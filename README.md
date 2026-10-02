@@ -1,22 +1,51 @@
 # darkpyonix
-DarkPyonix Kernel for AI/ML Development
 
-> Persistent reconnectable notebook kernel architecture.
+DarkPyonix Kernel — a file-bound, manager-independent Python kernel for AI/ML work done by people and agents.
 
-## 핵심 아이디어
-- 단일 Kernel Manager 프로세스가 외부 FastAPI 서버로 동작
-- 각 커널은 subprocess (Python) 로 실행되고, 매니저와 UNIX Domain Socket(Windows 에서는 Named Pipe / TCP loopback) 으로 제어 채널 유지
-- SSE 엔드포인트 최초 진입 시 FastAPI 가 HTTP 소켓 FD 를 dup 하여 커널 프로세스에 전달 -> 이후 해당 연결은 커널이 직접 write
-- 매니저는 이벤트 라우팅/셀 메타 관리만 수행, 실행/스트림 I/O 는 커널이 직접 처리
+```
+darkpyonix run train.py          # runs in the file's kernel; logs land in __runs__/train.py/
+darkpyonix stop train.py         # interrupts the running cell — never kills
+darkpyonix logs train.py -f      # follow the latest run
+darkpyonix vars train.py         # what the kernel currently holds
+```
 
-## 디렉토리
-- manager: FastAPI app, kernel process lifecycle
-- kernel: 개별 커널 프로세스 엔트리
-- common: 프로토콜, 메시지 스키마
+- **One kernel per file.** The kernel id comes from the file's path, so every IDE, agent and shared viewer finds the same kernel. Running the same file twice is refused, not duplicated.
+- **Kernels outlive managers.** Close the IDE, lose the network, kill the manager: the training keeps going, and the next manager finds it again.
+- **Stop means interrupt.** `KeyboardInterrupt` in the running cell; the namespace stays.
+- **Runs are recorded automatically** beside the file as `.ipynb` (nbformat 4), and inside the kernel as `__runs__`.
+- **Standard library only, Python 3.8+, nothing to install** in the interpreter that runs the kernel.
+- **Notebooks are plain `.py` / `.pynb`** with `# %% [type]` cells, valid Python under `python file.py`.
 
-## 개발 메모
-Windows 에서는 표준 FD 전달 (SCM_RIGHTS) 가 불가하므로 다음 전략 중 하나 사용:
-1) 127.0.0.1 loopback 전용 upgrade: 매니저가 커널에게 포트/토큰 전달, 커널이 해당 소켓에 attach (SO_REUSEPORT 불가 시 별도 핸드오프 라우트) 
-2) pywin32 로 DuplicateHandle 사용 (추후 구현) 
+## Status
 
-현재 PoC 는 플랫폼 공통성을 위해 커널이 manager 로부터 control channel 통해 'hijack request id' 를 받고, 내부 connection map 에서 raw socket 객체를 커널로 프록시하는 thread 를 붙여 zero-copy 에 가깝게 전달.
+Design is fixed (milestone M0); implementation starts with M1. See [PROJECT.md](PROJECT.md).
+
+## Documents
+
+| Document | Content |
+|---|---|
+| [PROJECT.md](PROJECT.md) | Scope, milestones with dates, open questions |
+| [docs/INTENT.md](docs/INTENT.md) | Why, decisions (D1–D13), rejected alternatives |
+| [docs/SPEC.md](docs/SPEC.md) | Requirements and acceptance criteria |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How kernel, manager, hub, Ember and ash fit together |
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | DKP/1: discovery datagrams and the kernel control channel |
+| [docs/FORMAT.md](docs/FORMAT.md) | The notebook file format |
+| [docs/api/](docs/api/) | OpenAPI for the manager and the hub, rendered by `docs/api/index.html` |
+| [darkpyonix.mermaid](darkpyonix.mermaid) | Class diagram of the object model |
+| [docs/설계초안/](docs/설계초안/) | The 2025 design materials, kept for reference |
+
+To browse the API locally: `python3 -m http.server -d docs/api 8000` and open <http://127.0.0.1:8000/>.
+
+## Repository layout
+
+```
+kernel/darkpyonix/            runtime API + notebook parser (stdlib only)
+kernel/darkpyonix/kernel/     the kernel process (stdlib only)
+kernel/darkpyonix/manager/    the manager and the darkpyonix CLI
+hub/                          darkpyonix.dev
+docs/                         design documents
+```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

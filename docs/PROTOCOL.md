@@ -1,0 +1,165 @@
+# PROTOCOL — DKP/1
+
+커널과 그 클라이언트(매니저, 테스트, 향후 CLI 직결) 사이의 와이어 형식입니다. 이 문서는 SPEC의 일부이며 `PR-*` 요구사항이 여기를 가리킵니다. 결정의 근거는 [INTENT.md](INTENT.md) D4–D6에 있습니다.
+
+## 1. 공통
+
+- **인코딩:** 모든 메시지는 UTF-8 JSON 객체입니다. 바이너리(이미지 등)는 nbformat처럼 base64 문자열로 MIME 번들 안에 넣습니다.
+- **버전:** 모든 메시지에 `"dkp": 1`이 있습니다. 모르는 버전은 무시(데이터그램)하거나 `error`로 닫습니다(TCP).
+- **모르는 필드:** 받는 쪽은 모르는 필드를 무시합니다. 필드 추가는 버전을 올리지 않습니다.
+- **런타임 홈:** `DARKPYONIX_HOME`(기본 `~/.darkpyonix`). 아래 경로는 모두 이 아래입니다.
+
+| 경로 | 권한 | 내용 |
+|---|---|---|
+| `user.key` | 0600 | 32바이트 무작위 키. 없으면 처음 쓰는 쪽이 원자적으로 만듭니다 |
+| `kernels/<kernel_id>.json` | 0644 | 발견 보조 등록. §2.4의 announce 본문과 같고 비밀값이 없습니다 |
+| `kernels/<kernel_id>.log` | 0600 | 커널 자신의 진단 로그(사용자 출력이 아님) |
+| `locks/<kernel_id>.lock` | 0600 | 파일당 커널 하나를 보장하는 OS 잠금 |
+| `managers/<pid>.json` | 0600 | 매니저의 `url`, `token`, `mode`, `pid`, `started_at` |
+
+## 2. 발견 (UDP 멀티캐스트)
+
+### 2.1 주소
+
+- 그룹 `239.255.68.80`, 포트 `46880`, 인터페이스 `127.0.0.1`, TTL 0(호스트 밖으로 나가지 않음), `IP_MULTICAST_LOOP` 켬.
+- 커널과 매니저 모두 `SO_REUSEADDR`(가능하면 `SO_REUSEPORT`)로 같은 포트에 바인드하고 그룹에 가입합니다.
+- `DARKPYONIX_DISCOVERY=registry`이면 멀티캐스트를 쓰지 않고 등록 파일만 씁니다.
+
+### 2.2 사용자 태그
+
+`user_tag = hex(SHA-256(user.key))[:16]`. 모든 데이터그램에 들어가고, 자기 태그와 다른 데이터그램은 무시합니다. 같은 기계의 다른 OS 사용자 커널과 섞이지 않게 하는 필터일 뿐 인증이 아닙니다(인증은 §3).
+
+### 2.3 query (매니저 → 그룹)
+
+```json
+{"dkp": 1, "op": "query", "user_tag": "…", "nonce": "8f2c…", "kernel_id": "k_…"}
+```
+
+`kernel_id`가 없으면 모든 커널이 응답합니다. 있으면 그 커널만 응답합니다.
+
+### 2.4 announce (커널 → 그룹)
+
+```json
+{
+  "dkp": 1, "op": "announce", "user_tag": "…", "nonce": "8f2c…",
+  "kernel_id": "k_3f9a0c1b2d4e5f607182", "path": "/home/u/exp/train.py",
+  "pid": 41234, "port": 53122, "status": "busy",
+  "run_id": "20261003-142233-a1f0",
+  "python": {"version": "3.11.9", "implementation": "CPython", "executable": "/usr/bin/python3.11"},
+  "dkp_kernel_version": "0.1.0", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
+}
+```
+
+커널은 다음 때 announce를 보냅니다.
+- query에 응답할 때(`nonce`를 그대로 돌려줌)
+- 시작을 마쳤을 때, 상태(`status`, `run_id`)가 바뀔 때
+- 5초마다(생존 신호)
+
+`status`는 `starting | idle | busy | stopping`입니다. 커널은 announce와 같은 본문을 `kernels/<kernel_id>.json`에도 원자적으로 씁니다.
+
+### 2.5 bye (커널 → 그룹)
+
+```json
+{"dkp": 1, "op": "bye", "user_tag": "…", "kernel_id": "k_…", "pid": 41234}
+```
+
+정상 종료 직전에 보내고 등록 파일을 지웁니다. 비정상 종료 때는 보내지 못하므로 매니저는 15초 동안 announce가 없거나 `pid`가 살아 있지 않은 커널을 목록에서 뺍니다.
+
+### 2.6 커널 ID
+
+```
+canonical = realpath(abspath(path))        # Windows는 normcase까지
+kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
+```
+
+같은 파일을 가리키는 심볼릭 링크와 상대 경로는 같은 ID가 됩니다.
+
+## 3. 제어 채널 (TCP, 루프백)
+
+### 3.1 프레임
+
+```
++----------------+---------------------------+
+| length: u32 BE | payload: UTF-8 JSON object |
++----------------+---------------------------+
+```
+
+- `length`는 payload 바이트 수이고 최대 64 MiB입니다. 넘으면 받는 쪽이 `error {code: "frame_too_large"}`를 보내고 연결을 닫습니다.
+- 커널은 `127.0.0.1`에만 리슨합니다.
+
+### 3.2 핸드셰이크
+
+```
+커널  → {"dkp":1,"op":"hello","kernel_id":"k_…","nonce":"<base64 32B>","kernel_version":"0.1.0"}
+클라 → {"dkp":1,"op":"auth","client":{"name":"manager","kind":"manager","pid":123},
+        "mac":"<hex HMAC-SHA256(user.key, nonce_bytes + kernel_id.encode())>"}
+커널  → {"dkp":1,"op":"welcome","session":"s_…","seq":1042}
+   또는 {"dkp":1,"op":"error","code":"auth_failed","message":"…"} 후 연결 종료
+```
+
+`seq`는 커널이 마지막으로 낸 이벤트 번호입니다. 핸드셰이크가 5초 안에 끝나지 않으면 커널이 연결을 닫습니다. 비교는 상수 시간(`hmac.compare_digest`)으로 합니다.
+
+### 3.3 요청과 응답
+
+```json
+{"dkp":1,"op":"request","id":7,"method":"run","params":{…}}
+{"dkp":1,"op":"response","id":7,"ok":true,"result":{…}}
+{"dkp":1,"op":"response","id":7,"ok":false,"error":{"code":"busy","message":"…","data":{…}}}
+```
+
+| method | params | result | 비고 |
+|---|---|---|---|
+| `status` | `{}` | §3.5 KernelInfo | |
+| `run` | `mode: "all"\|"cells"`, `cells: [int]`, `source: str?`, `params: {str: any}?`, `on_busy: "reject"\|"queue"` (기본 reject) | `{run_id, state: "running"\|"queued", position?}` | 바쁘면 `busy` 오류, `data`에 현재 실행 |
+| `cancel` | `run_id` | `{cancelled: bool}` | 대기 중인 실행만 취소 |
+| `interrupt` | `{}` | `{interrupted: bool, run_id?}` | 실행 중인 셀에 `KeyboardInterrupt` |
+| `restart` | `hard: bool` (기본 false) | `{restarted: true}` | soft는 네임스페이스만 새로, hard는 같은 인자로 프로세스 재실행 |
+| `shutdown` | `{}` | `{shutting_down: true}` | 실행 중이면 먼저 인터럽트 후 종료 |
+| `namespace` | `limit: int` (기본 200) | `{variables: [Variable]}` | 바쁠 때는 `repr`를 생략(§3.6) |
+| `runs.list` | `limit: int` | `{runs: [RunSummary]}` | 최신순 |
+| `runs.get` | `run_id: str \| "latest" \| "current"` | nbformat 4 노트북 | |
+| `subscribe` | `since: int?` | `{seq: int, replayed: int}` | `since` 이후의 이벤트를 다시 보내고 이어서 실시간 전송 |
+| `unsubscribe` | `{}` | `{}` | |
+
+오류 코드: `auth_failed`, `bad_request`, `unknown_method`, `busy`, `not_found`, `frame_too_large`, `shutting_down`, `internal`.
+
+### 3.4 이벤트
+
+```json
+{"dkp":1,"op":"event","seq":1043,"type":"output","time":"2026-10-03T05:22:34.120Z","data":{…}}
+```
+
+`seq`는 커널 수명 동안 1씩 늘어납니다. 커널은 최근 이벤트를 링 버퍼(기본 10,000개 또는 16 MiB)에 둡니다. `subscribe since`가 버퍼보다 오래되면 `replay_truncated` 이벤트를 먼저 보냅니다.
+
+| type | data |
+|---|---|
+| `kernel.status` | `{status, run_id?}` |
+| `run.queued` | `{run_id, position}` |
+| `run.started` | `{run_id, mode, cells: [int], params}` |
+| `run.finished` | `{run_id, status: "ok"\|"error"\|"interrupted"\|"cancelled", duration}` |
+| `cell.started` | `{run_id, index, execution_count}` |
+| `cell.finished` | `{run_id, index, status: "ok"\|"error"\|"interrupted", duration}` |
+| `output` | `{run_id, index, output: <nbformat 4 output>}` |
+| `output.clear` | `{run_id, index, wait: bool}` |
+| `replay_truncated` | `{oldest_seq}` |
+
+`output`의 `output` 필드는 nbformat 4의 출력 객체(`stream`, `display_data`, `execute_result`, `error`)를 그대로 씁니다. 같은 셀의 연속된 `stream` 출력은 커널이 최대 50 ms 동안 모아서 하나로 보냅니다.
+
+### 3.5 KernelInfo
+
+```json
+{
+  "kernel_id": "k_…", "path": "/home/u/exp/train.py", "pid": 41234, "port": 53122,
+  "status": "busy", "run_id": "20261003-142233-a1f0", "queue": ["20261003-142301-0b1c"],
+  "execution_count": 12, "python": {"version": "3.11.9", "implementation": "CPython", "executable": "…"},
+  "started_at": "…", "host": "macmini", "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py"
+}
+```
+
+### 3.6 Variable
+
+```json
+{"name": "model", "type": "torch.nn.Module", "repr": "Classifier(…)", "shape": null, "dtype": null, "len": null}
+```
+
+커널은 `repr`를 `reprlib`로 200자까지만 만듭니다. `shape`·`dtype`·`len`은 읽을 수 있을 때만 채웁니다. 이 값들을 만들면 사용자 코드(`__repr__`, 프로퍼티)가 실행되므로, 셀이 실행 중일 때는 다른 스레드에서 부르지 않도록 `name`과 `type`만 채우고 나머지는 `null`로 둡니다. `_`로 시작하는 이름, 모듈, 커널이 넣은 이름(`__runs__`, `darkpyonix`)은 뺍니다.

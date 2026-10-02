@@ -205,3 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# DarkPyonix: project-local work areas (CLAUDE.md "Where files go")
+.scratch/
+.claude/worktrees/
