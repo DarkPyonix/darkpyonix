@@ -406,6 +406,10 @@ paths:
       tags: [Shares]
       operationId: getAshViewer
       summary: The official ash viewer (static files; a placeholder until ash ships)
+      description: |
+        When the hub is given a built ash directory, its other files are served as static
+        assets under `/ash/` (outside this contract, like the manager's `/docs/` pages), and
+        `/s/{share_id}` serves the viewer's `index.html`.
       security: []
       responses:
         "200":
