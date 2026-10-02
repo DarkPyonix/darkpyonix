@@ -209,3 +209,6 @@ __marimo__/
 # DarkPyonix: project-local work areas (CLAUDE.md "Where files go")
 .scratch/
 .claude/worktrees/
+
+# Rust manager build output
+manager/target/

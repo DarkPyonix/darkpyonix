@@ -1,0 +1,13 @@
+[package]
+name = "darkpyonix"
+description = "DarkPyonix CLI and kernel manager (single binary)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "darkpyonix"
+path = "src/main.rs"
+
+[dependencies]
+dpx-core.workspace = true
