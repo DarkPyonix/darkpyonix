@@ -118,7 +118,7 @@ pub struct KernelArgs {
 #[derive(Debug, Args)]
 pub struct ShareArgs {
     pub file: PathBuf,
-    #[arg(long, value_parser = ["viewer1", "viewer2", "viewer3"])]
+    #[arg(long, value_parser = ["viewer1", "viewer2", "viewer3", "editor"])]
     pub permission: String,
     #[arg(long)]
     pub label: Option<String>,

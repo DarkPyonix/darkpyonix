@@ -26,12 +26,23 @@ pub fn frame(e: &KernelEvent) -> String {
     }
 }
 
+/// Aborts a background task (the presence heartbeat of a stream) when dropped.
+pub struct AbortOnDrop(pub tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 struct Feed {
     events: EventStream,
     hide_outputs: bool,
     keepalive: Duration,
     shutdown: watch::Receiver<bool>,
     hello: Option<String>,
+    /// Lives exactly as long as the stream: dropping the body stops the heartbeat.
+    _guard: Option<AbortOnDrop>,
 }
 
 pub fn response(
@@ -40,6 +51,7 @@ pub fn response(
     hide_outputs: bool,
     keepalive: Duration,
     shutdown: watch::Receiver<bool>,
+    guard: Option<AbortOnDrop>,
 ) -> Response {
     let feed = Feed {
         events,
@@ -47,6 +59,7 @@ pub fn response(
         keepalive,
         shutdown,
         hello: Some(format!(": darkpyonix events {kernel_id}\n\n")),
+        _guard: guard,
     };
     let stream = futures::stream::unfold(feed, |mut f| async move {
         if let Some(hello) = f.hello.take() {

@@ -49,6 +49,85 @@ pub struct FakeKernel {
     tx: broadcast::Sender<KernelEvent>,
     run_counter: u32,
     pub linger_on_shutdown: bool,
+    pub doc: FakeDoc,
+}
+
+/// The kernel's shared document (PROTOCOL §4), reduced to what the manager forwards.
+#[derive(Clone, Debug)]
+pub struct FakeCell {
+    pub cell_id: String,
+    pub kind: String,
+    pub source: String,
+    pub version: u64,
+}
+
+#[derive(Default)]
+pub struct FakeDoc {
+    pub cells: Vec<FakeCell>,
+    /// cell_id → Lock
+    pub locks: HashMap<String, Value>,
+    /// Presence entries in join order.
+    pub presence: Vec<Value>,
+    pub doc_version: u64,
+    next_id: u64,
+}
+
+/// The run the fake document builder maps its outputs from.
+pub const FAKE_DOC_RUN: &str = "20261003-120000-0001";
+
+pub fn sha_hex(s: &str) -> String {
+    hex::encode(sha2::Sha256::digest(s.as_bytes()))
+}
+
+fn cell_json(doc: &FakeDoc, i: usize) -> Value {
+    let c = &doc.cells[i];
+    let mut v = json!({
+        "cell_id": c.cell_id, "index": i, "type": c.kind, "title": null, "metadata": {},
+        "source": c.source, "source_sha256": sha_hex(&c.source), "version": c.version,
+    });
+    if let Some(l) = doc.locks.get(&c.cell_id) {
+        v["lock"] = l.clone();
+    }
+    v
+}
+
+fn doc_client(params: &Value) -> Result<String> {
+    match params["client"]["client_id"].as_str() {
+        Some(id) if !id.is_empty() => Ok(id.to_string()),
+        _ => Err(DpxError::new("bad_request", "client with a client_id is required")),
+    }
+}
+
+fn by_of(params: &Value) -> Value {
+    let c = &params["client"];
+    json!({"client_id": c["client_id"], "user": c["user"], "nickname": c["nickname"]})
+}
+
+fn find_cell(doc: &FakeDoc, cell_id: &str) -> Result<usize> {
+    doc.cells
+        .iter()
+        .position(|c| c.cell_id == cell_id)
+        .ok_or_else(|| DpxError::new("not_found", format!("no cell {cell_id}")).with_data(json!({"cell_id": cell_id})))
+}
+
+fn check_lock(doc: &FakeDoc, cell_id: &str, client_id: &str) -> Result<()> {
+    match doc.locks.get(cell_id) {
+        Some(l) if l["locked_by"] != client_id => Err(DpxError::new("locked", format!("cell {cell_id} is locked"))
+            .with_data(json!({"locked_by": l["locked_by"], "lock": l}))),
+        _ => Ok(()),
+    }
+}
+
+fn check_base(doc: &FakeDoc, i: usize, base: Option<u64>) -> Result<()> {
+    if base == Some(doc.cells[i].version) {
+        Ok(())
+    } else {
+        Err(DpxError::new("conflict", "stale base_version").with_data(json!({"cell": cell_json(doc, i)})))
+    }
+}
+
+fn wait_answer(s: &Value) -> Value {
+    json!({"status": s["status"], "run_id": s["run_id"], "run": s})
 }
 
 #[derive(Default)]
@@ -94,6 +173,14 @@ impl FakeBackend {
     pub fn add_with_ring(&self, path: &str, ring_max: usize) -> String {
         let kid = kernel_id_for(path);
         let (tx, _) = broadcast::channel(1024);
+        let preamble = std::fs::read_to_string(path).unwrap_or_default();
+        let doc = FakeDoc {
+            cells: vec![
+                FakeCell { cell_id: "c_preamble".into(), kind: "preamble".into(), source: preamble, version: 1 },
+                FakeCell { cell_id: "c_second".into(), kind: "code".into(), source: "x = 1\n".into(), version: 1 },
+            ],
+            ..FakeDoc::default()
+        };
         let info = KernelInfo {
             kernel_id: kid.clone(),
             path: path.to_string(),
@@ -120,6 +207,7 @@ impl FakeBackend {
             tx,
             run_counter: 0,
             linger_on_shutdown: false,
+            doc,
         };
         self.kernels.lock().unwrap().insert(kid.clone(), k);
         kid
@@ -146,6 +234,34 @@ impl FakeBackend {
 
     pub fn method_calls(&self, kid: &str) -> Vec<String> {
         self.calls.lock().unwrap().iter().filter(|c| c.0 == kid).map(|c| c.1.clone()).collect()
+    }
+
+    /// Params of every `method` request to `kid`, in order.
+    pub fn calls_of(&self, kid: &str, method: &str) -> Vec<Value> {
+        self.calls.lock().unwrap().iter().filter(|c| c.0 == kid && c.1 == method).map(|c| c.2.clone()).collect()
+    }
+
+    pub fn doc_cells(&self, kid: &str) -> Vec<FakeCell> {
+        self.kernels.lock().unwrap().get(kid).unwrap().doc.cells.clone()
+    }
+
+    /// The run `run_ref` names now (`runs.wait` polling).
+    fn wait_probe(&self, kernel_id: &str, run_ref: &str) -> Result<Option<Value>> {
+        let ks = self.kernels.lock().unwrap();
+        let k = ks
+            .get(kernel_id)
+            .ok_or_else(|| DpxError::new("kernel_unreachable", format!("no connection to {kernel_id}")))?;
+        Ok(match run_ref {
+            "latest" => k.finished.first().cloned(),
+            "current" => k.running.clone(),
+            id => k
+                .finished
+                .iter()
+                .chain(k.running.iter())
+                .find(|s| s["run_id"] == id)
+                .cloned()
+                .or_else(|| k.queue.iter().any(|q| q == id).then(|| json!({"run_id": id, "status": "queued"}))),
+        })
     }
 
     pub fn last_call(&self, kid: &str) -> Option<(String, Value)> {
@@ -241,6 +357,35 @@ impl KernelBackend for FakeBackend {
 
     async fn request(&self, kernel_id: &str, method: &str, params: Value) -> Result<Value> {
         self.check_fail(method)?;
+        if method == "runs.wait" {
+            // Long-poll like the kernel: until the run finishes or `timeout` seconds pass.
+            self.calls.lock().unwrap().push((kernel_id.into(), method.into(), params.clone()));
+            let timeout = params["timeout"].as_f64().unwrap_or(60.0);
+            let deadline = tokio::time::Instant::now() + Duration::from_secs_f64(timeout);
+            let mut run_ref = params["run_id"].as_str().unwrap_or_default().to_string();
+            if run_ref == "current" {
+                let cur = self.wait_probe(kernel_id, "current")?;
+                run_ref = match cur.as_ref().and_then(|s| s["run_id"].as_str()) {
+                    Some(id) => id.to_string(),
+                    None => return Err(DpxError::new("not_found", "no run is executing")),
+                };
+            }
+            loop {
+                let found = self.wait_probe(kernel_id, &run_ref)?;
+                if let Some(s) = &found {
+                    if s["status"] != "running" && s["status"] != "queued" {
+                        return Ok(wait_answer(s));
+                    }
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return match &found {
+                        Some(s) => Ok(wait_answer(s)),
+                        None => Err(DpxError::new("not_found", format!("unknown run {run_ref}"))),
+                    };
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
         let mut ks = self.kernels.lock().unwrap();
         let k = ks
             .get_mut(kernel_id)
@@ -301,6 +446,169 @@ impl KernelBackend for FakeBackend {
                 Ok(json!({}))
             }
             "status" => Ok(serde_json::to_value(&k.info).unwrap()),
+            "doc.snapshot" => {
+                let cells: Vec<Value> = (0..k.doc.cells.len()).map(|i| cell_json(&k.doc, i)).collect();
+                Ok(json!({"doc_version": k.doc.doc_version, "seq": k.seq, "cells": cells, "presence": k.doc.presence}))
+            }
+            "doc.cell.create" => {
+                doc_client(&params)?;
+                let pos = if let Some(a) = params["after"].as_str() {
+                    find_cell(&k.doc, a)? + 1
+                } else if let Some(b) = params["before"].as_str() {
+                    find_cell(&k.doc, b)?
+                } else {
+                    k.doc.cells.len()
+                };
+                k.doc.next_id += 1;
+                let cell = FakeCell {
+                    cell_id: format!("c_{:012x}", k.doc.next_id),
+                    kind: params["type"].as_str().unwrap_or("code").to_string(),
+                    source: params["source"].as_str().unwrap_or_default().to_string(),
+                    version: 1,
+                };
+                k.doc.cells.insert(pos, cell);
+                k.doc.doc_version += 1;
+                let cell = cell_json(&k.doc, pos);
+                let data = json!({"doc_version": k.doc.doc_version, "cell": cell, "by": by_of(&params)});
+                Self::emit_locked(k, "doc.cell.created", data);
+                Ok(json!({"cell": cell}))
+            }
+            "doc.cell.update" => {
+                let cid = doc_client(&params)?;
+                let i = find_cell(&k.doc, params["cell_id"].as_str().unwrap_or_default())?;
+                check_lock(&k.doc, &k.doc.cells[i].cell_id, &cid)?;
+                check_base(&k.doc, i, params["base_version"].as_u64())?;
+                if let Some(src) = params["source"].as_str() {
+                    k.doc.cells[i].source = src.to_string();
+                }
+                if let Some(t) = params["type"].as_str() {
+                    k.doc.cells[i].kind = t.to_string();
+                }
+                k.doc.cells[i].version += 1;
+                k.doc.doc_version += 1;
+                let cell = cell_json(&k.doc, i);
+                let data = json!({"doc_version": k.doc.doc_version, "cell": cell, "by": by_of(&params)});
+                Self::emit_locked(k, "doc.cell.updated", data);
+                Ok(json!({"cell": cell}))
+            }
+            "doc.cell.delete" => {
+                let cid = doc_client(&params)?;
+                let i = find_cell(&k.doc, params["cell_id"].as_str().unwrap_or_default())?;
+                if i == 0 {
+                    return Err(DpxError::new("bad_request", "the preamble cannot be deleted"));
+                }
+                check_lock(&k.doc, &k.doc.cells[i].cell_id, &cid)?;
+                check_base(&k.doc, i, params["base_version"].as_u64())?;
+                let gone = k.doc.cells.remove(i);
+                k.doc.locks.remove(&gone.cell_id);
+                k.doc.doc_version += 1;
+                let data = json!({"doc_version": k.doc.doc_version, "cell_id": gone.cell_id, "by": by_of(&params)});
+                Self::emit_locked(k, "doc.cell.deleted", data);
+                Ok(json!({"deleted": true}))
+            }
+            "doc.cell.move" => {
+                doc_client(&params)?;
+                let i = find_cell(&k.doc, params["cell_id"].as_str().unwrap_or_default())?;
+                let to = params["to_index"].as_u64().unwrap_or(0) as usize;
+                if i == 0 || to < 1 || to >= k.doc.cells.len() {
+                    return Err(DpxError::new("bad_request", "to_index out of range"));
+                }
+                let c = k.doc.cells.remove(i);
+                k.doc.cells.insert(to, c);
+                k.doc.doc_version += 1;
+                let cell = cell_json(&k.doc, to);
+                let data = json!({"doc_version": k.doc.doc_version, "cell": cell, "by": by_of(&params)});
+                Self::emit_locked(k, "doc.cell.moved", data);
+                Ok(json!({"cell": cell}))
+            }
+            "doc.lock" => {
+                let cid = doc_client(&params)?;
+                let i = find_cell(&k.doc, params["cell_id"].as_str().unwrap_or_default())?;
+                let cell_id = k.doc.cells[i].cell_id.clone();
+                check_lock(&k.doc, &cell_id, &cid)?;
+                if let Some(l) = k.doc.locks.get(&cell_id) {
+                    return Ok(json!({"lock": l}));
+                }
+                let c = &params["client"];
+                let lock = json!({
+                    "cell_id": cell_id, "locked_by": cid, "user": c["user"], "nickname": c["nickname"],
+                    "locked_at": now(), "last_activity": now(), "expires_at": "2026-10-03T12:03:00Z",
+                });
+                k.doc.locks.insert(cell_id.clone(), lock.clone());
+                let data = json!({"doc_version": k.doc.doc_version, "cell_id": cell_id, "lock": lock, "by": by_of(&params)});
+                Self::emit_locked(k, "doc.lock", data);
+                Ok(json!({"lock": lock}))
+            }
+            "doc.unlock" => {
+                let cid = doc_client(&params)?;
+                let i = find_cell(&k.doc, params["cell_id"].as_str().unwrap_or_default())?;
+                let cell_id = k.doc.cells[i].cell_id.clone();
+                check_lock(&k.doc, &cell_id, &cid)?;
+                if let Some(src) = params["source"].as_str() {
+                    if let Some(base) = params["base_version"].as_u64() {
+                        check_base(&k.doc, i, Some(base))?;
+                    }
+                    if k.doc.cells[i].source != src {
+                        k.doc.cells[i].source = src.to_string();
+                        k.doc.cells[i].version += 1;
+                        k.doc.doc_version += 1;
+                        let data = json!({"doc_version": k.doc.doc_version, "cell": cell_json(&k.doc, i), "by": by_of(&params)});
+                        Self::emit_locked(k, "doc.cell.updated", data);
+                    }
+                }
+                if k.doc.locks.remove(&cell_id).is_some() {
+                    let data = json!({"doc_version": k.doc.doc_version, "cell_id": cell_id, "by": by_of(&params), "reason": "released"});
+                    Self::emit_locked(k, "doc.unlock", data);
+                }
+                Ok(json!({"cell": cell_json(&k.doc, i)}))
+            }
+            "presence.update" => {
+                let cid = doc_client(&params)?;
+                let c = &params["client"];
+                let old = k.doc.presence.iter().position(|p| p["client_id"] == cid.as_str());
+                let mut entry = match old {
+                    Some(j) => k.doc.presence[j].clone(),
+                    None => json!({"focused_cell_id": null, "focused_at": null, "cursor": null}),
+                };
+                entry["client_id"] = json!(cid);
+                entry["nickname"] = c["nickname"].clone();
+                entry["user"] = c["user"].clone();
+                entry["permission"] = c["permission"].clone();
+                entry["last_seen"] = json!(now());
+                match c.get("avatar") {
+                    Some(a) => entry["avatar"] = a.clone(),
+                    None => {
+                        if let Some(m) = entry.as_object_mut() {
+                            m.remove("avatar");
+                        }
+                    }
+                }
+                if let Some(f) = params.get("focused_cell_id") {
+                    entry["focused_cell_id"] = f.clone();
+                    entry["focused_at"] = if f.is_null() { Value::Null } else { json!(now()) };
+                }
+                if let Some(cur) = params.get("cursor") {
+                    entry["cursor"] = cur.clone();
+                }
+                // Like the kernel: a bare heartbeat of a present client emits nothing.
+                let changed = old.is_none() || params.get("focused_cell_id").is_some() || params.get("cursor").is_some();
+                match old {
+                    Some(j) => k.doc.presence[j] = entry.clone(),
+                    None => k.doc.presence.push(entry.clone()),
+                }
+                if changed {
+                    Self::emit_locked(k, "presence.update", entry);
+                }
+                Ok(json!({}))
+            }
+            "presence.leave" => {
+                let cid = doc_client(&params)?;
+                if let Some(j) = k.doc.presence.iter().position(|p| p["client_id"] == cid.as_str()) {
+                    let entry = k.doc.presence.remove(j);
+                    Self::emit_locked(k, "presence.leave", entry);
+                }
+                Ok(json!({}))
+            }
             other => Err(DpxError::new("bad_request", format!("unknown method {other}"))),
         }
     }
@@ -341,7 +649,8 @@ impl KernelBackend for FakeBackend {
         self.check_fail("document")?;
         let source = std::fs::read_to_string(path).map_err(|_| DpxError::new("not_found", format!("no such file: {path}")))?;
         let mut cell = json!({"index": 0, "type": "preamble", "title": null, "source": source,
-            "source_sha256": hex::encode(sha2::Sha256::digest(source.as_bytes())), "metadata": {}});
+            "source_sha256": hex::encode(sha2::Sha256::digest(source.as_bytes())), "metadata": {},
+            "execution_count": 1, "status": "ok", "stale": false, "run_id": FAKE_DOC_RUN});
         if viewer_outputs {
             cell["outputs"] = json!([{"output_type": "stream", "name": "stdout", "text": "hello\n"}]);
         }

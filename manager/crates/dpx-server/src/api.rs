@@ -1,8 +1,13 @@
 //! Every operation of `docs/api/manager.openapi.yaml` (SPEC FR-M1) with the per-operation
-//! minimum permission of SPEC FR-A3.
+//! minimum permission of SPEC FR-A3 / FR-S8.
+//!
+//! Collaborative operations (SPEC §10a, PROTOCOL §4) are thin: the kernel holds the shared
+//! document, locks and presence; the manager checks the permission, builds the `client`
+//! object from the token and the `X-DarkPyonix-Client` / `X-DarkPyonix-Nickname` headers,
+//! and forwards.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Bytes;
@@ -31,6 +36,13 @@ pub struct AppState {
     pub idle_timeout: Option<Duration>,
     pub share_base: String,
     pub sse_keepalive: Duration,
+    /// Interval of `presence.update` heartbeats while a client's event stream is open.
+    pub presence_heartbeat: Duration,
+    /// User name of master-token clients (FR-S4).
+    pub os_user: String,
+    /// Avatars given with `updatePresence`, per (kernel id, client id), so that heartbeats and
+    /// later requests of that client carry the same `client` object.
+    pub avatars: Mutex<HashMap<(String, String), String>>,
     pub shutdown: watch::Receiver<bool>,
 }
 
@@ -55,6 +67,15 @@ const OP_EVENTS: &[u16] = &[200, 400, 401, 404, 500, 502];
 const OP_LIST_SHARES: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_CREATE_SHARE: &[u16] = &[201, 400, 401, 403, 404, 500, 502];
 const OP_REVOKE_SHARE: &[u16] = &[204, 401, 403, 404, 500, 502];
+const OP_CREATE_CELL: &[u16] = &[201, 400, 401, 403, 404, 500, 502];
+const OP_UPDATE_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
+const OP_DELETE_CELL: &[u16] = &[204, 400, 401, 403, 404, 409, 500, 502];
+const OP_MOVE_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
+const OP_LOCK_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
+const OP_UNLOCK_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
+const OP_UPDATE_PRESENCE: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
+const OP_LEAVE_PRESENCE: &[u16] = &[204, 400, 401, 403, 404, 500, 502];
+const OP_WAIT_RUN: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 
 fn finish(r: ApiResult<Response>, documented: &[u16]) -> Response {
     match r {
@@ -152,6 +173,113 @@ pub fn kernel_json(k: &KernelInfo) -> Value {
 
 fn ok_json(status: StatusCode, v: Value) -> ApiResult<Response> {
     Ok((status, Json(v)).into_response())
+}
+
+// ------------------------------------------------------------------ client identity (FR-S4, FR-S6)
+
+const CLIENT_HEADER: &str = "x-darkpyonix-client";
+const NICKNAME_HEADER: &str = "x-darkpyonix-nickname";
+const NICKNAME_MAX: usize = 64;
+
+/// A header as UTF-8 (nicknames are device names and need not be ASCII), trimmed, non-empty.
+fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get(name)
+        .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn check_client_id(id: &str) -> ApiResult<()> {
+    if util::is_client_id(id) {
+        Ok(())
+    } else {
+        Err(ApiError::invalid("client id: expected ^[A-Za-z0-9_-]{8,64}$"))
+    }
+}
+
+fn check_nickname(nickname: Option<&str>) -> ApiResult<()> {
+    match nickname {
+        Some(n) if n.chars().count() > NICKNAME_MAX => Err(ApiError::invalid("nickname: at most 64 characters")),
+        _ => Ok(()),
+    }
+}
+
+/// The PROTOCOL §4 `client` object: `{client_id, nickname, user, avatar?, permission}`.
+/// The user is the OS user for the master token and the share label (or `guest`) for a
+/// share token; the avatar is the last one this client gave with `updatePresence`.
+pub fn client_value(
+    st: &AppState,
+    p: &Principal,
+    kernel_id: &str,
+    client_id: Option<&str>,
+    nickname: Option<&str>,
+) -> Value {
+    let user = match &p.share_id {
+        None => st.os_user.clone(),
+        Some(_) => p
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .unwrap_or("guest")
+            .to_string(),
+    };
+    let mut c = Map::new();
+    if let Some(id) = client_id {
+        c.insert("client_id".into(), Value::String(id.to_string()));
+    }
+    c.insert("nickname".into(), Value::String(nickname.unwrap_or("").to_string()));
+    c.insert("user".into(), Value::String(user));
+    if let Some(id) = client_id {
+        let avatars = st.avatars.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(a) = avatars.get(&(kernel_id.to_string(), id.to_string())) {
+            c.insert("avatar".into(), Value::String(a.clone()));
+        }
+    }
+    c.insert("permission".into(), Value::String(p.permission.as_str().to_string()));
+    Value::Object(c)
+}
+
+/// Client id and nickname from the headers of an operation that needs a client (edits,
+/// locks, presence): `400` without a valid client id.
+fn client_ident(headers: &HeaderMap) -> ApiResult<(String, Option<String>)> {
+    let id = header_str(headers, CLIENT_HEADER)
+        .ok_or_else(|| ApiError::invalid("X-DarkPyonix-Client: a client id is required for this operation"))?;
+    check_client_id(id)?;
+    let nickname = header_str(headers, NICKNAME_HEADER);
+    check_nickname(nickname)?;
+    Ok((id.to_string(), nickname.map(String::from)))
+}
+
+fn required_client(st: &AppState, p: &Principal, kernel_id: &str, headers: &HeaderMap) -> ApiResult<Value> {
+    let (id, nickname) = client_ident(headers)?;
+    Ok(client_value(st, p, kernel_id, Some(id.as_str()), nickname.as_deref()))
+}
+
+/// `client` for run attribution (`started_by` / `interrupted_by`, FR-S6). The client id is
+/// optional here (the CLI and agents may not send one) and a malformed one is left out.
+fn optional_client(st: &AppState, p: &Principal, kernel_id: &str, headers: &HeaderMap) -> Value {
+    let id = header_str(headers, CLIENT_HEADER).filter(|id| util::is_client_id(id));
+    let nickname: Option<String> = header_str(headers, NICKNAME_HEADER).map(|n| n.chars().take(NICKNAME_MAX).collect());
+    client_value(st, p, kernel_id, id, nickname.as_deref())
+}
+
+/// `cell_id` path parameter (`^[A-Za-z0-9_.:-]{1,64}$`); anything else names no cell.
+fn check_cell(cell_id: &str) -> ApiResult<()> {
+    if util::is_cell_id(cell_id) {
+        Ok(())
+    } else {
+        Err(ApiError::not_found(format!("no such cell: {cell_id}")))
+    }
+}
+
+/// `result[name]` of a kernel answer.
+fn field(res: Value, name: &str) -> ApiResult<Value> {
+    match res {
+        Value::Object(mut m) => m.remove(name).ok_or_else(|| ApiError::internal(format!("kernel answer has no {name}"))),
+        _ => Err(ApiError::internal(format!("kernel answer has no {name}"))),
+    }
 }
 
 // ------------------------------------------------------------------ System
@@ -277,12 +405,19 @@ pub async fn shutdown_kernel(
     finish(r.await, OP_SHUTDOWN)
 }
 
-pub async fn interrupt_kernel(State(st): St, Extension(p): Extension<Principal>, Path(kid): Path<String>) -> Response {
+pub async fn interrupt_kernel(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(kid): Path<String>,
+    headers: HeaderMap,
+) -> Response {
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Permission::Viewer3)?;
         visible(&st, &p, &kid).await?;
-        let res = call(&st, &kid, "interrupt", json!({})).await?;
+        // `interrupted_by` (FR-S6).
+        let client = optional_client(&st, &p, &kid, &headers);
+        let res = call(&st, &kid, "interrupt", json!({ "client": client })).await?;
         let mut out = Map::new();
         out.insert("interrupted".into(), json!(res.get("interrupted").and_then(Value::as_bool).unwrap_or(false)));
         if let Some(run_id) = res.get("run_id").filter(|v| v.is_string()) {
@@ -371,6 +506,97 @@ fn shape_document(mut doc: Value, kernel_id: Option<&str>, outputs: bool) -> Val
     doc
 }
 
+/// FR-S1: the kernel's live document (`doc.snapshot`: cell ids, versions, locks, conflicts,
+/// presence, `doc_version`, `seq`) with the latest outputs of the FR-R4 document builder
+/// mapped onto its cells. Cells are matched by index and `source_sha256`, then by
+/// `source_sha256` anywhere, then by index. Outputs whose source differs from the live cell
+/// are marked `stale`. Without a snapshot (a kernel older than PROTOCOL §4) cell ids come
+/// from `# @id` or the position and every version is 1.
+pub fn merge_snapshot(doc: Value, snap: Option<Value>) -> Value {
+    let mut doc = match doc {
+        Value::Object(m) => m,
+        other => return other,
+    };
+    let built: Vec<Value> = match doc.remove("cells") {
+        Some(Value::Array(c)) => c,
+        _ => Vec::new(),
+    };
+    let Some(snap) = snap else {
+        let cells: Vec<Value> = built
+            .into_iter()
+            .map(|mut c| {
+                if let Value::Object(m) = &mut c {
+                    let index = m.get("index").and_then(Value::as_u64).unwrap_or(0);
+                    let id = m
+                        .get("metadata")
+                        .and_then(|md| md.get("id"))
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                        .unwrap_or_else(|| format!("i_{index}"));
+                    m.entry("cell_id").or_insert(Value::String(id));
+                    m.entry("version").or_insert(json!(1));
+                    m.entry("lock").or_insert(Value::Null);
+                    m.entry("conflict").or_insert(Value::Null);
+                }
+                c
+            })
+            .collect();
+        doc.insert("cells".into(), Value::Array(cells));
+        doc.entry("doc_version").or_insert(json!(0));
+        doc.entry("seq").or_insert(json!(0));
+        doc.entry("presence").or_insert(json!([]));
+        return Value::Object(doc);
+    };
+
+    let sha_of = |c: &Value| c.get("source_sha256").and_then(Value::as_str).map(String::from);
+    let mut used = vec![false; built.len()];
+    let mut cells = Vec::new();
+    let snap_cells: Vec<Value> = match snap.get("cells") {
+        Some(Value::Array(c)) => c.clone(),
+        _ => Vec::new(),
+    };
+    for (pos, sc) in snap_cells.into_iter().enumerate() {
+        let Value::Object(mut cell) = sc else { continue };
+        let index = cell.get("index").and_then(Value::as_u64).map(|i| i as usize).unwrap_or(pos);
+        let want: Option<String> = cell.get("source_sha256").and_then(Value::as_str).map(String::from);
+        let same_source = |j: usize| want.is_some() && sha_of(&built[j]) == want;
+        let found = (index < built.len() && !used[index] && same_source(index))
+            .then_some(index)
+            .or_else(|| (0..built.len()).find(|&j| !used[j] && same_source(j)))
+            .or_else(|| (index < built.len() && !used[index]).then_some(index));
+        match found {
+            Some(j) => {
+                used[j] = true;
+                let b = &built[j];
+                for key in ["outputs", "execution_count", "status", "run_id"] {
+                    if let Some(v) = b.get(key) {
+                        cell.insert(key.to_string(), v.clone());
+                    }
+                }
+                let built_stale = b.get("stale").and_then(Value::as_bool).unwrap_or(false);
+                let has_run = b.get("run_id").is_some_and(|v| !v.is_null());
+                let edited = sha_of(b) != want;
+                cell.insert("stale".into(), Value::Bool(built_stale || (edited && has_run)));
+            }
+            None => {
+                cell.insert("outputs".into(), json!([]));
+                cell.insert("execution_count".into(), Value::Null);
+                cell.insert("status".into(), Value::Null);
+                cell.insert("stale".into(), Value::Bool(false));
+                cell.insert("run_id".into(), Value::Null);
+            }
+        }
+        cell.entry("lock").or_insert(Value::Null);
+        cell.entry("conflict").or_insert(Value::Null);
+        cells.push(Value::Object(cell));
+    }
+    doc.insert("cells".into(), Value::Array(cells));
+    doc.insert("doc_version".into(), snap.get("doc_version").cloned().unwrap_or(json!(0)));
+    doc.insert("seq".into(), snap.get("seq").cloned().unwrap_or(json!(0)));
+    doc.insert("presence".into(), snap.get("presence").cloned().unwrap_or(json!([])));
+    Value::Object(doc)
+}
+
 pub async fn get_kernel_document(
     State(st): St,
     Extension(p): Extension<Principal>,
@@ -379,8 +605,16 @@ pub async fn get_kernel_document(
     let r = async {
         let k = visible(&st, &p, &kid).await?;
         let outputs = p.at_least(Permission::Viewer2);
-        let doc = st.backend.document(&k.path, outputs).await?;
-        ok_json(StatusCode::OK, shape_document(doc, Some(&kid), outputs))
+        let (snap, doc) =
+            tokio::join!(st.backend.request(&kid, "doc.snapshot", json!({})), st.backend.document(&k.path, outputs));
+        let doc = doc?;
+        let snap = match snap {
+            Ok(v) => Some(v),
+            // A kernel without the collaborative document (older than PROTOCOL §4).
+            Err(e) if e.code == "unknown_method" => None,
+            Err(e) => return Err(ApiError::from(e)),
+        };
+        ok_json(StatusCode::OK, shape_document(merge_snapshot(doc, snap), Some(&kid), outputs))
     };
     finish(r.await, OP_KERNEL_DOCUMENT)
 }
@@ -397,7 +631,8 @@ pub async fn get_document(State(st): St, Extension(p): Extension<Principal>, uri
             return Err(ApiError::not_found(format!("no such file: {path}")));
         }
         let doc = st.backend.document(path, true).await?;
-        ok_json(StatusCode::OK, shape_document(doc, None, true))
+        // No kernel, so no live state: the Document fields of FR-S1 get their defaults.
+        ok_json(StatusCode::OK, shape_document(merge_snapshot(doc, None), None, true))
     };
     finish(r.await, OP_DOCUMENT)
 }
@@ -443,26 +678,37 @@ struct RunBody {
     params: Option<Map<String, Value>>,
     #[serde(default)]
     on_busy: Option<OnBusy>,
+    /// Alternative to `cells` (FR-S6).
+    #[serde(default)]
+    cell_ids: Option<Vec<String>>,
 }
 
 pub async fn start_run(
     State(st): St,
     Extension(p): Extension<Principal>,
     Path(kid): Path<String>,
+    headers: HeaderMap,
     RawBody(body): RawBody,
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Permission::Viewer3)?;
         let b: RunBody = parse_json(&body)?;
-        if matches!(b.mode, RunMode::Cells) && b.cells.as_ref().is_none_or(Vec::is_empty) {
-            return Err(ApiError::invalid("cells: mode 'cells' needs a non-empty 'cells' list"));
+        if b.cells.is_some() && b.cell_ids.is_some() {
+            return Err(ApiError::invalid("cells, cell_ids: give one of them, not both"));
+        }
+        let has_cells = b.cells.as_ref().is_some_and(|c| !c.is_empty()) || b.cell_ids.as_ref().is_some_and(|c| !c.is_empty());
+        if matches!(b.mode, RunMode::Cells) && !has_cells {
+            return Err(ApiError::invalid("cells: mode 'cells' needs a non-empty 'cells' or 'cell_ids' list"));
         }
         visible(&st, &p, &kid).await?;
         let mut params = Map::new();
         params.insert("mode".into(), serde_json::to_value(&b.mode).unwrap_or_default());
         if let Some(c) = b.cells {
             params.insert("cells".into(), json!(c));
+        }
+        if let Some(ids) = b.cell_ids {
+            params.insert("cell_ids".into(), json!(ids));
         }
         if let Some(s) = b.source {
             params.insert("source".into(), Value::String(s));
@@ -471,6 +717,8 @@ pub async fn start_run(
             params.insert("params".into(), Value::Object(pm));
         }
         params.insert("on_busy".into(), serde_json::to_value(b.on_busy.unwrap_or_default()).unwrap_or_default());
+        // `started_by` (FR-S6).
+        params.insert("client".into(), optional_client(&st, &p, &kid, &headers));
         let res = call(&st, &kid, "run", Value::Object(params)).await?;
         ok_json(StatusCode::ACCEPTED, res)
     };
@@ -586,11 +834,46 @@ pub async fn stream_events(
                 ),
             },
         };
+        // FR-S4: with a client id (query, since EventSource cannot set headers, or header)
+        // the stream keeps the client present.
+        let client_id = q
+            .get("client_id")
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .or_else(|| header_str(&headers, CLIENT_HEADER))
+            .map(String::from);
+        let nickname = q
+            .get("nickname")
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .or_else(|| header_str(&headers, NICKNAME_HEADER))
+            .map(String::from);
+        if let Some(id) = &client_id {
+            check_client_id(id)?;
+        }
+        check_nickname(nickname.as_deref())?;
         let events = st.backend.subscribe(&kid, since).await?;
         let hide_outputs = !p.at_least(Permission::Viewer2);
-        Ok(sse::response(events, &kid, hide_outputs, st.sse_keepalive, st.shutdown.clone()))
+        let guard = client_id.map(|id| {
+            let task = tokio::spawn(presence_heartbeat(st.clone(), p.clone(), kid.clone(), id, nickname));
+            sse::AbortOnDrop(task.abort_handle())
+        });
+        Ok(sse::response(events, &kid, hide_outputs, st.sse_keepalive, st.shutdown.clone(), guard))
     };
     finish(r.await, OP_EVENTS)
+}
+
+/// `presence.update {client}` now and every `presence_heartbeat` until aborted (the event
+/// stream closed). The kernel lets the client leave 30 s after the last one (FR-S4).
+async fn presence_heartbeat(st: Arc<AppState>, p: Principal, kid: String, client_id: String, nickname: Option<String>) {
+    loop {
+        // Rebuilt each time so an avatar set later with updatePresence is kept.
+        let client = client_value(&st, &p, &kid, Some(client_id.as_str()), nickname.as_deref());
+        if let Err(e) = st.backend.request(&kid, "presence.update", json!({ "client": client })).await {
+            tracing::debug!("presence heartbeat of {client_id} on {kid} failed: {e}");
+        }
+        tokio::time::sleep(st.presence_heartbeat).await;
+    }
 }
 
 // ------------------------------------------------------------------ Sharing
@@ -631,7 +914,7 @@ pub async fn create_share(
         };
         let b: ShareBody = parse_json(&body)?;
         let permission = Permission::parse_share(&b.permission)
-            .ok_or_else(|| ApiError::invalid("permission: expected viewer1, viewer2 or viewer3"))?;
+            .ok_or_else(|| ApiError::invalid("permission: expected viewer1, viewer2, viewer3 or editor"))?;
         if b.label.as_ref().is_some_and(|l| l.chars().count() > 120) {
             return Err(ApiError::invalid("label: at most 120 characters"));
         }
@@ -672,6 +955,370 @@ pub async fn revoke_share(
         Ok(StatusCode::NO_CONTENT.into_response())
     };
     finish(r.await, OP_REVOKE_SHARE)
+}
+
+// ------------------------------------------------------------------ Collaborative document (FR-S1..S5, S8)
+
+/// `CellEdit` plus `after`/`before` (createCell) and `base_version` (updateCell).
+#[derive(Deserialize)]
+struct CellEditBody {
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    metadata: Option<Map<String, Value>>,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default)]
+    before: Option<String>,
+    #[serde(default)]
+    base_version: Option<i64>,
+}
+
+/// `{client, type?, source?, metadata?}` for `doc.cell.create` / `doc.cell.update`.
+fn edit_params(client: Value, b: &CellEditBody) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("client".into(), client);
+    if let Some(t) = &b.kind {
+        m.insert("type".into(), Value::String(t.clone()));
+    }
+    if let Some(src) = &b.source {
+        m.insert("source".into(), Value::String(src.clone()));
+    }
+    if let Some(md) = &b.metadata {
+        m.insert("metadata".into(), Value::Object(md.clone()));
+    }
+    m
+}
+
+pub async fn create_cell(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(kid): Path<String>,
+    headers: HeaderMap,
+    RawBody(body): RawBody,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Editor)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        let b: CellEditBody = parse_json(&body)?;
+        if b.after.is_some() && b.before.is_some() {
+            return Err(ApiError::invalid("after, before: give one of them, not both"));
+        }
+        visible(&st, &p, &kid).await?;
+        let mut params = edit_params(client, &b);
+        if let Some(a) = &b.after {
+            params.insert("after".into(), Value::String(a.clone()));
+        }
+        if let Some(bf) = &b.before {
+            params.insert("before".into(), Value::String(bf.clone()));
+        }
+        let res = call(&st, &kid, "doc.cell.create", Value::Object(params)).await?;
+        ok_json(StatusCode::CREATED, field(res, "cell")?)
+    };
+    finish(r.await, OP_CREATE_CELL)
+}
+
+pub async fn update_cell(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, cell_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    RawBody(body): RawBody,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Editor)?;
+        check_cell(&cell_id)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        let b: CellEditBody = parse_json(&body)?;
+        let base = b.base_version.ok_or_else(|| ApiError::invalid("base_version: required"))?;
+        visible(&st, &p, &kid).await?;
+        let mut params = edit_params(client, &b);
+        params.insert("cell_id".into(), Value::String(cell_id.clone()));
+        params.insert("base_version".into(), json!(base));
+        let res = call(&st, &kid, "doc.cell.update", Value::Object(params)).await?;
+        ok_json(StatusCode::OK, field(res, "cell")?)
+    };
+    finish(r.await, OP_UPDATE_CELL)
+}
+
+pub async fn delete_cell(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, cell_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Editor)?;
+        check_cell(&cell_id)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        let base = query(&uri)?
+            .get("base_version")
+            .ok_or_else(|| ApiError::invalid("base_version: required"))?
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| ApiError::invalid("base_version: expected an integer"))?;
+        visible(&st, &p, &kid).await?;
+        call(
+            &st,
+            &kid,
+            "doc.cell.delete",
+            json!({ "client": client, "cell_id": cell_id, "base_version": base }),
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT.into_response())
+    };
+    finish(r.await, OP_DELETE_CELL)
+}
+
+pub async fn move_cell(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, cell_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    RawBody(body): RawBody,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Editor)?;
+        check_cell(&cell_id)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        #[derive(Deserialize)]
+        struct MoveBody {
+            to_index: i64,
+        }
+        let b: MoveBody = parse_json(&body)?;
+        if b.to_index < 1 {
+            return Err(ApiError::invalid("to_index: must be >= 1 (the preamble stays first)"));
+        }
+        visible(&st, &p, &kid).await?;
+        let res = call(
+            &st,
+            &kid,
+            "doc.cell.move",
+            json!({ "client": client, "cell_id": cell_id, "to_index": b.to_index }),
+        )
+        .await?;
+        ok_json(StatusCode::OK, field(res, "cell")?)
+    };
+    finish(r.await, OP_MOVE_CELL)
+}
+
+pub async fn lock_cell(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, cell_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Editor)?;
+        check_cell(&cell_id)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        visible(&st, &p, &kid).await?;
+        let res = call(&st, &kid, "doc.lock", json!({ "client": client, "cell_id": cell_id })).await?;
+        ok_json(StatusCode::OK, field(res, "lock")?)
+    };
+    finish(r.await, OP_LOCK_CELL)
+}
+
+pub async fn unlock_cell(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, cell_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    RawBody(body): RawBody,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Editor)?;
+        check_cell(&cell_id)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        #[derive(Deserialize, Default)]
+        struct UnlockBody {
+            #[serde(default)]
+            source: Option<String>,
+            #[serde(default)]
+            base_version: Option<i64>,
+        }
+        // The body is optional.
+        let b = if body.iter().all(u8::is_ascii_whitespace) {
+            UnlockBody::default()
+        } else {
+            parse_json::<UnlockBody>(&body)?
+        };
+        visible(&st, &p, &kid).await?;
+        let mut params = Map::new();
+        params.insert("client".into(), client);
+        params.insert("cell_id".into(), Value::String(cell_id.clone()));
+        if let Some(src) = b.source {
+            params.insert("source".into(), Value::String(src));
+        }
+        if let Some(base) = b.base_version {
+            params.insert("base_version".into(), json!(base));
+        }
+        let res = call(&st, &kid, "doc.unlock", Value::Object(params)).await?;
+        ok_json(StatusCode::OK, field(res, "cell")?)
+    };
+    finish(r.await, OP_UNLOCK_CELL)
+}
+
+fn is_index(v: &Value) -> bool {
+    v.as_u64().is_some()
+}
+
+/// `Cursor` (`{cell_id, line, column, selection?: [[l, c], [l, c]]}`) or null.
+fn check_cursor(v: &Value) -> ApiResult<()> {
+    if v.is_null() {
+        return Ok(());
+    }
+    let bad = || ApiError::invalid("cursor: expected {cell_id, line, column, selection?} or null");
+    let m = v.as_object().ok_or_else(bad)?;
+    if !m.get("cell_id").is_some_and(Value::is_string) {
+        return Err(bad());
+    }
+    if !m.get("line").is_some_and(is_index) || !m.get("column").is_some_and(is_index) {
+        return Err(bad());
+    }
+    match m.get("selection") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::Array(points)) => {
+            let ok = points.len() == 2
+                && points.iter().all(|pt| pt.as_array().is_some_and(|xy| xy.len() == 2 && xy.iter().all(is_index)));
+            if ok {
+                Ok(())
+            } else {
+                Err(bad())
+            }
+        }
+        Some(_) => Err(bad()),
+    }
+}
+
+pub async fn update_presence(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(kid): Path<String>,
+    headers: HeaderMap,
+    RawBody(body): RawBody,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Viewer1)?;
+        let (client_id, nickname) = client_ident(&headers)?;
+        let b: Map<String, Value> = parse_json(&body)?;
+        if b.get("focused_cell_id").is_some_and(|v| !(v.is_null() || v.is_string())) {
+            return Err(ApiError::invalid("focused_cell_id: expected a string or null"));
+        }
+        if let Some(c) = b.get("cursor") {
+            check_cursor(c)?;
+        }
+        let avatar = match b.get("avatar") {
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(Value::String(a)) => Some(Some(a.clone())),
+            Some(_) => return Err(ApiError::invalid("avatar: expected a string or null")),
+        };
+        visible(&st, &p, &kid).await?;
+        if let Some(avatar) = avatar {
+            let mut avatars = st.avatars.lock().unwrap_or_else(|e| e.into_inner());
+            let key = (kid.clone(), client_id.clone());
+            match avatar {
+                Some(a) => {
+                    avatars.insert(key, a);
+                }
+                None => {
+                    avatars.remove(&key);
+                }
+            }
+        }
+        let client = client_value(&st, &p, &kid, Some(client_id.as_str()), nickname.as_deref());
+        let mut params = Map::new();
+        params.insert("client".into(), client);
+        // Present keys only: an absent key leaves focus/cursor as they are, null clears them.
+        for key in ["focused_cell_id", "cursor"] {
+            if let Some(v) = b.get(key) {
+                params.insert(key.to_string(), v.clone());
+            }
+        }
+        call(&st, &kid, "presence.update", Value::Object(params)).await?;
+        let snap = call(&st, &kid, "doc.snapshot", json!({})).await?;
+        let presence = snap.get("presence").cloned().unwrap_or_else(|| json!([]));
+        ok_json(StatusCode::OK, json!({ "presence": presence }))
+    };
+    finish(r.await, OP_UPDATE_PRESENCE)
+}
+
+pub async fn leave_presence(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(kid): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Viewer1)?;
+        let client = required_client(&st, &p, &kid, &headers)?;
+        visible(&st, &p, &kid).await?;
+        call(&st, &kid, "presence.leave", json!({ "client": client.clone() })).await?;
+        if let Some(id) = client.get("client_id").and_then(Value::as_str) {
+            st.avatars.lock().unwrap_or_else(|e| e.into_inner()).remove(&(kid.clone(), id.to_string()));
+        }
+        Ok(StatusCode::NO_CONTENT.into_response())
+    };
+    finish(r.await, OP_LEAVE_PRESENCE)
+}
+
+// ------------------------------------------------------------------ Alarm (FR-S7)
+
+/// waitRun `timeout` bounds (seconds) and default.
+const WAIT_DEFAULT: i64 = 60;
+const WAIT_MAX: i64 = 300;
+const FINISHED: [&str; 5] = ["ok", "error", "interrupted", "cancelled", "crashed"];
+
+pub async fn wait_run(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, run_ref)): Path<(String, String)>,
+    uri: Uri,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Permission::Viewer2)?;
+        check_run_ref(&run_ref)?;
+        let timeout = match query(&uri)?.get("timeout") {
+            None => WAIT_DEFAULT,
+            Some(v) => v
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| ApiError::invalid("timeout: expected an integer number of seconds"))?
+                .clamp(1, WAIT_MAX),
+        };
+        visible(&st, &p, &kid).await?;
+        // The backend allows this request `timeout` plus a margin (not its usual 30 s).
+        let res = call(&st, &kid, "runs.wait", json!({ "run_id": run_ref, "timeout": timeout })).await?;
+        let Value::Object(mut out) = res else {
+            return Err(ApiError::internal("runs.wait answered with a non-object"));
+        };
+        let status = out.get("status").and_then(Value::as_str).unwrap_or("running").to_string();
+        let run_id = out.get("run_id").and_then(Value::as_str).map(String::from).unwrap_or_else(|| run_ref.clone());
+        let next = if FINISHED.contains(&status.as_str()) {
+            Value::Null
+        } else {
+            Value::String(format!("/api/v1/kernels/{kid}/runs/{run_id}/wait?timeout={timeout}"))
+        };
+        out.insert("status".into(), Value::String(status));
+        out.insert("run_id".into(), Value::String(run_id));
+        out.entry("run").or_insert(Value::Null);
+        out.insert("next".into(), next);
+        ok_json(StatusCode::OK, Value::Object(out))
+    };
+    finish(r.await, OP_WAIT_RUN)
 }
 
 // ------------------------------------------------------------------ fallbacks

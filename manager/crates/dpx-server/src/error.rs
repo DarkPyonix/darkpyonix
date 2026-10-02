@@ -60,7 +60,7 @@ impl ApiError {
 }
 
 impl From<DpxError> for ApiError {
-    /// not_found→404, busy→409, start_timeout→504, kernel_unreachable/shutting_down→502,
+    /// not_found→404, busy/conflict/locked→409, start_timeout→504, kernel_unreachable/shutting_down→502,
     /// forbidden→403, unauthorized→401, bad_request→400, anything else→500 internal.
     fn from(e: DpxError) -> Self {
         let status = match e.code.as_str() {
@@ -68,7 +68,8 @@ impl From<DpxError> for ApiError {
             "unauthorized" => StatusCode::UNAUTHORIZED,
             "forbidden" => StatusCode::FORBIDDEN,
             "not_found" => StatusCode::NOT_FOUND,
-            "busy" => StatusCode::CONFLICT,
+            // FR-S2/S3: `conflict` carries `data.cell`, `locked` carries `data.locked_by`.
+            "busy" | "conflict" | "locked" => StatusCode::CONFLICT,
             "start_timeout" => StatusCode::GATEWAY_TIMEOUT,
             "kernel_unreachable" | "shutting_down" => StatusCode::BAD_GATEWAY,
             _ => {

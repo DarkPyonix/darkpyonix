@@ -33,6 +33,8 @@ pub use crate::ident::{canonical_path, kernel_id_for};
 
 /// FR-M2: how long `ensure` waits for a launched kernel to announce itself.
 pub const START_TIMEOUT: Duration = Duration::from_secs(10);
+/// Extra time a `runs.wait` request gets beyond its own `timeout` before the manager gives up.
+const RUNS_WAIT_MARGIN: Duration = Duration::from_secs(15);
 const READY_STATUSES: [&str; 2] = ["idle", "busy"];
 
 /// Backend settings. [`Config::from_env`] reads `DARKPYONIX_HOME`, `DARKPYONIX_DISCOVERY` and
@@ -413,6 +415,14 @@ impl KernelBackend for RealBackend {
             ));
         }
         let conn = self.connection(kernel_id).await?;
+        if method == "runs.wait" {
+            // FR-S7 long-poll: the kernel answers after up to `timeout` (<= 300) seconds, so the
+            // usual request timeout would cut it short.
+            let wait = params.get("timeout").and_then(Value::as_f64).unwrap_or(60.0).clamp(1.0, 300.0);
+            return conn
+                .request_timeout(method, params, Duration::from_secs_f64(wait) + RUNS_WAIT_MARGIN)
+                .await;
+        }
         conn.request(method, params).await
     }
 

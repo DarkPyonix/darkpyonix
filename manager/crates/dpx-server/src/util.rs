@@ -102,6 +102,26 @@ pub fn write_private_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// The OS user running the manager: the user name of master-token clients (FR-S4).
+pub fn os_user() -> String {
+    ["USER", "USERNAME", "LOGNAME"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .map(|v| v.trim().to_string())
+        .find(|v| !v.is_empty())
+        .unwrap_or_else(|| "user".to_string())
+}
+
+/// `^[A-Za-z0-9_-]{8,64}$` (OpenAPI `X-DarkPyonix-Client`).
+pub fn is_client_id(s: &str) -> bool {
+    (8..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// `^[A-Za-z0-9_.:-]{1,64}$` (OpenAPI `CellId`).
+pub fn is_cell_id(s: &str) -> bool {
+    (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+}
+
 /// `<file dir>/__runs__/<file name>` (OpenAPI `Kernel.runs_dir`).
 pub fn runs_dir_for(path: &str) -> String {
     let p = Path::new(path);
@@ -128,6 +148,13 @@ mod tests {
         assert!(is_run_id("20261003-142233-a1f0"));
         assert!(!is_run_id("20261003-142233-a1fg"));
         assert!(!is_run_id("latest"));
+        assert!(is_client_id("ipad-of-kim_01"));
+        assert!(!is_client_id("short"));
+        assert!(!is_client_id("has space in it"));
+        assert!(is_cell_id("c_0a1b2c3d4e5f"));
+        assert!(is_cell_id("intro.v2:1"));
+        assert!(!is_cell_id(""));
+        assert!(!is_cell_id("a/b"));
     }
 
     #[test]

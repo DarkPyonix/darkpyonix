@@ -20,7 +20,9 @@ pub enum Permission {
     Viewer1 = 1,
     Viewer2 = 2,
     Viewer3 = 3,
-    Admin = 4,
+    /// `viewer3` plus cell edits and locks (SPEC FR-S8).
+    Editor = 4,
+    Admin = 5,
 }
 
 impl Permission {
@@ -29,6 +31,7 @@ impl Permission {
             Permission::Viewer1 => "viewer1",
             Permission::Viewer2 => "viewer2",
             Permission::Viewer3 => "viewer3",
+            Permission::Editor => "editor",
             Permission::Admin => "admin",
         }
     }
@@ -37,6 +40,7 @@ impl Permission {
             "viewer1" => Some(Permission::Viewer1),
             "viewer2" => Some(Permission::Viewer2),
             "viewer3" => Some(Permission::Viewer3),
+            "editor" => Some(Permission::Editor),
             _ => None,
         }
     }
@@ -48,11 +52,13 @@ pub struct Principal {
     pub permission: Permission,
     pub kernel_id: Option<String>,
     pub share_id: Option<String>,
+    /// The share's label (shown as the user name of its clients, FR-S4).
+    pub label: Option<String>,
 }
 
 impl Principal {
     pub fn admin() -> Self {
-        Self { permission: Permission::Admin, kernel_id: None, share_id: None }
+        Self { permission: Permission::Admin, kernel_id: None, share_id: None, label: None }
     }
     pub fn at_least(&self, p: Permission) -> bool {
         self.permission >= p
@@ -123,17 +129,17 @@ impl ShareStore {
 
     pub fn authenticate(&self, token: &str) -> Option<Principal> {
         let digest = sha256_hex(token);
-        let row: Option<(String, String, String, Option<i64>)> = self
+        let row: Option<(String, String, String, Option<i64>, Option<String>)> = self
             .lock()
             .query_row(
-                "SELECT share_id, kernel_id, permission, expires_unix FROM shares WHERE token_sha256 = ?1",
+                "SELECT share_id, kernel_id, permission, expires_unix, label FROM shares WHERE token_sha256 = ?1",
                 params![digest],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()
             .ok()
             .flatten();
-        let (share_id, kernel_id, permission, expires) = row?;
+        let (share_id, kernel_id, permission, expires, label) = row?;
         if let Some(t) = expires {
             if t <= util::unix_now() {
                 return None;
@@ -143,6 +149,7 @@ impl ShareStore {
             permission: Permission::parse_share(&permission)?,
             kernel_id: Some(kernel_id),
             share_id: Some(share_id),
+            label,
         })
     }
 

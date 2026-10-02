@@ -56,6 +56,9 @@ pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_DEDICATED_PORT: u16 = 46881;
 pub const DEFAULT_SHARE_BASE: &str = "https://darkpyonix.dev/s";
 const SSE_KEEPALIVE: Duration = Duration::from_secs(15);
+/// `presence.update` heartbeat while a client's event stream is open (FR-S4; the kernel
+/// expires a client 30 s after its last heartbeat).
+pub const PRESENCE_HEARTBEAT: Duration = Duration::from_secs(10);
 const MAX_BODY: usize = 64 * 1024 * 1024;
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const GRACEFUL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -94,6 +97,8 @@ pub struct ServerConfig {
     pub master_token: Option<String>,
     /// Interval of SSE keep-alive comments (15 s).
     pub sse_keepalive: Duration,
+    /// Interval of `presence.update` heartbeats for event streams opened with a client id (10 s).
+    pub presence_heartbeat: Duration,
 }
 
 impl ServerConfig {
@@ -109,6 +114,7 @@ impl ServerConfig {
             proxies: Vec::new(),
             master_token: None,
             sse_keepalive: SSE_KEEPALIVE,
+            presence_heartbeat: PRESENCE_HEARTBEAT,
         }
     }
 
@@ -242,7 +248,7 @@ async fn proxy_gate(State(proxy): State<Arc<Proxy>>, req: Request, next: Next) -
 }
 
 pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) -> Router {
-    use axum::routing::{delete, post};
+    use axum::routing::{delete, patch, post, put};
     let api = Router::new()
         .route("/health", get(api::get_health))
         .route("/api/v1/manager", get(api::get_manager))
@@ -258,6 +264,12 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .route("/api/v1/kernels/{kernel_id}/events", get(api::stream_events))
         .route("/api/v1/kernels/{kernel_id}/shares", get(api::list_shares).post(api::create_share))
         .route("/api/v1/kernels/{kernel_id}/shares/{share_id}", delete(api::revoke_share))
+        .route("/api/v1/kernels/{kernel_id}/cells", post(api::create_cell))
+        .route("/api/v1/kernels/{kernel_id}/cells/{cell_id}", patch(api::update_cell).delete(api::delete_cell))
+        .route("/api/v1/kernels/{kernel_id}/cells/{cell_id}/move", post(api::move_cell))
+        .route("/api/v1/kernels/{kernel_id}/cells/{cell_id}/lock", put(api::lock_cell).delete(api::unlock_cell))
+        .route("/api/v1/kernels/{kernel_id}/presence", put(api::update_presence).delete(api::leave_presence))
+        .route("/api/v1/kernels/{kernel_id}/runs/{run_ref}/wait", get(api::wait_run))
         .route("/docs", get(docs::redirect))
         .route("/docs/", get(docs::index))
         .route("/docs/{name}", get(docs::file))
@@ -387,6 +399,9 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         idle_timeout,
         share_base: config.share_base.clone(),
         sse_keepalive: config.sse_keepalive,
+        presence_heartbeat: config.presence_heartbeat,
+        os_user: util::os_user(),
+        avatars: Mutex::new(std::collections::HashMap::new()),
         shutdown: rx.clone(),
     });
     let app = router(state, proxy, activity.clone());

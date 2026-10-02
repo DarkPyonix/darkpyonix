@@ -155,8 +155,11 @@ async fn test_fr_x3_busy_run_is_409_with_busy_error() {
     assert_eq!(q.status, 202);
     assert_eq!(q.body["state"], "queued");
     assert_eq!(q.body["position"], 1);
-    let (m, p) = s.backend.last_call(&kid).unwrap();
+    let (m, mut p) = s.backend.last_call(&kid).unwrap();
     assert_eq!(m, "run");
+    // `client` (FR-S6) is checked in collab.rs.
+    let client = p.as_object_mut().unwrap().remove("client").expect("run carries the client");
+    assert_eq!(client["permission"], "admin");
     assert_eq!(p, json!({"mode": "all", "on_busy": "queue", "params": {"lr": 0.1}, "source": "x=1"}));
     // busy data without `current` is wrapped so the BusyError shape holds.
     s.backend.fail_on("run", DpxError::new("busy", "busy").with_data(json!({"run_id": "r"})));
@@ -328,7 +331,7 @@ async fn test_fr_a3_permission_matrix() {
     let (other, _) = s.kernel("other.py");
     let a = s.admin();
     let mut tokens = vec![];
-    for perm in ["viewer1", "viewer2", "viewer3"] {
+    for perm in ["viewer1", "viewer2", "viewer3", "editor"] {
         let c = a.post(&format!("/api/v1/kernels/{kid}/shares"), json!({"permission": perm, "label": perm})).await;
         assert_eq!(c.status, 201, "{}", c.text);
         tokens.push((perm, c.body["token"].as_str().unwrap().to_string(), c.body["share_id"].as_str().unwrap().to_string()));
@@ -337,7 +340,8 @@ async fn test_fr_a3_permission_matrix() {
         "viewer1" => 1,
         "viewer2" => 2,
         "viewer3" => 3,
-        _ => 4,
+        "editor" => 4,
+        _ => 5,
     };
     // (method, path, body, minimum permission)
     let b = format!("/api/v1/kernels/{kid}");
