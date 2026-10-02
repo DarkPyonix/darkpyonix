@@ -161,13 +161,14 @@ FORMAT §2의 문법(프리앰블, 셀 표식, 제목, 타입, 메타데이터, 
 ### FR-F2 `darkpyonix.markdown` — `Agreed`
 FORMAT §3.2. 커널 안에서는 `text/markdown` `display_data`를 내고(`silent=True`이면 기록에 남기지 않음), 커널 밖에서는 아무것도 하지 않습니다. 모르는 키워드 인자는 경고만 남깁니다.
 - 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`
+- 상태 메모: 커널 밖 동작과 `darkpyonix.kernel.hostctx` 계약까지는 검증했습니다. 실제 커널이 `display_data`로 내보내는 경로는 실행기(executor)와 합친 뒤 검증하고 `Done`으로 바꿉니다.
 
-### FR-F3 `darkpyonix.params` — `Agreed`
+### FR-F3 `darkpyonix.params` — `Done`
 FORMAT §3.3. 값의 우선순위는 실행 요청 `params` → 명령줄 `--name` → `default`입니다.
 - 수용 기준: `choices`와 정수 `default`면 인덱스로 고르고, `range`를 벗어난 값은 `ValueError`입니다. `python file.py --model_id swin_t`가 `"swin_t"`를 냅니다.
 - 테스트: `test_fr_f3_params_precedence_and_validation`
 
-### FR-F4 `darkpyonix.binding` — `Agreed`
+### FR-F4 `darkpyonix.binding` — `Done`
 FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터만 벗기고 다른 데코레이터는 보존합니다.
 - 수용 기준: `[code]` 셀 변수를 참조하는 binding 클래스 본문은 `NameError`를 냅니다. import한 이름과 앞선 binding은 보입니다.
 - 테스트: `test_fr_f4_binding_cannot_see_code_cell_variables`
@@ -176,7 +177,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다.
 - 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유)
 
-### FR-F6 `darkpyonix.run_command` — `Agreed`
+### FR-F6 `darkpyonix.run_command` — `Done`
 셸 명령을 하위 프로세스로 실행하고 출력을 줄 단위로 스트림 출력으로 보냅니다. `check=True`이면 실패 시 `CalledProcessError`입니다. 인터럽트가 오면 하위 프로세스 그룹에 SIGINT를 전달합니다.
 - 테스트: `test_fr_f6_run_command_streams_and_forwards_interrupt`
 

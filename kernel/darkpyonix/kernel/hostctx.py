@@ -62,3 +62,24 @@ def _uninstall() -> None:
 def _set_params(params: Optional[Dict[str, Any]]) -> None:
     global _params
     _params = dict(params or {})
+
+
+# ---------------------------------------------------------------- hosting without the executor
+
+def set_active(params: Optional[Dict[str, Any]] = None,
+               emit: Optional[Callable[[Dict[str, Any], bool], None]] = None) -> None:
+    """Host the runtime API without an executor (tests, embedders).
+
+    ``emit(bundle, silent)`` receives the bundle exactly as given to ``emit_display``.
+    """
+    def _hook(data: Dict[str, Any], metadata: Dict[str, Any], silent: bool) -> None:
+        if emit is not None:
+            emit({"data": data, "metadata": metadata} if metadata else data, silent)
+
+    _install(_hook)
+    _set_params(params)
+
+
+def clear() -> None:
+    """Leave the hosted state; the runtime API behaves as under plain ``python file.py``."""
+    _uninstall()
