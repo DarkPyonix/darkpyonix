@@ -153,7 +153,7 @@ PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모�
 
 ## 6. 런타임 API와 파일 형식 (F)
 
-### FR-F1 셀 파서 — `Agreed`
+### FR-F1 셀 파서 — `Done`
 FORMAT §2의 문법(프리앰블, 셀 표식, 제목, 타입, 메타데이터, 셀 식별)을 파싱합니다. 파서는 커널, 매니저, 런타임 API가 공유하며 표준 라이브러리만 씁니다.
 - 수용 기준: `docs/examples/darkpyonix_format.py`를 파싱하면 프리앰블 1개와 셀 22개(code 11, markdown 2, binding 2, argparse·shell·parallel·concurrent·cinterop·cppinterop·rustinterop 각 1)가 나오고, 타입, 제목, `@width` 메타데이터, `concorrunt`→`concurrent` 별칭이 FORMAT대로 나옵니다. 파싱 후 다시 직렬화하면 원문과 바이트 단위로 같습니다.
 - 테스트: `test_fr_f1_reference_file_parses`, `test_fr_f1_parse_serialize_roundtrip`
@@ -161,13 +161,14 @@ FORMAT §2의 문법(프리앰블, 셀 표식, 제목, 타입, 메타데이터, 
 ### FR-F2 `darkpyonix.markdown` — `Agreed`
 FORMAT §3.2. 커널 안에서는 `text/markdown` `display_data`를 내고(`silent=True`이면 기록에 남기지 않음), 커널 밖에서는 아무것도 하지 않습니다. 모르는 키워드 인자는 경고만 남깁니다.
 - 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`
+- 상태 메모: 커널 밖 동작과 `darkpyonix.kernel.hostctx` 계약까지는 검증했습니다. 실제 커널이 `display_data`로 내보내는 경로는 실행기(executor)와 합친 뒤 검증하고 `Done`으로 바꿉니다.
 
-### FR-F3 `darkpyonix.params` — `Agreed`
+### FR-F3 `darkpyonix.params` — `Done`
 FORMAT §3.3. 값의 우선순위는 실행 요청 `params` → 명령줄 `--name` → `default`입니다.
 - 수용 기준: `choices`와 정수 `default`면 인덱스로 고르고, `range`를 벗어난 값은 `ValueError`입니다. `python file.py --model_id swin_t`가 `"swin_t"`를 냅니다.
 - 테스트: `test_fr_f3_params_precedence_and_validation`
 
-### FR-F4 `darkpyonix.binding` — `Agreed`
+### FR-F4 `darkpyonix.binding` — `Done`
 FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터만 벗기고 다른 데코레이터는 보존합니다.
 - 수용 기준: `[code]` 셀 변수를 참조하는 binding 클래스 본문은 `NameError`를 냅니다. import한 이름과 앞선 binding은 보입니다.
 - 테스트: `test_fr_f4_binding_cannot_see_code_cell_variables`
@@ -176,7 +177,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다.
 - 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유)
 
-### FR-F6 `darkpyonix.run_command` — `Agreed`
+### FR-F6 `darkpyonix.run_command` — `Done`
 셸 명령을 하위 프로세스로 실행하고 출력을 줄 단위로 스트림 출력으로 보냅니다. `check=True`이면 실패 시 `CalledProcessError`입니다. 인터럽트가 오면 하위 프로세스 그룹에 SIGINT를 전달합니다.
 - 테스트: `test_fr_f6_run_command_streams_and_forwards_interrupt`
 
@@ -228,9 +229,9 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ## 9. 인증과 공유 (A)
 
-### FR-A1 커널 인증 — `Agreed`
+### FR-A1 커널 인증 — `Done`
 PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음 쓰는 쪽이 0600으로 원자적으로 만듭니다.
-- 테스트: `test_fr_a1_wrong_key_is_rejected`
+- 테스트: `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`
 
 ### FR-A2 매니저 토큰 — `Agreed`
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`)와 공유 링크만 `?token=`을 받습니다. `/health`만 인증 없이 열립니다.
@@ -326,7 +327,7 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 
 ### NFR-K3 출력 오버헤드 — `Agreed`
 `print`를 100,000번 하는 셀의 실행 시간이 같은 인터프리터의 일반 실행 대비 1.5배를 넘지 않습니다. 구독자가 느려도 메인 스레드가 막히지 않습니다(출력 큐 상한을 넘으면 기록은 계속하되 실시간 이벤트를 합칩니다).
-- 측정 기록: (구현 후 기입)
+- 측정 기록 (2026-10-03, macOS arm64, `test_nfr_k3_print_overhead`): 셀 안 100,000번 `print`를 파이프로 출력하는 일반 실행과 비교, 5회 중 최솟값의 프로세스 CPU 시간 비율은 3.9 1.08, 3.11 1.17, 3.13 1.24, 3.14 1.42, 3.15 1.21입니다. 측정 당시 머신의 부하 평균이 100을 넘어 벽시계 시간은 같은 측정 안에서도 0.7~8배로 흔들렸으므로 판정에 쓰지 않았습니다. 한가한 머신에서 벽시계 시간을 다시 재야 `Done`이 됩니다.
 
 ### NFR-K4 시작 시간 — `Agreed`
 커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다.
@@ -346,14 +347,19 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 
 ## 12. 프로토콜 요구사항
 
-### PR-1 DKP/1 프레임 — `Agreed`
+### PR-1 DKP/1 프레임 — `Done`
 PROTOCOL §3.1. 64 MiB를 넘는 프레임은 거절합니다.
+- 테스트: `test_pr_1_oversized_frame_is_refused`, `test_pr_1_frame_too_large_closes_connection`
 
-### PR-2 핸드셰이크 — `Agreed`
+### PR-2 핸드셰이크 — `Done`
 PROTOCOL §3.2. 5초 제한, 상수 시간 비교.
+- 테스트: `test_pr_2_handshake_times_out`
 
-### PR-3 이벤트 재전송 — `Agreed`
-PROTOCOL §3.4. 링 버퍼와 `replay_truncated`.
+### PR-3 이벤트 재전송 — `Done`
+PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있어도 이벤트를 내는 쪽은 막히지 않습니다(클라이언트별 송신 버퍼, 64 MiB를 넘으면 그 클라이언트를 끊음).
+- 테스트: `test_pr_3_subscribe_replays_since_and_streams_live`, `test_pr_3_replay_truncated_when_ring_overflows`, `test_pr_3_ring_is_bounded_by_bytes`, `test_slow_subscriber_does_not_block_append`
+- 측정 기록: 이벤트 append → 루프백 클라이언트 수신 지연, 1,000개 기준 p50 약 0.04–0.15 ms, p99 0.1–3.4 ms (맥미니, 다른 작업으로 load average 약 31인 상태, Python 3.13; 3.9·3.11도 p99 0.4–4.2 ms). `test_event_latency_p99`
 
-### PR-4 호환성 — `Agreed`
+### PR-4 호환성 — `Done`
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
+- 테스트: `test_pr_4_unknown_fields_are_ignored`

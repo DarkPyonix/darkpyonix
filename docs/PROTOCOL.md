@@ -129,7 +129,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 {"dkp":1,"op":"event","seq":1043,"type":"output","time":"2026-10-03T05:22:34.120Z","data":{…}}
 ```
 
-`seq`는 커널 수명 동안 1씩 늘어납니다. 커널은 최근 이벤트를 링 버퍼(기본 10,000개 또는 16 MiB)에 둡니다. `subscribe since`가 버퍼보다 오래되면 `replay_truncated` 이벤트를 먼저 보냅니다.
+`seq`는 커널 수명 동안 1씩 늘어납니다. 커널은 최근 이벤트를 링 버퍼(기본 10,000개 또는 16 MiB)에 둡니다. `subscribe since`가 버퍼보다 오래되면 `replay_truncated` 이벤트를 먼저 보냅니다. 이 이벤트는 로그에 속하지 않으므로 `seq`가 `null`입니다.
 
 | type | data |
 |---|---|

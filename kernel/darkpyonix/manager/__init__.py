@@ -1,1 +1,1 @@
-__all__ = ["kernel_registry", "main"]
+"""The DarkPyonix kernel manager and CLI. May use third-party packages (INTENT D10)."""
