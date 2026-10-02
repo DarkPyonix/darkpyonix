@@ -241,25 +241,53 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 
 ## 10. 허브 (H)
 
-허브는 터널 방식(PROJECT Q1)과 로그인 방식(Q2)이 정해진 뒤에 `Agreed`로 올립니다.
+전송은 iroh 1.x로 정했습니다(PROJECT Q1, 2026-10-03, 조건부: ember SPEC NFR-N1을 못 맞추면 직접 구현을 검토). 그래서 허브는 직접 만든 랑데부·중계 대신 iroh가 이미 쓰는 프로토콜을 그대로 받는 서버입니다. 기기는 iroh 엔드포인트이고, 기기 ID는 그 엔드포인트 ID(ed25519 공개 키, 소문자 hex 64자)입니다. ChatGPT 플랜 로그인은 로컬 호스팅 앱에만 열려 있어서 허브에 넣지 않습니다(Q2, FR-H6).
 
-### FR-H1 기기 등록 — `Draft`
-기기(메인 서버·지부)는 허브에 공개 키로 등록하고, 허브는 계정별 기기 목록을 냅니다.
+허브는 Rust 단일 바이너리 `darkpyonix-hub`(`hub/server/`)이고, nginx 없이 TLS·HTTP API·iroh 릴레이·정적 파일을 한 프로세스가 맡습니다(INTENT D10과 같은 원칙). 포트는 TCP 443(API, `/relay`, `/pkarr`, ash), TCP 80(`/generate_204`와 HTTPS 리디렉트), UDP 7842(QUIC 주소 발견, QAD)입니다. 계약은 [api/hub.openapi.yaml](api/hub.openapi.yaml)이고, 허브가 답하는 경로·메서드·상태 코드가 그 문서와 같음을 테스트가 확인합니다(`test_hub_every_operation_answers_with_a_documented_status`, NFR-M3와 같은 방식).
 
-### FR-H2 랑데부와 홀펀칭 — `Draft`
-허브는 기기 사이의 연결 후보를 교환하는 시그널링과 공인 주소 반사를 제공해, 사용자가 연결을 신경 쓰지 않아도 P2P가 맺어지게 합니다.
+전송 계층 교체 가능성: 허브가 iroh에 묶이는 곳은 릴레이(`/relay`, QAD)와 주소 레코드 형식(pkarr 서명 패킷)뿐입니다. 기기 등록, 계정, 공유, 이름은 "ed25519 공개 키 하나 = 기기"라는 가정만 씁니다. 직접 구현으로 바꾸면 그 두 곳만 바꿉니다.
 
-### FR-H3 중계 — `Draft`
-홀펀칭이 실패하면 허브가 암호화된 바이트를 중계합니다.
+**인증 모델(11월 범위).** 로그인(FR-H6)이 없으므로 계정은 허브가 발급하는 계정 토큰으로 식별합니다. `POST /v1/accounts`가 계정과 계정 토큰을 만들고(운영자가 가입 비밀값을 설정하면 그 값이 있어야 함), 계정 토큰으로 기기를 등록하면 기기마다 기기 토큰이 나옵니다. 토큰은 SHA-256 해시로만 저장합니다. 계정 토큰은 메인 서버(ember server)가 보관하고, 새 컴퓨터는 메인 서버를 거쳐 등록합니다.
 
-### FR-H4 ash 호스팅과 공유 링크 — `Draft`
-`https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 호스팅하고, `https://darkpyonix.dev/s/<share_id>` 링크로 공유 커널에 연결합니다.
+### FR-H1 기기 등록 — `Agreed`
+기기는 iroh 엔드포인트 ID로 등록하고, 등록할 때 허브가 낸 일회용 챌린지(5분 유효)에 서명해 개인 키를 가졌음을 증명합니다. 서명하는 메시지는 `darkpyonix-hub/v1/register\n<account_id>\n<challenge>`입니다. 기기는 계정 하나에만 속하고, 기기 목록과 조회는 같은 계정 안에서만 보입니다. 기기를 지우면 그 키는 폐기되어 다시 등록할 수 없고, 릴레이에 붙어 있던 연결은 바로 끊깁니다.
+- 수용 기준: 실제 iroh 엔드포인트 둘을 등록하면 계정의 기기 목록에 두 엔드포인트 ID가 나옵니다. 서명이 틀리거나, 챌린지를 다시 쓰거나, 다른 계정 소속 챌린지를 쓰면 400입니다. 이미 등록된 키는 409입니다. 다른 계정의 토큰으로는 그 기기가 보이지 않습니다(404). 지운 기기의 토큰은 401입니다.
+- 테스트: `test_fr_h1_register_two_iroh_endpoints`, `test_fr_h1_registration_requires_key_possession`, `test_fr_h1_devices_are_scoped_to_their_account`, `test_fr_h1_removed_device_is_revoked`
 
-### FR-H5 HTTPS — `Draft`
-메인 서버가 `https://<name>.darkpyonix.dev` 형식의 주소와 공인 인증서를 얻게 합니다(모바일 웹뷰의 보안 컨텍스트 요건).
+### FR-H2 주소 디렉터리와 발견 — `Agreed`
+기기는 현재 iroh 주소(릴레이 URL과 직접 주소)를 자기 키로 서명한 pkarr 패킷으로 허브에 올리고, 같은 계정의 기기는 엔드포인트 ID만으로 서로의 주소를 찾습니다.
+- 프로토콜: iroh의 pkarr 릴레이 HTTP 프로토콜을 그대로 씁니다. `PUT /pkarr/<z32 키>`로 올리고 `GET /pkarr/<z32 키>`로 받습니다. 그래서 iroh의 기본 `PkarrPublisher`·`PkarrResolver`를 `https://darkpyonix.dev/pkarr?token=<기기 토큰>`에 그대로 붙일 수 있습니다(ember 전송 크레이트가 따로 구현할 것이 없음). 같은 내용을 JSON으로 보는 `GET /v1/devices/{endpoint_id}/addresses`도 둡니다.
+- 받는 쪽 검사: 서명이 맞고, 키가 폐기되지 않은 등록 기기이고, 타임스탬프가 저장된 것보다 새 것만 받습니다(아니면 400/403/409).
+- 조회 범위: `GET`은 같은 계정의 기기 토큰이나 계정 토큰이 있어야 합니다. 조회가 공개되지 않으므로 기기는 직접 주소까지 올려도(`AddrFilter::unfiltered`) 공인 IP가 계정 밖으로 새지 않습니다.
+- DNS 발견(iroh-dns-server, `_iroh.<z32>.<도메인>` TXT)은 쓰지 않습니다. DNS 질의에는 계정 범위를 걸 수 없고, 권한 DNS 서버와 NS 위임을 따로 운영해야 하며, 우리 기기는 모두 허브와 HTTPS로 말하므로 얻는 것이 없습니다. 저장하는 레코드가 같은 서명 패킷이라 나중에 필요하면 DNS 앞단만 더할 수 있습니다.
+- 수용 기준: 두 엔드포인트가 기본 `PkarrPublisher`로 주소를 올리고, 한쪽이 기본 `PkarrResolver`로 상대의 엔드포인트 ID만 가지고 연결합니다. 등록되지 않은 키의 `PUT`은 403, 토큰 없는 `GET`은 401, 다른 계정의 `GET`은 404입니다.
+- 테스트: `test_fr_h2_publish_and_resolve_with_stock_iroh_lookup`, `test_fr_h2_directory_rejects_unregistered_and_foreign`
 
-### FR-H6 로그인 — `Draft`
-OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사용량도 쓸 수 있는 페이지를 둡니다. 2026-10-03 조사 결과 ChatGPT 플랜 사용("Sign in with ChatGPT")은 오픈소스·로컬 호스팅 앱에 열려 있고 원격 호스팅은 별도 승인이 필요합니다. 그래서 플랜 사용은 ember server가 맡고(ember SPEC), 허브의 로그인은 승인을 받은 뒤에 다룹니다(PROJECT Q2).
+### FR-H3 중계 — `Agreed`
+허브는 iroh-relay 서버 크레이트의 릴레이 서비스를 같은 프로세스에서 돌리고(`GET /relay` WebSocket), iroh가 쓰는 보조 서비스도 함께 냅니다. HTTPS 지연 프로브 `GET /ping`, 캡티브 포털 검사 `GET /generate_204`, UDP 7842의 QUIC 주소 발견(QAD)입니다. iroh 1.x는 STUN을 쓰지 않고 QAD로 공인 주소를 알아내므로 STUN 서버는 두지 않습니다.
+- 접근 정책: 릴레이 핸드셰이크가 증명한 엔드포인트 ID가 폐기되지 않은 등록 기기이면 받습니다. 등록 기기가 아니면 유효한 손님 통행권(FR-H4가 발급, `Authorization: Bearer` 또는 `?token=`)이 있을 때만 받습니다. 그 밖에는 거절합니다.
+- 수용 기준: 두 등록 기기가 IP 전송을 끈 릴레이 전용 모드로 우리 릴레이를 거쳐 연결하고 데이터를 주고받습니다(선택된 경로가 릴레이). 같은 두 기기가 루프백에서 직접 경로로도 연결합니다. 등록되지 않은 엔드포인트는 릴레이가 거절해 연결하지 못합니다. 루프백 처리량과 왕복 지연을 측정해 여기에 적습니다.
+- 테스트: `test_fr_h3_relay_only_connection_through_hub`, `test_fr_h3_direct_connection_on_loopback`, `test_fr_h3_relay_rejects_unregistered_endpoint`, `test_fr_h3_relay_throughput_and_latency`
+- 측정 기록: (구현 후 기입)
+
+### FR-H4 ash 호스팅과 공유 링크 — `Agreed`
+`https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 호스팅하고, 공유 링크 `https://darkpyonix.dev/s/<share_id>#<token>`을 그 공유를 연 기기로 이어 줍니다. 공유 토큰은 URL 조각(`#` 뒤)에 있어서 허브로 가지 않습니다. 권한 검사는 끝단의 전용 매니저가 합니다(FR-A3).
+- 기기는 `POST /v1/shares`로 자기 공유를 게시하고, 누구나 `GET /v1/shares/{share_id}`로 그 공유를 연 기기의 엔드포인트 ID와 릴레이 URL, 10분짜리 손님 릴레이 통행권을 받습니다. ash(브라우저 iroh, 릴레이 전용)는 그 통행권으로 릴레이에 붙어 기기에 연결합니다. `GET /s/{share_id}`는 ash 뷰어 페이지를 냅니다(뷰어가 나오기 전까지는 자리표시 페이지).
+- 수용 기준: 게시한 공유가 기기 ID와 통행권으로 풀립니다. 그 통행권을 든 미등록 엔드포인트는 릴레이를 거쳐 공유한 기기에 연결하고, 통행권이 없으면 거절됩니다. 게시를 지우면 404입니다. `/s/{share_id}`와 `/ash/`가 HTML을 냅니다.
+- 테스트: `test_fr_h4_share_resolves_to_hosting_device`, `test_fr_h4_guest_reaches_share_host_through_relay_with_pass`, `test_fr_h4_viewer_pages_are_served`
+
+### FR-H5 HTTPS 이름 — `Draft`
+메인 서버가 `https://<name>.darkpyonix.dev` 주소와 공인 인증서를 얻게 합니다(모바일 웹뷰의 보안 컨텍스트 요건, ember FR-N4).
+- 방식 비교:
+  - (A) **ACME DNS-01을 허브가 대신 게시.** 메인 서버가 자기 개인 키로 인증서를 받고, 허브는 `_acme-challenge.<name>.darkpyonix.dev` TXT만 게시합니다. TLS가 메인 서버에서 끝나므로 허브는 평문을 보지 않습니다(NFR-H1 유지). 대신 공인 IP가 없는 기기에 브라우저가 직접 닿지 못하므로, ember 앱이 루프백 포워더(127.0.0.1 → iroh)로 그 이름을 열어야 합니다(이름의 A 레코드를 127.0.0.1로 둘 수도 있음).
+  - (B) **허브가 TLS를 끝내는 HTTPS 엣지**(rustunnel 방식). 아무 브라우저나 닿지만 허브가 평문을 봅니다. NFR-H1을 깨므로 쓰지 않습니다.
+  - (C) **SNI 패스스루 엣지.** 허브가 ClientHello의 SNI만 읽고 TLS 바이트를 그대로 iroh로 기기에 넘깁니다. 인증서는 (A)로 받은 기기의 것이라 평문은 여전히 기기에서만 보입니다. 앱 없는 브라우저에서도 닿지만 공개 트래픽 대역폭이 허브에 걸립니다.
+- 결정: (A)를 기본으로 하고, 앱 없는 브라우저 접근이 필요해지면 (C)를 더합니다. (B)는 쓰지 않습니다. 허브는 이름을 메인 서버 기기에 예약하고(`PUT /v1/names/{name}`), 그 기기가 요청한 TXT 값을 DNS 공급자로 게시합니다(`PUT /v1/names/{name}/acme-challenge`). DNS 공급자는 교체 가능한 인터페이스 뒤에 둡니다.
+- `Draft`인 이유: darkpyonix.dev의 DNS 공급자(그 API)와 (C)의 필요 여부가 정해지지 않았습니다. 이름 예약과 TXT 게시 API는 메모리 공급자로 구현·시험합니다.
+- 테스트(부분): `test_fr_h5_name_reservation_and_acme_txt`
+
+### FR-H6 로그인 — `Draft` (11월 범위 밖)
+OpenAI 계정 로그인과 Chat 사용량 페이지입니다. ChatGPT 플랜 사용("Sign in with ChatGPT")은 오픈소스·로컬 호스팅 앱에만 열려 있고 원격 호스팅은 별도 신청과 승인이 필요합니다. 그래서 플랜 사용은 ember server가 맡고(ember SPEC), 허브의 로그인은 승인을 받은 뒤에 다룹니다(PROJECT Q2, M4 비고). 11월에는 위의 계정 토큰 모델을 씁니다.
 
 ## 11. 비기능 요구사항
 
@@ -288,8 +316,10 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 ### NFR-M3 문서와 코드의 일치 — `Agreed`
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
 
-### NFR-H1 종단 간 암호화 — `Draft`
-허브는 중계하는 내용을 볼 수 없습니다. 기기 사이의 세션 키는 허브를 거치지 않고 합의합니다.
+### NFR-H1 종단 간 암호화 — `Agreed`
+허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다.
+- 수용 기준: 릴레이 전용 연결로 알려진 평문 표식을 보낼 때, 클라이언트와 허브 사이의 바이트(허브까지 TLS 없이 평문 HTTP 릴레이로 둔 경우에도)에 그 표식이 나타나지 않고, 상대 끝단에서는 그대로 받습니다.
+- 테스트: `test_nfr_h1_relay_sees_only_ciphertext`
 
 ## 12. 프로토콜 요구사항
 

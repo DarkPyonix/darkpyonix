@@ -1,39 +1,56 @@
 openapi: 3.1.0
 info:
   title: DarkPyonix Hub API (darkpyonix.dev)
-  version: 0.1.0-draft.1
-  summary: Device rendezvous, relay, share links and HTTPS for DarkPyonix.
+  version: 0.2.0
+  summary: Device registry, address directory, iroh relay, share links and HTTPS names for DarkPyonix.
   description: |
-    **Status: Draft.** Every operation here is SPEC `FR-H*` in `Draft` state. It is published
-    so that Ember and ash can design against it; it becomes `Agreed` after PROJECT Q1 (tunnel
-    technology) and Q2 (sign-in) are decided.
-
     The hub connects a user's machines (the main server and its branch computers) and lets
-    shared notebooks reach a dedicated manager, **without seeing their traffic**: devices agree
-    on session keys end to end, and the hub only coordinates and, as a last resort, relays
-    ciphertext (SPEC NFR-H1).
+    shared notebooks reach a dedicated manager, **without seeing their traffic** (SPEC NFR-H1).
 
-    Real-time channels are WebSockets. They appear here as `GET` operations answered with
-    `101 Switching Protocols`; their message formats are described in each operation.
+    The peer-to-peer transport is **iroh 1.x** (PROJECT Q1, decided conditionally on
+    2026-10-03). A device *is* an iroh endpoint: its id is the endpoint id, the lowercase hex
+    of its ed25519 public key. The hub therefore speaks iroh's own protocols where iroh needs
+    a server:
+
+    - `GET /relay`, `GET /ping`, `GET /generate_204` and QUIC address discovery on UDP 7842
+      are the iroh relay (the `iroh-relay` server crate, run in-process). Connections are
+      end-to-end QUIC TLS between endpoints; the relay forwards ciphertext.
+    - `PUT`/`GET /pkarr/{key}` is iroh's pkarr relay protocol, so the stock
+      `PkarrPublisher` and `PkarrResolver` work against `https://darkpyonix.dev/pkarr`.
+
+    Everything else (`/v1/...`) is the hub's own JSON API.
+
+    **Status per operation** follows SPEC §10: FR-H1 to FR-H4 are `Agreed`; FR-H5 is `Draft`
+    (the DNS provider is open); FR-H6 (sign-in) is out of the November scope and has no
+    operations here.
+
+    **Authentication (November scope).** Without sign-in, an account is identified by an
+    account token from `POST /v1/accounts`. Registering a device with that token returns a
+    device token for that device. Both are bearer tokens (`Authorization: Bearer <token>`);
+    where a stock iroh client cannot set headers (`GET /pkarr/{key}`), the same token may be
+    passed as the `token` query parameter. Tokens are stored hashed. A removed device's token
+    and key stop working at once.
   license:
     name: MIT
     url: https://github.com/DarkPyonix/darkpyonix/blob/main/LICENSE
 servers:
   - url: https://darkpyonix.dev
 security:
-  - accountToken: []
+  - bearer: []
 tags:
   - name: System
   - name: Accounts
-    description: Sign-in (FR-H6).
+    description: Account tokens (November scope; sign-in FR-H6 is later).
   - name: Devices
-    description: Machines registered to an account (FR-H1).
-  - name: Connectivity
-    description: Rendezvous for hole punching and the relay fallback (FR-H2, FR-H3).
+    description: iroh endpoints registered to an account (FR-H1).
+  - name: Directory
+    description: Signed iroh address records, iroh pkarr relay protocol (FR-H2).
+  - name: Relay
+    description: The iroh relay and its probes (FR-H3).
   - name: Shares
-    description: Public share links for ash (FR-H4).
-  - name: Certificates
-    description: HTTPS names for main servers (FR-H5).
+    description: Public share links and the ash viewer (FR-H4).
+  - name: Names
+    description: "`<name>.darkpyonix.dev` and ACME DNS-01 challenges (FR-H5, Draft)."
 
 paths:
   /health:
@@ -49,49 +66,68 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status]
+                required: [status, version]
                 properties:
                   status: {type: string, const: ok}
+                  version: {type: string}
 
-  /v1/auth/openai/start:
-    get:
+  /v1/accounts:
+    post:
       tags: [Accounts]
-      operationId: startOpenAiSignIn
-      summary: Begin sign-in with an OpenAI account
+      operationId: createAccount
+      summary: Create an account and its account token
       description: |
-        Draft. Redirects to OpenAI's authorization page. Whether OpenAI offers this sign-in to
-        third-party services, and on what terms, is PROJECT Q2.
+        If the operator configured a signup secret, it must be sent in `X-Hub-Signup-Secret`.
+        The account token is shown once; keep it on the main server.
       security: []
       parameters:
-        - name: redirect_uri
-          in: query
-          required: true
-          schema: {type: string, format: uri}
+        - name: X-Hub-Signup-Secret
+          in: header
+          required: false
+          schema: {type: string}
       responses:
-        "302":
-          description: Redirect to the identity provider.
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [account_id, account_token]
+                properties:
+                  account_id: {type: string, pattern: "^a_[0-9a-f]{16}$"}
+                  account_token: {type: string}
+        "403":
+          description: Signup secret missing or wrong.
 
-  /v1/auth/openai/callback:
-    get:
-      tags: [Accounts]
-      operationId: finishOpenAiSignIn
-      summary: Finish sign-in and issue an account token
-      security: []
-      parameters:
-        - {name: code, in: query, required: true, schema: {type: string}}
-        - {name: state, in: query, required: true, schema: {type: string}}
+  /v1/challenges:
+    post:
+      tags: [Devices]
+      operationId: createChallenge
+      summary: Issue a one-time registration challenge (valid 5 minutes)
+      description: Requires the account token.
       responses:
-        "302":
-          description: Redirect back to the client with a one-time code exchangeable for an account token.
+        "201":
+          description: The challenge to sign.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [challenge, expires_at]
+                properties:
+                  challenge: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  expires_at: {type: integer, description: Unix seconds.}
+        "401":
+          description: Missing or invalid account token.
 
   /v1/devices:
     get:
       tags: [Devices]
       operationId: listDevices
-      summary: Devices of the signed-in account
+      summary: Devices of the caller's account
+      description: Account token or a device token of the account.
       responses:
         "200":
-          description: Devices and their last-seen connectivity.
+          description: Devices, newest last. Removed devices are not listed.
           content:
             application/json:
               schema:
@@ -101,11 +137,17 @@ paths:
                   devices:
                     type: array
                     items: {$ref: "#/components/schemas/Device"}
+        "401":
+          description: Missing or invalid token.
     post:
       tags: [Devices]
       operationId: registerDevice
-      summary: Register a machine
-      description: The device proves possession of its private key by signing the hub's challenge.
+      summary: Register an iroh endpoint as a device of the account
+      description: |
+        Requires the account token. The device proves possession of its secret key by signing
+        the UTF-8 bytes of `darkpyonix-hub/v1/register\n<account_id>\n<challenge>` with its
+        ed25519 key (iroh `SecretKey::sign`). The challenge is consumed by this call whatever
+        the outcome.
       requestBody:
         required: true
         content:
@@ -113,156 +155,427 @@ paths:
             schema: {$ref: "#/components/schemas/DeviceRegistration"}
       responses:
         "201":
-          description: Registered.
+          description: Registered. The device token is shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, device_token]
+                properties:
+                  device: {$ref: "#/components/schemas/Device"}
+                  device_token: {type: string}
+        "400":
+          description: Malformed endpoint id, unknown/expired/used challenge, or bad signature.
+        "401":
+          description: Missing or invalid account token.
+        "409":
+          description: This endpoint id is already registered (or was removed; removed keys are not reused).
+
+  /v1/devices/{endpoint_id}:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+    get:
+      tags: [Devices]
+      operationId: getDevice
+      summary: One device of the caller's account
+      responses:
+        "200":
+          description: The device.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Device"}
-        "409":
-          description: The public key is already registered.
-
-  /v1/devices/{device_id}:
-    parameters:
-      - {name: device_id, in: path, required: true, schema: {type: string, pattern: "^d_[0-9a-f]{16}$"}}
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: No such device in the caller's account.
     delete:
       tags: [Devices]
       operationId: removeDevice
-      summary: Remove a device and revoke its credentials
+      summary: Remove a device; revokes its token and key and drops its relay connections
+      description: Requires the account token.
       responses:
         "204":
           description: Removed.
+        "401":
+          description: Missing or invalid account token.
+        "404":
+          description: No such device in the account.
 
-  /v1/rendezvous:
-    get:
-      tags: [Connectivity]
-      operationId: openRendezvous
-      summary: Signaling channel (WebSocket)
-      description: |
-        A device keeps one rendezvous socket open. Messages are JSON:
-
-        - `{"op":"offer","to":"d_…","candidates":[…],"pubkey":"…"}`: ask a peer to connect;
-          candidates include the reflexive address observed by the hub's UDP endpoint
-          (`darkpyonix.dev:3478`).
-        - `{"op":"answer","to":"d_…","candidates":[…]}`: the peer's reply.
-        - `{"op":"relay","session":"r_…"}`: hole punching failed; both sides open `/v1/relay/{session}`.
-
-        Session keys are derived end to end from the devices' keys; the hub never sees them.
-      responses:
-        "101":
-          description: Switching Protocols.
-
-  /v1/relay/{session_id}:
+  /v1/devices/{endpoint_id}/addresses:
     parameters:
-      - {name: session_id, in: path, required: true, schema: {type: string, pattern: "^r_[0-9a-f]{16}$"}}
+      - $ref: "#/components/parameters/EndpointId"
     get:
-      tags: [Connectivity]
+      tags: [Directory]
+      operationId: getDeviceAddresses
+      summary: The device's latest signed address record, decoded
+      description: Same data as `GET /pkarr/{key}`, as JSON. Same-account callers only.
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AddressRecord"}
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: No such device in the caller's account, or it has published nothing yet.
+
+  /pkarr/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The endpoint's public key in z-base-32 (52 characters), as iroh's pkarr client sends it.
+        schema: {type: string, pattern: "^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$"}
+    put:
+      tags: [Directory]
+      operationId: publishAddressRecord
+      summary: Publish a signed pkarr packet (iroh pkarr relay protocol)
+      description: |
+        Body: the pkarr relay payload, `signature (64) || timestamp_us big-endian (8) || DNS packet`.
+        The signature authenticates the request; no token is needed. Only registered,
+        non-removed devices are accepted, and only packets newer than the stored one.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "204":
+          description: Stored.
+        "400":
+          description: Malformed key or payload, or the signature does not verify.
+        "403":
+          description: The key is not a registered device.
+        "409":
+          description: Not newer than the stored packet.
+    get:
+      tags: [Directory]
+      operationId: resolveAddressRecord
+      summary: Fetch a device's signed pkarr packet (iroh pkarr relay protocol)
+      description: |
+        Requires a token of the same account, as a bearer header or the `token` query
+        parameter (for iroh's stock `PkarrResolver`, configure the relay URL as
+        `https://darkpyonix.dev/pkarr?token=<device token>`).
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: The pkarr relay payload; verify it with the key.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "400":
+          description: Malformed key.
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: Unknown key, another account's device, or nothing published.
+
+  /relay:
+    get:
+      tags: [Relay]
       operationId: openRelay
-      summary: Relay fallback (WebSocket of opaque ciphertext frames)
+      summary: iroh relay (WebSocket upgrade, iroh relay protocol)
+      description: |
+        Served by the `iroh-relay` crate. The relay handshake proves the client's endpoint id.
+        Admitted: registered, non-removed devices; or any endpoint presenting a valid guest
+        relay pass from `GET /v1/shares/{share_id}` as `Authorization: Bearer` or `?token=`.
+        Everything else is denied during the handshake.
+      security: []
       responses:
         "101":
           description: Switching Protocols.
+        "400":
+          description: Not a valid relay upgrade request.
+
+  /ping:
+    get:
+      tags: [Relay]
+      operationId: relayProbe
+      summary: HTTPS latency probe used by iroh's net report
+      security: []
+      responses:
+        "200":
+          description: Empty.
+
+  /generate_204:
+    get:
+      tags: [Relay]
+      operationId: captivePortalProbe
+      summary: Captive portal check used by iroh
+      description: Echoes `X-Iroh-Challenge` as `X-Iroh-Response: response <challenge>`. Also served on plain HTTP port 80.
+      security: []
+      responses:
+        "204":
+          description: No content.
 
   /v1/shares:
     post:
       tags: [Shares]
       operationId: publishShare
-      summary: Publish a share link for a kernel on one of the account's devices
+      summary: Publish a share hosted by the calling device
+      description: Requires the device token of the hosting device (the dedicated manager's machine).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [device_id, share_id]
+              required: [share_id]
               properties:
-                device_id: {type: string}
                 share_id: {type: string, pattern: "^s_[0-9a-f]{16}$", description: The share created on the dedicated manager.}
       responses:
         "201":
-          description: The public link. The share token travels in the URL fragment and never reaches the hub.
+          description: Published. The share token travels in the URL fragment and never reaches the hub.
           content:
             application/json:
               schema:
                 type: object
-                required: [url]
+                required: [share_id, url]
                 properties:
+                  share_id: {type: string}
                   url: {type: string, example: "https://darkpyonix.dev/s/s_0f1e2d3c4b5a6978"}
+        "400":
+          description: Malformed share id.
+        "401":
+          description: Missing or invalid device token.
+        "409":
+          description: The share id is published by another device.
 
   /v1/shares/{share_id}:
     parameters:
-      - {name: share_id, in: path, required: true, schema: {type: string, pattern: "^s_[0-9a-f]{16}$"}}
+      - $ref: "#/components/parameters/ShareId"
     get:
       tags: [Shares]
       operationId: resolveShare
-      summary: Resolve a share link to a route ash can open
+      summary: Resolve a share to its hosting device, with a guest relay pass
       security: []
       responses:
         "200":
-          description: How to reach the device that hosts the shared kernel.
+          description: How to reach the hosting device. ash dials `endpoint_id` via `relay_url` with `relay_token`.
           content:
             application/json:
               schema:
                 type: object
-                required: [device_id, route]
+                required: [share_id, endpoint_id, relay_url, relay_token, relay_token_expires_at]
                 properties:
-                  device_id: {type: string}
-                  route: {type: string, enum: [direct, relay]}
-                  endpoint: {type: string, format: uri}
+                  share_id: {type: string}
+                  endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  relay_url: {type: string, format: uri, description: "The device's published home relay, or this hub's relay."}
+                  relay_token: {type: string, description: Guest relay pass (10 minutes).}
+                  relay_token_expires_at: {type: integer, description: Unix seconds.}
         "404":
-          description: Unknown or unpublished share.
+          description: Unknown or unpublished share, or its device was removed.
     delete:
       tags: [Shares]
       operationId: unpublishShare
-      summary: Remove a published share link
+      summary: Remove a published share
+      description: The hosting device's token or the account token.
       responses:
         "204":
           description: Removed.
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: No such share in the caller's account.
 
-  /v1/certificates:
-    post:
-      tags: [Certificates]
-      operationId: requestCertificateName
-      summary: Reserve `<name>.darkpyonix.dev` for a main server and answer its ACME DNS-01 challenge
+  /s/{share_id}:
+    parameters:
+      - $ref: "#/components/parameters/ShareId"
+    get:
+      tags: [Shares]
+      operationId: openShareLink
+      summary: The page a share link opens (ash viewer; a placeholder until ash ships)
+      description: The token in the URL fragment stays in the browser.
+      security: []
+      responses:
+        "200":
+          description: HTML.
+          content:
+            text/html: {}
+        "404":
+          description: Unknown or unpublished share.
+
+  /ash/:
+    get:
+      tags: [Shares]
+      operationId: getAshViewer
+      summary: The official ash viewer (static files; a placeholder until ash ships)
+      security: []
+      responses:
+        "200":
+          description: HTML.
+          content:
+            text/html: {}
+
+  /v1/names:
+    get:
+      tags: [Names]
+      operationId: listNames
+      summary: Names reserved by the caller's account
+      responses:
+        "200":
+          description: Names.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [names]
+                properties:
+                  names:
+                    type: array
+                    items: {$ref: "#/components/schemas/Name"}
+        "401":
+          description: Missing or invalid token.
+
+  /v1/names/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    put:
+      tags: [Names]
+      operationId: reserveName
+      summary: Reserve `<name>.darkpyonix.dev` for the calling main server
+      description: Requires the device token of a device with role `main_server`.
+      responses:
+        "200":
+          description: Already reserved by this device.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Name"}
+        "201":
+          description: Reserved.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Name"}
+        "400":
+          description: Malformed or reserved word.
+        "401":
+          description: Missing or invalid device token.
+        "403":
+          description: The caller is not a main server.
+        "409":
+          description: Taken by another device.
+    delete:
+      tags: [Names]
+      operationId: releaseName
+      summary: Release a name (and clear its challenge records)
+      responses:
+        "204":
+          description: Released.
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: Not reserved by the caller's account.
+
+  /v1/names/{name}/acme-challenge:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    put:
+      tags: [Names]
+      operationId: setAcmeChallenge
+      summary: Publish `_acme-challenge.<name>.darkpyonix.dev` TXT values for ACME DNS-01
+      description: |
+        The main server runs its own ACME client and keeps its private key; the hub only
+        publishes the TXT values (SPEC FR-H5 option A). Replaces any previous values.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [device_id, name]
+              required: [values]
               properties:
-                device_id: {type: string}
-                name: {type: string, pattern: "^[a-z0-9-]{3,32}$"}
-                acme_txt: {type: string, description: The `_acme-challenge` TXT value the device's ACME client needs.}
+                values:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  items: {type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Base64url SHA-256 key authorization digest.}
       responses:
-        "201":
-          description: The name is reserved and the TXT record is published.
-        "409":
-          description: The name is taken.
+        "204":
+          description: Published.
+        "400":
+          description: Malformed values.
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: Not reserved by the calling device.
+        "502":
+          description: The DNS provider refused the change.
+    delete:
+      tags: [Names]
+      operationId: clearAcmeChallenge
+      summary: Remove the challenge TXT values
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: Not reserved by the calling device.
+        "502":
+          description: The DNS provider refused the change.
 
 components:
   securitySchemes:
-    accountToken:
+    bearer:
       type: http
       scheme: bearer
-      description: Account token issued after sign-in, or a device token for device-originated calls.
+      description: Account token or device token, as each operation states.
+  parameters:
+    EndpointId:
+      name: endpoint_id
+      in: path
+      required: true
+      description: iroh endpoint id, lowercase hex of the ed25519 public key.
+      schema: {type: string, pattern: "^[0-9a-f]{64}$"}
+    ShareId:
+      name: share_id
+      in: path
+      required: true
+      schema: {type: string, pattern: "^s_[0-9a-f]{16}$"}
+    Name:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[a-z0-9]([a-z0-9-]{1,30}[a-z0-9])$"}
   schemas:
     Device:
       type: object
-      required: [device_id, name, role, public_key, created_at]
+      required: [endpoint_id, name, role, created_at, online]
       properties:
-        device_id: {type: string, pattern: "^d_[0-9a-f]{16}$"}
+        endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
         name: {type: string}
         role: {type: string, enum: [main_server, computer]}
-        public_key: {type: string, description: Ed25519 public key, base64.}
-        created_at: {type: string, format: date-time}
-        last_seen: {type: [string, "null"], format: date-time}
-        online: {type: boolean}
+        created_at: {type: integer, description: Unix seconds.}
+        last_seen: {type: [integer, "null"], description: Unix seconds of the last relay connection or address publish.}
+        online: {type: boolean, description: Connected to this hub's relay now.}
     DeviceRegistration:
       type: object
-      required: [name, role, public_key, challenge, signature]
+      required: [endpoint_id, name, role, challenge, signature]
       properties:
-        name: {type: string, maxLength: 64}
+        endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+        name: {type: string, minLength: 1, maxLength: 64}
         role: {type: string, enum: [main_server, computer]}
-        public_key: {type: string}
         challenge: {type: string}
-        signature: {type: string}
+        signature: {type: string, pattern: "^[0-9a-f]{128}$", description: Hex ed25519 signature.}
+    AddressRecord:
+      type: object
+      required: [endpoint_id, relay_urls, direct_addresses, published_at_us, signed_packet]
+      properties:
+        endpoint_id: {type: string}
+        relay_urls: {type: array, items: {type: string}}
+        direct_addresses: {type: array, items: {type: string, description: "ip:port"}}
+        published_at_us: {type: integer, description: The packet's signed timestamp, microseconds since the epoch.}
+        signed_packet: {type: string, description: "The pkarr relay payload, base64url without padding, for end-to-end verification."}
+    Name:
+      type: object
+      required: [name, fqdn, endpoint_id]
+      properties:
+        name: {type: string}
+        fqdn: {type: string, example: "studio.darkpyonix.dev"}
+        endpoint_id: {type: string}
