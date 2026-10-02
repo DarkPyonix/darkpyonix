@@ -34,8 +34,17 @@ def make_run(path, run_id=None, mode="all", cells=None, params=None):
     return run
 
 
+def _source_sha(source):
+    try:
+        from darkpyonix.format._parser import source_sha256
+    except ImportError:
+        return sha(source)
+    return source_sha256(source)
+
+
 def add_cell(run, index, source, outputs=(), type="code", cell_id=None, status="ok", count=None):
-    rec = CellRecord(index, type, source, sha(source), title="cell %d" % index, cell_id=cell_id)
+    # Records carry the parser's hash (FORMAT §2.4), as the executor will record it.
+    rec = CellRecord(index, type, source, _source_sha(source), title="cell %d" % index, cell_id=cell_id)
     rec.started_at = now_iso()
     rec.outputs.extend(outputs)
     rec.execution_count = count if count is not None else index
