@@ -38,10 +38,9 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [CLAUDE.md](CLAUDE.md)에
 | M2 | 매니저·CLI·런타임 API | 2026-10-17 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
 | M3 | 전용 매니저와 공유 | 2026-10-24 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
 | M4 | 허브 | 2026-11-20 | FR-H1~H5, NFR-H1. OpenAI 로그인(FR-H6)은 허브가 아니라 ember server에서 함(Q2) | Q1을 2026-10-24까지 결정, Ember M5와 함께 |
-| M5 | 기억으로서의 커널 | 11월 범위 밖 | 네임스페이스 체크포인트·복원 설계(INTENT 1.2 D) | M2 |
 
 **11월 범위에서 뺀 것과 이유**
-- M5 체크포인트·복원: 살아 있는 네임스페이스와 실행 기록(`__runs__`)만으로도 에이전트가 상태를 조회할 수 있습니다(FR-K6, FR-R3). 복원은 pickle 없이 설계해야 해서(INTENT §4) 연구가 먼저 필요합니다.
+- (변수 체크포인트·복원은 범위가 아닙니다. 변수는 실행 기록에 남은 코드로 재현합니다. INTENT 1.2 D.)
 - `parallel`/`concurrent`와 interop 셀의 실행 의미(Q7, Q8): 문법은 받아들이고 보존하지만, 실행 의미는 이슈 #5와 #7의 결정이 먼저입니다.
 - FR-H6 허브의 OpenAI 로그인: 원격 호스팅 서비스는 OpenAI 관심 신청서와 승인이 필요하므로 11월에 넣지 않습니다. 사용자 플랜 사용은 ember server(로컬 호스팅)에서 합니다(Q2).
 
@@ -51,7 +50,7 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [CLAUDE.md](CLAUDE.md)에
 
 | ID | 질문 | 상태 |
 |---|---|---|
-| Q1 | 컴퓨터 사이 P2P 전송 | 재검토(2026-10-03). 사용자 지적: tailcat은 모바일에서 앱(런타임)이 둘이 되고, "직접 구현이 몇 달"이라는 리더 판단은 틀렸다. 비교: **tailcat**(Go, 사이드카 또는 gomobile → Rust 앱 안에 런타임 둘, iOS는 별도 프로세스 불가) / **[iroh](https://github.com/n0-computer/iroh) 1.0**(Rust, 같은 프로세스, QUIC 홀펀칭 직결 약 90%, 릴레이 자체 운영, MIT·Apache-2.0, 모바일 바인딩) / **[rustunnel](https://github.com/joaoh82/rustunnel)**(Rust, TLS WebSocket 릴레이형 터널·서브도메인·HTTPS, 홀펀칭 없음, **AGPL-3.0**) / **직접 구현**(UDP 반사·홀펀칭·Noise 암호화·릴레이 폴백. 릴레이가 안전망이 되므로 몇 주 규모, 대칭 NAT·포트 매핑·로밍 품질은 점진적). 리더 권장: 전송은 iroh로 시작하고 darkpyonix.dev가 iroh-relay와 주소 디렉터리를 운영, 전송 계층은 인터페이스 뒤에 둬서 직접 구현으로 바꿀 수 있게 함. rustunnel은 허브의 공개 HTTPS 엣지(FR-H5) 참고 구현으로만 검토(AGPL이라 클라이언트에 링크하지 않음). 사용자 확인 대기 |
+| Q1 | 컴퓨터 사이 P2P 전송 | 재검토(2026-10-03). 사용자 지적: tailcat은 모바일에서 앱(런타임)이 둘이 되고, "직접 구현이 몇 달"이라는 리더 판단은 틀렸다. 비교: **tailcat**(Go, 사이드카 또는 gomobile → Rust 앱 안에 런타임 둘, iOS는 별도 프로세스 불가) / **[iroh](https://github.com/n0-computer/iroh) 1.0**(Rust, 같은 프로세스, QUIC 홀펀칭 직결 약 90%, 릴레이 자체 운영, MIT·Apache-2.0, 모바일 바인딩) / **[rustunnel](https://github.com/joaoh82/rustunnel)**(Rust, TLS WebSocket 릴레이형 터널·서브도메인·HTTPS, 홀펀칭 없음, **AGPL-3.0**) / **직접 구현**(UDP 반사·홀펀칭·Noise 암호화·릴레이 폴백. 릴레이가 안전망이 되므로 몇 주 규모, 대칭 NAT·포트 매핑·로밍 품질은 점진적). 리더 권장: 전송은 iroh로 시작하고 darkpyonix.dev가 iroh-relay와 주소 디렉터리를 운영, 전송 계층은 인터페이스 뒤에 둬서 직접 구현으로 바꿀 수 있게 함. rustunnel은 허브의 공개 HTTPS 엣지(FR-H5) 참고 구현으로만 검토(AGPL이라 클라이언트에 링크하지 않음). **결정(2026-10-03, 조건부)**: 사용자 "P2P를 iroh로 가는건 일단 허용하는데 그게 품질이 별로면 아예 직접 구현하는거도 고민해봐". 품질 기준(직결 성공률, 지연, 수립·전환 시간, 모바일 배터리)은 Ember SPEC에 숫자로 두고, 미달이면 직접 구현으로 바꿉니다. 그래서 전송 계층은 인터페이스 뒤에 둡니다 |
 | Q2 | OpenAI 계정 로그인과 ChatGPT 플랜 사용량 | 조사 완료(2026-10-03). "Sign in with ChatGPT"(OAuth 2.0 + OIDC, PKCE, 루프백 리디렉트)로 오픈소스·로컬 호스팅 앱은 사용자의 ChatGPT 플랜으로 Responses API를 쓸 수 있습니다(`store:false`, `stream:true` 필수, 앱별 주간 상한). 유료·원격 호스팅 앱은 관심 신청서가 필요합니다. 그래서 플랜 사용은 사용자가 직접 띄운 ember server에서 하고, darkpyonix.dev 허브는 이 경로를 쓰지 않습니다 |
 | Q3 | Windows 루프백 멀티캐스트의 신뢰성. 안 되면 Windows 기본값을 등록 파일 발견으로 둘지 | M1에서 측정 |
 | Q4 | 기존 Jupyter 도구와의 호환(Jupyter Server REST 흉내)이 필요한지 | 보류 |
