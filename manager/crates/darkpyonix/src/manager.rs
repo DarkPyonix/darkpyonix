@@ -38,26 +38,45 @@ impl From<&ManagerArgs> for ManagerOpts {
     }
 }
 
-/// INTEGRATION POINT (leader): serve the manager API until shutdown.
+/// Serve the manager API until shutdown (INTENT D10, SPEC FR-C1, FR-M3, FR-M4).
 ///
-/// Wire `dpx_kernel::RealBackend` into `dpx_server::serve` here. Contract the CLI relies on
-/// (SPEC FR-C1, FR-M3, PROTOCOL §1):
-/// * listen on `opts.host:opts.port` (port 0 = any free port);
-/// * once `/health` answers, write `<DARKPYONIX_HOME>/managers/<own pid>.json`, mode 0600,
-///   atomically (write a temp file, then rename) with
-///   `{"url": "http://127.0.0.1:<port>", "token": "<master token>", "mode": "ephemeral"|"dedicated",
-///     "pid": <own pid>, "started_at": "<RFC 3339>"}` — see `discovery::ManagerRecord`;
-///   the CLI that spawned it polls for exactly that file name for 5 s;
-/// * ephemeral: exit after `idle_timeout` seconds with no request and no open SSE stream,
-///   removing the registry file and leaving every kernel running;
-/// * never read stdin or write to stdout (the CLI spawns it with both closed; stderr goes
-///   to `<DARKPYONIX_HOME>/managers/spawn.log`).
-///
-/// It runs on its own Tokio runtime (build a multi-thread one here); `main` calls it before
-/// any client-side runtime exists. Return `Err(message)` to exit 1 with that message.
+/// `dpx_kernel::RealBackend` (discovery, DKP/1, the embedded kernel) behind
+/// `dpx_server::serve` (the OpenAPI over HTTP/SSE, TLS, proxy). Ephemeral managers bind
+/// loopback and write `<DARKPYONIX_HOME>/managers/<pid>.json` (0600) once listening; they
+/// exit after `idle_timeout` and never touch kernels. Never reads stdin or writes stdout.
 pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
-    let _ = opts;
-    Err("manager not wired yet: `darkpyonix manager` awaits dpx-kernel::RealBackend + dpx-server::serve".into())
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("cannot start runtime: {e}"))?;
+    rt.block_on(async move {
+        let backend = dpx_kernel::RealBackend::from_env()
+            .map_err(|e| format!("cannot start kernel backend: {e}"))?;
+        let home = dpx_server::default_home();
+        let mut config = match opts.mode {
+            Mode::Ephemeral => dpx_server::ServerConfig::ephemeral(home),
+            Mode::Dedicated => dpx_server::ServerConfig::dedicated(home, opts.host.clone(), opts.port),
+        };
+        if opts.mode == Mode::Ephemeral {
+            config.port = opts.port;
+        }
+        config.idle_timeout = opts.idle_timeout.map(std::time::Duration::from_secs);
+        if let Ok(token) = std::env::var("DARKPYONIX_MANAGER_TOKEN") {
+            if !token.is_empty() {
+                config.master_token = Some(token);
+            }
+        }
+        let dedicated_random_token = opts.mode == Mode::Dedicated && config.master_token.is_none();
+        let handle = dpx_server::serve(config, std::sync::Arc::new(backend))
+            .await
+            .map_err(|e| format!("cannot serve: {e}"))?;
+        eprintln!("darkpyonix manager listening on {}", handle.url);
+        if dedicated_random_token {
+            eprintln!("master token (shown once; set DARKPYONIX_MANAGER_TOKEN to fix it): {}", handle.token);
+        }
+        dpx_server::run_until_signal(handle).await;
+        Ok(())
+    })
 }
 
 #[cfg(test)]

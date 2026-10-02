@@ -13,7 +13,9 @@ path = "src/main.rs"
 dpx-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1", features = ["rt", "macros", "signal", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "signal", "time", "sync"] }
+dpx-kernel.workspace = true
+dpx-server.workspace = true
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 sha2 = "0.10"
