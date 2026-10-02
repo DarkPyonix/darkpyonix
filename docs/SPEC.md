@@ -116,7 +116,17 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 | `__runs__.list(limit=20)` | 최신순 요약 목록 |
 | `__runs__.dir` | 기록 폴더 경로(str) |
 
-- 수용 기준: 두 번째 실행의 셀에서 `__runs__.latest["metadata"]["darkpyonix"]["run_id"]`가 첫 번째 실행의 ID입니다. 반환값은 `json.dumps`로 직렬화됩니다.
+목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다.
+- `run.run_id`, `run.status`, `run.params`, `run.cells`
+- `run.cells[i].outputs`, `run.cells[i].text`: 스트림 출력 문자열을 이어 붙인 것
+- `run.cells[i].result`: `execute_result`의 `text/plain`
+- `run.cell("cell_id 또는 제목")`
+- `run.path`
+- `run.notebook`: 원본 nbformat dict
+- 수용 기준:
+  - 두 번째 실행의 셀에서 `__runs__.latest.run_id`가 첫 번째 실행의 ID입니다.
+  - `__runs__.latest.cells[1].text`가 그 셀의 표준 출력입니다.
+  - 반환값은 `json.dumps`로 직렬화됩니다.
 - 테스트: `test_fr_r3_runs_magic_exposes_logs_as_json`
 
 ### FR-R4 기록과 셀 맵핑 — `Agreed`
@@ -234,9 +244,53 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 | `viewer1` | ✓ | | | |
 | `viewer2` | ✓ | ✓ | | |
 | `viewer3` | ✓ | ✓ | ✓ | |
+| `editor` | ✓ (편집·잠금 포함, FR-S8) | ✓ | ✓ | |
 | `admin`(마스터) | ✓ | ✓ | ✓ | ✓ |
 
+작업별 최소 권한: 커널·실행 기록 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다.
 - 테스트: `test_fr_a3_permission_matrix`
+
+## 10a. 협업 문서 (S)
+
+한 커널(=파일)에 여러 클라이언트가 동시에 붙습니다. VS Code 확장, IntelliJ, ash, Ember 대화 화면, 에이전트가 함께 붙을 수 있습니다. 2025 설계의 셀 동기화, 셀 잠금, 포커스, 실행 알림, 알람을 이어받습니다(`설계초안/`의 WS 명세). 커널이 이 상태를 들고 있습니다. 매니저는 언제든 사라질 수 있고, 같은 파일에 서로 다른 매니저(로컬 임시 매니저와 전용 매니저)로 붙은 클라이언트도 같은 상태를 봐야 하기 때문입니다.
+
+### FR-S1 공유 문서 상태 — `Agreed`
+커널은 파일을 파싱한 문서(셀 목록)를 메모리에 두고 문서 버전 `doc_version`(편집마다 1 증가)을 관리합니다. 셀마다 커널 수명 동안 바뀌지 않는 `cell_id`를 둡니다. 파일에 `# @id`가 있으면 그 값을 쓰고, 없으면 `c_<hex>`를 만들되 파일에는 쓰지 않습니다. 첫 동기화 스냅숏(`GET /kernels/{id}/document`)에는 셀(`cell_id`, 셀별 `version`, 소스, 최신 출력), 잠금, 접속자, `doc_version`, 그리고 그 스냅숏 직후의 이벤트 `seq`가 함께 들어 있습니다. 클라이언트는 그 `seq`부터 이벤트를 구독하면 빠짐없이 이어집니다.
+- 수용 기준: 두 클라이언트가 같은 스냅숏을 받은 뒤 한쪽이 편집하면, 다른 쪽은 이벤트만으로 같은 문서 상태에 도달합니다(셀 순서, 소스, 버전이 같음).
+- 테스트: `test_fr_s1_snapshot_plus_events_converge`
+
+### FR-S2 셀 편집 — `Agreed`
+셀 생성(위치는 `after`/`before` `cell_id` 또는 끝, 타입, 소스, 메타데이터), 소스·타입·메타데이터 수정, 삭제, 이동을 지원합니다. 수정은 `base_version`(그 셀의 버전)을 받고, 다르면 `409 conflict`와 현재 셀을 돌려줍니다. 다른 클라이언트가 잠근 셀의 수정·삭제는 `409 locked`입니다. 편집마다 `doc.cell.*` 이벤트를 모든 구독자에게 보내고, 이벤트에는 누가 했는지(`by`)가 들어갑니다.
+- 수용 기준: 버전이 맞지 않는 수정은 거절되고 문서는 바뀌지 않습니다. 생성·수정·삭제·이동이 이벤트로 퍼집니다.
+- 테스트: `test_fr_s2_edit_ops_and_version_conflict`
+
+### FR-S3 셀 잠금 — `Agreed`
+편집을 시작하는 클라이언트는 그 셀을 잠급니다(2025 설계의 `start_typing`). 잠금은 셀마다 하나이고 `locked_by`(클라이언트), 사용자 이름, `locked_at`, `last_activity`를 가집니다. 잠근 클라이언트가 수정할 때마다 `last_activity`가 갱신됩니다. 잠금은 세 경우에 풀립니다. 잠근 클라이언트가 해제할 때(최종 소스를 함께 보낼 수 있음, 2025 `cell_unlocked_with_code`), 3분 동안 활동이 없을 때, 그 클라이언트가 접속을 끊을 때입니다. 잠금과 해제는 `doc.lock`/`doc.unlock` 이벤트로 퍼집니다.
+- 수용 기준: 잠긴 셀을 다른 클라이언트가 잠그면 `409 locked`와 `locked_by`를 받습니다. 3분 무활동 뒤에는 자동으로 풀립니다(테스트에서는 시간을 줄임). 접속이 끊긴 클라이언트의 잠금도 풀립니다.
+- 테스트: `test_fr_s3_lock_exclusive_idle_release_and_disconnect`
+
+### FR-S4 접속자, 포커스, 커서 — `Agreed`
+클라이언트는 접속할 때 `client_id`(기기마다 고유)와 `nickname`(기기 이름, 2025 `?nickname=`)을 알립니다. 사용자 이름과 아바타는 토큰에서 정해지고, 없으면 클라이언트가 준 값을 씁니다. 접속자 목록은 다음을 담습니다: 사용자, 기기, 권한, 포커스한 셀(`focused_cell_id`, `focused_at`), 커서(`cell_id`, `line`, `column`, 선택 범위). 포커스, 블러, 커서 변경은 `presence.update` 이벤트로 퍼집니다(커서는 클라이언트마다 초당 최대 20회로 합칩니다). 이벤트 스트림이 끊기고 30초가 지나면 그 클라이언트는 `presence.leave`가 됩니다.
+- 테스트: `test_fr_s4_presence_focus_cursor_and_leave`
+
+### FR-S5 디스크 파일과의 동기화 — `Agreed`
+- 클라이언트 편집은 300ms 디바운스 뒤 파일에 원자적으로 저장합니다(FORMAT 직렬화, 손대지 않은 셀은 바이트 그대로).
+- 바깥에서 파일이 바뀌면(에이전트의 Edit 도구, `git checkout`, 다른 편집기) 커널이 1초 안에 알아채고 다시 파싱합니다. 셀을 `cell_id` → `source_sha256` → 순서로 맞추고 `doc.reloaded` 이벤트를 보냅니다.
+- 그때 잠긴 셀이 바깥에서도 바뀌었으면, 잠근 쪽의 내용을 지우지 않습니다. 그 셀을 `conflict`로 표시하고 두 버전을 모두 이벤트에 담습니다. 잠근 클라이언트가 해제하거나 다시 수정하면 충돌이 풀립니다.
+- 수용 기준: 커널이 붙어 있는 동안 파일을 밖에서 고치면 모든 클라이언트에 반영됩니다. 클라이언트 편집이 파일에 저장되고, 고치지 않은 셀의 바이트는 그대로입니다.
+- 테스트: `test_fr_s5_external_edit_reloads_and_locked_cell_conflicts`, `test_fr_s5_client_edit_is_saved_byte_exact`
+
+### FR-S6 실행한 사람 표시 — `Agreed`
+`run.queued`, `run.started`, `run.finished`, `cell.*` 이벤트와 실행 기록 메타데이터에 실행을 요청한 클라이언트(`started_by`: client_id, 사용자, 기기)를 넣습니다. 인터럽트하면 `interrupted_by`도 넣습니다(2025 `execution_started.started_by`, `execution_interrupted.interrupted_by`). 셀을 실행하는 요청에는 `cell_ids`를 쓸 수 있습니다(인덱스 `cells`와 둘 중 하나).
+- 테스트: `test_fr_s6_runs_are_attributed`
+
+### FR-S7 알람 — `Agreed`
+SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, 웹훅 대체)를 위해 롱폴링을 둡니다. `GET /kernels/{id}/runs/{run_ref}/wait?timeout=`는 그 실행이 끝나면 바로, 아니면 `timeout`(기본 60초, 최대 300초) 뒤에 돌려줍니다. 응답은 끝났을 때 실행 요약, 아직이면 `status: running`과 진행 정보이고, 다시 부를 때 쓸 `next` 정보가 들어 있습니다(2025 `executions/{cell_id}/wait`의 timeout·재폴링 모델). 실행이 끝나면 `run.finished` 이벤트가 모든 구독자에게 가므로, Ember는 이 이벤트로 휴대폰 푸시를 보냅니다.
+- 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`
+
+### FR-S8 권한 — `Agreed`
+셀 편집(FR-S2)과 잠금(FR-S3)은 `editor` 이상만 할 수 있습니다. `editor`는 `viewer3`(실행 가능)에 셀 편집을 더한 공유 권한이고, 2025 설계의 `user_permission: "write"`에 해당합니다. 접속자 표시와 포커스(FR-S4)는 `viewer1`부터 할 수 있습니다. FR-A3 표에 `editor`를 더합니다.
+- 테스트: `test_fr_a3_permission_matrix` (FR-A3과 공유)
 
 ## 10. 허브 (H)
 
@@ -285,7 +339,7 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 커널의 출력이 매니저 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함).
 
 ### NFR-M3 문서와 코드의 일치 — `Agreed`
-매니저가 내는 OpenAPI 스키마의 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 테스트가 비교합니다.
+매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
 
 ### NFR-H1 종단 간 암호화 — `Draft`
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이의 세션 키는 허브를 거치지 않고 합의합니다.

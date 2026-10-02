@@ -46,7 +46,7 @@
   "pid": 41234, "port": 53122, "status": "busy",
   "run_id": "20261003-142233-a1f0",
   "python": {"version": "3.11.9", "implementation": "CPython", "executable": "/usr/bin/python3.11"},
-  "dkp_kernel_version": "0.1.0", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
+  "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
 }
 ```
 
@@ -163,3 +163,34 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 ```
 
 커널은 `repr`를 `reprlib`로 200자까지만 만듭니다. `shape`·`dtype`·`len`은 읽을 수 있을 때만 채웁니다. 이 값들을 만들면 사용자 코드(`__repr__`, 프로퍼티)가 실행되므로, 셀이 실행 중일 때는 다른 스레드에서 부르지 않도록 `name`과 `type`만 채우고 나머지는 `null`로 둡니다. `_`로 시작하는 이름, 모듈, 커널이 넣은 이름(`__runs__`, `darkpyonix`)은 뺍니다.
+
+## 4. 협업 문서 (SPEC §10a)
+
+커널은 파일의 공유 문서 상태(셀, 셀별 버전, 잠금, 접속자)를 들고 있습니다. 아래 메서드와 이벤트는 §3과 같은 채널을 씁니다. 모든 편집 메서드는 `client`를 받습니다. `client`는 `{client_id, nickname, user, avatar?, permission}`이고, 매니저가 토큰에서 채워 넘깁니다.
+
+| method | params | result |
+|---|---|---|
+| `doc.snapshot` | `{}` | `{doc_version, seq, cells:[{cell_id, index, type, title, metadata, source, source_sha256, version, lock?, conflict?}], presence:[Presence]}`. `seq`는 이 스냅숏 직후의 이벤트 번호 |
+| `doc.cell.create` | `client, after?: cell_id, before?: cell_id, type, source, metadata?` | `{cell}` |
+| `doc.cell.update` | `client, cell_id, base_version, source?, type?, metadata?` | `{cell}`. 버전이 다르면 `conflict`, 다른 클라이언트가 잠갔으면 `locked` |
+| `doc.cell.delete` | `client, cell_id, base_version` | `{deleted: true}` |
+| `doc.cell.move` | `client, cell_id, to_index` | `{cell}` |
+| `doc.lock` | `client, cell_id` | `{lock}`. 이미 잠겨 있으면 `locked`, `data.locked_by` |
+| `doc.unlock` | `client, cell_id, source?, base_version?` | `{cell}`. 최종 소스를 함께 보내면 저장 후 해제 |
+| `presence.update` | `client, focused_cell_id?, cursor?: {cell_id, line, column, selection?: [[l,c],[l,c]]}` | `{}` |
+| `presence.leave` | `client` | `{}` |
+| `runs.wait` | `run_id \| "latest" \| "current", timeout` | 끝나면 실행 요약, 아니면 `{status: "running", progress?}` |
+
+오류 코드 추가: `conflict`, `locked`, `forbidden`.
+
+| event type | data |
+|---|---|
+| `doc.cell.created` / `doc.cell.updated` / `doc.cell.deleted` / `doc.cell.moved` | `{doc_version, cell, by}` (`deleted`는 `cell_id`만) |
+| `doc.lock` / `doc.unlock` | `{doc_version, cell_id, lock?, by, reason?: "released"\|"idle"\|"disconnected"}` |
+| `doc.reloaded` | `{doc_version, cells, cause: "external"}`. 바깥 편집으로 다시 파싱한 뒤 보내는 전체 셀 목록 |
+| `doc.conflict` | `{cell_id, local: {source, version, by}, disk: {source}}` |
+| `presence.update` / `presence.leave` | `{client_id, nickname, user, avatar?, focused_cell_id?, focused_at?, cursor?}` |
+
+`Presence = {client_id, nickname, user, avatar?, permission, focused_cell_id?, focused_at?, cursor?, last_seen}`.
+
+`run.queued`, `run.started`, `run.finished`, `cell.started`, `cell.finished` 이벤트의 `data`에는 `started_by`(client_id, user, nickname)가 들어갑니다. 인터럽트로 끝난 실행에는 `interrupted_by`가 더해집니다(SPEC FR-S6). `run` 메서드는 `cells` 대신 `cell_ids`를 받을 수 있습니다.
