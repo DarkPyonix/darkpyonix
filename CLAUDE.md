@@ -88,6 +88,17 @@ Never introduce anything that violates these. If a task seems to require it, sto
    through `DARKPYONIX_HOME` instead of writing to the real home directory.
 4. If a task seems to need a path outside the repository, ask first.
 
+## Sub-agents and builds
+
+- **Sub-agents never run Rust builds** (`cargo build/test/clippy/run`, or anything that compiles
+  Rust such as `maturin`). They write code and tests, research, and write documents. The session
+  that spawned them builds and tests, one cargo invocation at a time with `CARGO_BUILD_JOBS=2`,
+  or pushes the branch and lets GitHub Actions run it. (User rule, 2026-10-03.)
+- Never share one `CARGO_TARGET_DIR` between worktrees: path crates from different worktrees
+  overwrite each other's artifacts.
+- Python test runs are allowed in sub-agents; keep them inside `.scratch/` and kill every process
+  they start.
+
 ## Git
 
 - Branches: `develop` (integration, where work lands) and `main` (protected, default).
