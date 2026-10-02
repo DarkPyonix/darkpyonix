@@ -218,9 +218,9 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ## 9. 인증과 공유 (A)
 
-### FR-A1 커널 인증 — `Agreed`
+### FR-A1 커널 인증 — `Done`
 PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음 쓰는 쪽이 0600으로 원자적으로 만듭니다.
-- 테스트: `test_fr_a1_wrong_key_is_rejected`
+- 테스트: `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`
 
 ### FR-A2 매니저 토큰 — `Agreed`
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`)와 공유 링크만 `?token=`을 받습니다. `/health`만 인증 없이 열립니다.
@@ -292,14 +292,19 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 
 ## 12. 프로토콜 요구사항
 
-### PR-1 DKP/1 프레임 — `Agreed`
+### PR-1 DKP/1 프레임 — `Done`
 PROTOCOL §3.1. 64 MiB를 넘는 프레임은 거절합니다.
+- 테스트: `test_pr_1_oversized_frame_is_refused`, `test_pr_1_frame_too_large_closes_connection`
 
-### PR-2 핸드셰이크 — `Agreed`
+### PR-2 핸드셰이크 — `Done`
 PROTOCOL §3.2. 5초 제한, 상수 시간 비교.
+- 테스트: `test_pr_2_handshake_times_out`
 
-### PR-3 이벤트 재전송 — `Agreed`
-PROTOCOL §3.4. 링 버퍼와 `replay_truncated`.
+### PR-3 이벤트 재전송 — `Done`
+PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있어도 이벤트를 내는 쪽은 막히지 않습니다(클라이언트별 송신 버퍼, 64 MiB를 넘으면 그 클라이언트를 끊음).
+- 테스트: `test_pr_3_subscribe_replays_since_and_streams_live`, `test_pr_3_replay_truncated_when_ring_overflows`, `test_pr_3_ring_is_bounded_by_bytes`, `test_slow_subscriber_does_not_block_append`
+- 측정 기록: 이벤트 append → 루프백 클라이언트 수신 지연, 1,000개 기준 p50 약 0.04–0.15 ms, p99 0.1–3.4 ms (맥미니, 다른 작업으로 load average 약 31인 상태, Python 3.13; 3.9·3.11도 p99 0.4–4.2 ms). `test_event_latency_p99`
 
-### PR-4 호환성 — `Agreed`
+### PR-4 호환성 — `Done`
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
+- 테스트: `test_pr_4_unknown_fields_are_ignored`
