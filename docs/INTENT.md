@@ -98,6 +98,10 @@ DarkPyonix 전체는 **에이전트 대화가 먼저이고, 필요할 때 코딩
 
 Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, DarkPyonix는 그 위에 에이전트 간 통신, 컴퓨터 전환, 원격 브라우저만 덧붙입니다. 이 일은 ember가 맡습니다. Gemstone(thisisthepy)을 로컬 추론 엔진으로 붙이는 일은 하네스가 필요하므로 우리 스택 밖에 둡니다. Gemstone 쪽은 2026-10-03에 OpenAI 호환 API가 `tools` 요청에서 tool call을 실행하지 않고 `tool_calls`(스트리밍은 tool-call delta)로 돌려주는 pass-through 방식을 결정했습니다(LogitAI/Gemstone#61, PR #62). 다만 API 자체는 아직 계획 단계입니다. 그 API가 나오면, 그것을 프로바이더로 쓰는 하네스를 ember가 래핑합니다. 그 전까지 Gemstone 연결은 대기입니다.
 
+### D14. interop·데이터 셀만은 사용자가 설치한 패키지를 그 호출 안에서 import합니다
+
+사용자 승인(2026-10-03, "예외 승인할게"). 표준 라이브러리 전용 규칙(§2 조건 1)은 커널과 런타임 API가 **스스로** 동작하는 경로에 그대로 적용됩니다. 예외는 사용자가 interop 셀(`run_cinterop`, `run_cppinterop`, `run_rustinterop`)이나 데이터 셀(`yaml` 등)을 실제로 호출했을 때뿐입니다. 그때는 그 함수 안에서만 사용자 인터프리터에 설치된 cython, cppyy, maturin, PyYAML 같은 패키지를 import합니다. 설치되어 있지 않으면 명확한 오류를 내고, 커널 안에서와 `python file.py`에서 똑같이 동작합니다. 모듈 수준이나 커널 기동 경로에서는 절대 import하지 않습니다. NFR-K2 검사는 이 함수들만 허용 목록으로 둡니다.
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
