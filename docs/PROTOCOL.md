@@ -135,13 +135,15 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 |---|---|
 | `kernel.status` | `{status, run_id?}` |
 | `run.queued` | `{run_id, position}` |
-| `run.started` | `{run_id, mode, cells: [int], params}` |
+| `run.started` | `{run_id, mode, cells: [int], cell_ids: [str\|null], params}` |
 | `run.finished` | `{run_id, status: "ok"\|"error"\|"interrupted"\|"cancelled", duration}` |
-| `cell.started` | `{run_id, index, execution_count}` |
-| `cell.finished` | `{run_id, index, status: "ok"\|"error"\|"interrupted", duration}` |
-| `output` | `{run_id, index, output: <nbformat 4 output>}` |
-| `output.clear` | `{run_id, index, wait: bool}` |
+| `cell.started` | `{run_id, index, cell_id, execution_count}` |
+| `cell.finished` | `{run_id, index, cell_id, status: "ok"\|"error"\|"interrupted", duration}` |
+| `output` | `{run_id, index, cell_id, output: <nbformat 4 output>}` |
+| `output.clear` | `{run_id, index, cell_id, wait: bool}` |
 | `replay_truncated` | `{oldest_seq}` |
+
+`index`는 실행이 읽은 파일에서의 셀 위치이고, `cell_id`는 그 셀의 공유 문서 ID(§4, `doc.snapshot`의 `cell_id`)입니다. 실행 중에 셀이 옮겨지거나 지워져도 `cell_id`로 셀을 찾아야 합니다. 실행이 시작될 때 공유 문서와 파일이 맞지 않으면(커널이 문서를 들고 있지 않을 때 등) `cell_id`는 `null`입니다. `run.started`의 `cell_ids`는 `cells`와 같은 순서·길이의 배열이고 같은 규칙을 따릅니다.
 
 `output`의 `output` 필드는 nbformat 4의 출력 객체(`stream`, `display_data`, `execute_result`, `error`)를 그대로 씁니다. 같은 셀의 연속된 `stream` 출력은 커널이 최대 50 ms 동안 모아서 하나로 보냅니다.
 
@@ -170,27 +172,39 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 | method | params | result |
 |---|---|---|
-| `doc.snapshot` | `{}` | `{doc_version, seq, cells:[{cell_id, index, type, title, metadata, source, source_sha256, version, lock?, conflict?}], presence:[Presence]}`. `seq`는 이 스냅숏 직후의 이벤트 번호 |
-| `doc.cell.create` | `client, after?: cell_id, before?: cell_id, type, source, metadata?` | `{cell}` |
-| `doc.cell.update` | `client, cell_id, base_version, source?, type?, metadata?` | `{cell}`. 버전이 다르면 `conflict`, 다른 클라이언트가 잠갔으면 `locked` |
-| `doc.cell.delete` | `client, cell_id, base_version` | `{deleted: true}` |
-| `doc.cell.move` | `client, cell_id, to_index` | `{cell}` |
-| `doc.lock` | `client, cell_id` | `{lock}`. 이미 잠겨 있으면 `locked`, `data.locked_by` |
-| `doc.unlock` | `client, cell_id, source?, base_version?` | `{cell}`. 최종 소스를 함께 보내면 저장 후 해제 |
-| `presence.update` | `client, focused_cell_id?, cursor?: {cell_id, line, column, selection?: [[l,c],[l,c]]}` | `{}` |
-| `presence.leave` | `client` | `{}` |
+| `doc.snapshot` | `{}` | `{doc_version, seq, cells: [DocumentCell], presence: [Presence]}` (아래 스냅숏 규칙) |
+| `doc.cell.create` | `client, request_id?, after?: cell_id, before?: cell_id, type?, title?, source?, metadata?` | `{cell}`. `after`·`before`가 둘 다 없으면 **문서 끝에 붙입니다**. 둘 다 주면 `bad_request`. `type` 기본값 `code`, `source` 기본값 `""` |
+| `doc.cell.update` | `client, request_id?, cell_id, base_version, source?, type?, title?, metadata?` | `{cell}`. 버전이 다르면 `conflict`, 다른 클라이언트가 잠갔으면 `locked`. `title: null`이나 `""`는 제목을 지웁니다. 프리앰블은 `source`만 바꿀 수 있습니다 |
+| `doc.cell.delete` | `client, request_id?, cell_id, base_version` | `{deleted: true}` |
+| `doc.cell.move` | `client, request_id?, cell_id, to_index` | `{cell}` |
+| `doc.lock` | `client, request_id?, cell_id` | `{lock}`. 이미 잠겨 있으면 `locked`, `data.locked_by` |
+| `doc.unlock` | `client, request_id?, cell_id, source?, base_version?` | `{cell}`. 최종 소스를 함께 보내면 저장 후 해제 |
+| `presence.update` | `client, request_id?, focused_cell_id?, cursor?: {cell_id, line, column, selection?: [[l,c],[l,c]]}` | `{}` |
+| `presence.leave` | `client, request_id?` | `{}` |
 | `runs.wait` | `run_id \| "latest" \| "current", timeout` | 끝나면 실행 요약, 아니면 `{status: "running", progress?}` |
 
 오류 코드 추가: `conflict`, `locked`, `forbidden`.
 
 | event type | data |
 |---|---|
-| `doc.cell.created` / `doc.cell.updated` / `doc.cell.deleted` / `doc.cell.moved` | `{doc_version, cell, by}` (`deleted`는 `cell_id`만) |
-| `doc.lock` / `doc.unlock` | `{doc_version, cell_id, lock?, by, reason?: "released"\|"idle"\|"disconnected"}` |
+| `doc.cell.created` / `doc.cell.updated` / `doc.cell.deleted` / `doc.cell.moved` | `{doc_version, cell, by, request_id?}` (`deleted`는 `cell` 대신 `cell_id`) |
+| `doc.lock` / `doc.unlock` | `{doc_version, cell_id, lock?, by, reason?: "released"\|"idle"\|"disconnected", request_id?}` |
 | `doc.reloaded` | `{doc_version, cells, cause: "external"}`. 바깥 편집으로 다시 파싱한 뒤 보내는 전체 셀 목록 |
-| `doc.conflict` | `{cell_id, local: {source, version, by}, disk: {source}}` |
-| `presence.update` / `presence.leave` | `{client_id, nickname, user, avatar?, focused_cell_id?, focused_at?, cursor?}` |
+| `doc.conflict` | `{doc_version, cell_id, local: {source, version, by}, disk: {source}}` |
+| `presence.update` / `presence.leave` | `{doc_version, client_id, nickname, user, avatar?, permission, focused_cell_id?, focused_at?, cursor?, last_seen, request_id?}` |
 
 `Presence = {client_id, nickname, user, avatar?, permission, focused_cell_id?, focused_at?, cursor?, last_seen}`.
+
+`DocumentCell = {cell_id, index, type, raw_type, title, metadata, source, source_sha256, version, lock?, conflict?}`.
+
+- `source`는 파서(FORMAT §2.4)가 낸 본문 그대로입니다. 표식과 메타데이터 줄은 빠지고, 다음 표식 앞의 빈 줄(앞 셀 본문에 속함)과 줄 끝(`\r\n` 포함)은 남습니다. 클라이언트가 이 값을 바꾸지 않고 돌려보내면 파일 바이트도 바뀌지 않습니다.
+- `type`은 정규 타입(소문자, 별칭 해석, 타입 없는 표식은 `code`, 첫 셀은 `preamble`)이고, `raw_type`은 표식의 `[ ]` 안에 쓰인 그대로(없으면 `null`)입니다. 표시는 `type`으로, 원문 보존이 필요하면 `raw_type`을 씁니다.
+- `title`은 표식의 제목이고 없으면 `null`입니다.
+
+**스냅숏의 `seq`.** `seq`는 **스냅숏에 이미 반영된 마지막 이벤트의 번호**입니다. 클라이언트는 `subscribe since=seq`(HTTP는 `?since=seq`)로 구독하고, `seq`가 그보다 큰 이벤트만 스냅숏 위에 적용합니다. 커널은 문서 상태를 바꾸는 일과 그 이벤트를 내는 일을 한 잠금 안에서 하고, 스냅숏도 같은 잠금 안에서 만듭니다. 따라서 스냅숏과 경쟁한 편집은 스냅숏에 들어 있거나(`seq` 이하) 구독으로 오거나(`seq` 초과) 둘 중 정확히 하나입니다. 클라이언트가 `seq`가 자기 것 이하인 이벤트를 받으면 무시합니다(재연결로 겹칠 때).
+
+**`doc_version`.** 문서 내용이나 구조가 바뀔 때만 1 늘어납니다: 셀 생성·수정·삭제·이동(`doc.cell.*`)과 다시 읽기(`doc.reloaded`). 잠금 해제로 충돌이 풀려 셀이 바뀌면 그것도 `doc.cell.updated`이므로 늘어납니다. 잠금·해제(`doc.lock`/`doc.unlock`), 충돌 표시(`doc.conflict`), 접속자(`presence.*`)는 늘리지 않지만, 이 이벤트들도 내는 순간의 현재 `doc_version`을 담습니다. 바뀐 것이 없는 수정·이동(같은 값, 같은 위치)은 이벤트를 내지 않고 `doc_version`도 그대로입니다.
+
+**`request_id`.** `doc.*`(snapshot 제외)와 `presence.*` 요청은 클라이언트가 고른 `request_id`(문자열, 1–64자)를 받을 수 있습니다. 그 요청으로 생긴 이벤트는 모두 같은 `request_id`를 그대로 담습니다(예: `doc.unlock`에 최종 소스를 보내면 `doc.cell.updated`와 `doc.unlock` 둘 다, `presence.leave`가 잠금을 풀면 `doc.unlock`과 `presence.leave` 둘 다). 합쳐서 나중에 보내는 커서 `presence.update`는 마지막으로 합쳐진 요청의 `request_id`를 담습니다. 유휴 해제처럼 요청 없이 생긴 이벤트에는 없습니다. 같은 `client_id`를 쓰는 두 창이 자기 편집의 메아리를 구별하는 용도이며, 커널은 값을 해석하지 않습니다. 형식이 틀리면 `bad_request`입니다.
 
 `run.queued`, `run.started`, `run.finished`, `cell.started`, `cell.finished` 이벤트의 `data`에는 `started_by`(client_id, user, nickname)가 들어갑니다. 인터럽트로 끝난 실행에는 `interrupted_by`가 더해집니다(SPEC FR-S6). `run` 메서드는 `cells` 대신 `cell_ids`를 받을 수 있습니다.
