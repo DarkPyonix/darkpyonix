@@ -46,7 +46,7 @@
   "pid": 41234, "port": 53122, "status": "busy",
   "run_id": "20261003-142233-a1f0",
   "python": {"version": "3.11.9", "implementation": "CPython", "executable": "/usr/bin/python3.11"},
-  "dkp_kernel_version": "0.1.0", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
+  "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
 }
 ```
 

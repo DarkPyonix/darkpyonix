@@ -236,6 +236,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 | `viewer3` | ✓ | ✓ | ✓ | |
 | `admin`(마스터) | ✓ | ✓ | ✓ | ✓ |
 
+작업별 최소 권한: 커널·실행 기록 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다.
 - 테스트: `test_fr_a3_permission_matrix`
 
 ## 10. 허브 (H)
@@ -285,7 +286,7 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 커널의 출력이 매니저 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함).
 
 ### NFR-M3 문서와 코드의 일치 — `Agreed`
-매니저가 내는 OpenAPI 스키마의 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 테스트가 비교합니다.
+매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
 
 ### NFR-H1 종단 간 암호화 — `Draft`
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이의 세션 키는 허브를 거치지 않고 합의합니다.
