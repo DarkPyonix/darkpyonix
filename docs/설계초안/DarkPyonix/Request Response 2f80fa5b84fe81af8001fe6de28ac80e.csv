@@ -1,0 +1,38 @@
+﻿이름,API 분류,태그
+Response POST/kernels/{kernel_id},API Response,kernels
+Request PUT/kernels/{kernel_id}/cells/{cell_id}/lock,API Response,kernels
+Request /kernels/{kernel_id}/{cell_id}/interrupt,API Response,kernels
+Response /ws/kernels/{kernel_id}?token={token},API Response,WS
+Response DELETE /kernels/{kernel_id},API Response,kernels
+Request kernels/{kernel_id}/tokens/{token}/verify,API Request,auth
+Response /kernels/{kernel_id}/executions,API Response,kernels
+Request /kernels/{kernel_id}/tokens/auth,API Request,auth
+Request POST/kernels/{kernel_id},API Request,kernels
+Response /kernels/{kernel_id}/password,API Response,auth
+Request /kernels/{kernel_id}/cells/{cell_id}/unlock,API Request,kernels
+Response /kernels/{kernel_id}/{cell_id}/interrupt,API Response,kernels
+Response /kernels/{kernel_id}/cells/{cell_id}/lock,API Response,kernels
+Response,API Response,alarm
+"Response 
+/kernels/{kernel_id}/cells/{cell_id}/unlock",API Response,kernels
+,API Response,alarm
+Response /kernels/{kernel_id}/tokens/auth,API Response,auth
+Request /kernels/{kernel_id}/executions,API Request,kernels
+Request /kernels/{kernel_id}/cells/{cell_id}/lock,API Response,kernels
+Request,API Request,alarm
+Response kernels/{kernel_id}/tokens/{token}/verify,API Response,auth
+Request /kernels/{kernel_id}/password,API Response,auth
+Request DELETE /kernels/{kernel_id},API Request,kernels
+Request /kernels/{kernel_id}/tokens/share,API Request,auth
+Request /ws/kernels/{kernel_id}?token={token},API Request,WS
+Response PUT/kernels/{kernel_id}/cells/{cell_id}/lock,API Response,kernels
+Response /kernels/{kernel_id}/tokens/share,API Response,auth
+Response /kernels/{kernel_id}/tokens/initial,API Response,auth
+Request /kernels/{kernel_id},API Request,kernels
+Request /kernels/{kernel_id}/tokens/initial,API Request,auth
+Request /kernels/{kernel_id}/cells,API Request,kernels
+DTO Template,API Response,kernels
+Response /kernels/{kernel_id},API Response,kernels
+Response /kernels/{kernel_id}/cells/{cell_id},API Response,kernels
+Response /kernels/{kernel_id}/cells,API Response,kernels
+Request /kernels/{kernel_id}/cells/{cell_id},API Response,kernels

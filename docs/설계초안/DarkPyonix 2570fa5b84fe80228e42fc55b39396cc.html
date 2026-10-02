@@ -1,0 +1,893 @@
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title>DarkPyonix</title><style>
+/* cspell:disable-file */
+/* webkit printing magic: print all background colors */
+html {
+	-webkit-print-color-adjust: exact;
+}
+* {
+	box-sizing: border-box;
+	-webkit-print-color-adjust: exact;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+@media only screen {
+	body {
+		margin: 2em auto;
+		max-width: 900px;
+		color: rgb(55, 53, 47);
+	}
+}
+
+body {
+	line-height: 1.5;
+	white-space: pre-wrap;
+}
+
+a,
+a.visited {
+	color: inherit;
+	text-decoration: underline;
+}
+
+.pdf-relative-link-path {
+	font-size: 80%;
+	color: #444;
+}
+
+h1,
+h2,
+h3 {
+	letter-spacing: -0.01em;
+	line-height: 1.2;
+	font-weight: 600;
+	margin-bottom: 0;
+}
+
+/* Override strong tags inside headings to maintain consistent weight */
+h1 strong,
+h2 strong,
+h3 strong {
+	font-weight: 600;
+}
+
+.page-title {
+	font-size: 2.5rem;
+	font-weight: 700;
+	margin-top: 0;
+	margin-bottom: 0.75em;
+}
+
+h1 {
+	font-size: 1.875rem;
+	margin-top: 1.875rem;
+}
+
+h2 {
+	font-size: 1.5rem;
+	margin-top: 1.5rem;
+}
+
+h3 {
+	font-size: 1.25rem;
+	margin-top: 1.25rem;
+}
+
+.source {
+	border: 1px solid #ddd;
+	border-radius: 3px;
+	padding: 1.5em;
+	word-break: break-all;
+}
+
+.callout {
+	border-radius: 10px;
+	padding: 1rem;
+	/* Paint a complete callout box on every PDF page fragment. */
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+
+/* For default-background callouts, render the border outline. */
+.callout.block-color-default_background {
+	border: 1px solid rgba(55, 53, 47, 0.09);
+}
+
+figure {
+	margin: 1.25em 0;
+	page-break-inside: avoid;
+}
+
+/*
+ * Toggles and callouts hold arbitrary content, so they can easily be taller
+ * than a page. They must stay breakable: avoiding breaks inside them makes
+ * Chromium push the whole block onto the next page, which leaves the previous
+ * page mostly empty before every long toggle.
+ */
+details,
+aside {
+	margin: 1.25em 0;
+}
+
+/* Keep a toggle's title on the same page as the start of its content. */
+summary {
+	page-break-after: avoid;
+	break-after: avoid;
+}
+
+/*
+ * Toggle headings render as <h1/h2/h3 style="display:inline-block"> inside
+ * <summary>. Without this reset, the heading's margin-top pushes it below the
+ * ::marker (▼), so the triangle and the title appear on separate lines.
+ */
+summary h1,
+summary h2,
+summary h3,
+summary h4 {
+	margin-top: 0;
+}
+
+figcaption {
+	opacity: 0.5;
+	font-size: 85%;
+	margin-top: 0.5em;
+}
+
+mark {
+	background-color: transparent;
+}
+
+.indented {
+	padding-left: 1.5em;
+}
+
+hr {
+	background: transparent;
+	display: block;
+	width: 100%;
+	height: 1px;
+	visibility: visible;
+	border: none;
+	border-bottom: 1px solid rgba(55, 53, 47, 0.09);
+}
+
+img {
+	max-width: 100%;
+}
+
+@media only print {
+	img {
+		max-height: 100vh;
+		object-fit: contain;
+	}
+
+	table.collection-content {
+		width: 100%;
+		table-layout: fixed;
+	}
+
+	table.collection-content th,
+	table.collection-content td {
+		overflow-wrap: anywhere;
+	}
+
+	table.collection-content td > .user,
+	table.collection-content td > time {
+		white-space: pre-wrap;
+	}
+}
+
+@page {
+	margin: 1in;
+}
+
+.collection-content-wrapper {
+	overflow-x: auto;
+}
+
+@media only print {
+	.collection-content-wrapper {
+		overflow-x: visible;
+	}
+}
+
+.collection-content {
+	font-size: 0.875rem;
+}
+
+.collection-content td {
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.column-list {
+	display: flex;
+	gap: 46px;
+}
+
+.column {
+	min-width: 0;
+	overflow: hidden;
+}
+
+.column > *:first-child {
+	margin-top: 0;
+}
+
+.table_of_contents-item {
+	display: block;
+	font-size: 0.875rem;
+	line-height: 1.3;
+	padding-inline: 0.125rem;
+	padding-block: 0.375rem;
+}
+
+.table_of_contents-indent-1 {
+	margin-left: 1.5rem;
+}
+
+.table_of_contents-indent-2 {
+	margin-left: 3rem;
+}
+
+.table_of_contents-indent-3 {
+	margin-left: 4.5rem;
+}
+
+.table_of_contents-link {
+	text-decoration: none;
+	opacity: 0.7;
+	border-bottom: 1px solid rgba(55, 53, 47, 0.18);
+}
+
+table,
+th,
+td {
+	border: 1px solid rgba(55, 53, 47, 0.09);
+}
+
+table {
+	border-collapse: collapse;
+	border-left: none;
+	border-right: none;
+}
+
+th,
+td {
+	font-weight: normal;
+	padding: 0.25em 0.5em;
+	line-height: 1.5;
+	min-height: 1.5em;
+	text-align: left;
+}
+
+th {
+	color: rgba(55, 53, 47, 0.6);
+}
+
+ol,
+ul {
+	margin: 0;
+	margin-block-start: 0.6em;
+	margin-block-end: 0.6em;
+}
+
+li > ol:first-child,
+li > ul:first-child {
+	margin-block-start: 0.6em;
+}
+
+ul > li {
+	list-style: disc;
+}
+
+ul.to-do-list {
+	padding-inline-start: 0;
+}
+
+ul.to-do-list > li {
+	list-style: none;
+}
+
+.to-do-children-checked {
+	text-decoration: line-through;
+	opacity: 0.375;
+}
+
+ul.toggle > li {
+	list-style: none;
+}
+
+ul {
+	padding-inline-start: 1.7em;
+}
+
+ul > li {
+	padding-left: 0.1em;
+}
+
+ol {
+	padding-inline-start: 1.6em;
+}
+
+ol.numbered-list.numbered-list-digits-2 {
+	padding-inline-start: 2em;
+}
+
+ol.numbered-list.numbered-list-digits-3plus {
+	padding-inline-start: 2.4em;
+}
+
+ol > li {
+	padding-left: 0.2em;
+}
+
+.mono ol {
+	padding-inline-start: 2em;
+}
+
+.mono ol > li {
+	text-indent: -0.4em;
+}
+
+.toggle {
+	padding-inline-start: 0em;
+	list-style-type: none;
+}
+
+/* Indent toggle children */
+.toggle > li > details {
+	padding-left: 1.7em;
+}
+
+.toggle > li > details > summary {
+	margin-left: -1.1em;
+}
+
+.selected-value {
+	display: inline-block;
+	padding: 0 0.5em;
+	background: rgba(206, 205, 202, 0.5);
+	border-radius: 3px;
+	margin-right: 0.5em;
+	margin-top: 0.3em;
+	margin-bottom: 0.3em;
+	white-space: nowrap;
+}
+
+.collection-title {
+	display: inline-block;
+	margin-right: 1em;
+}
+
+.page-description {
+	margin-bottom: 2em;
+}
+
+.simple-table {
+	margin-top: 1em;
+	font-size: 0.875rem;
+	empty-cells: show;
+}
+.simple-table td {
+	height: 29px;
+	min-width: 120px;
+}
+
+.simple-table th {
+	height: 29px;
+	min-width: 120px;
+}
+
+.simple-table-header-color {
+	background: rgb(247, 246, 243);
+	color: black;
+}
+.simple-table-header {
+	font-weight: 500;
+}
+
+time {
+	opacity: 0.5;
+}
+
+.icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	max-width: 1.2em;
+	max-height: 1.2em;
+	text-decoration: none;
+	vertical-align: text-bottom;
+	margin-right: 0.5em;
+}
+
+/*
+ * Render emoji icons using a ::before pseudo-element to keep the glyph
+ * out of the DOM textContent traversal. This avoids double-rendering icons
+ * in callouts and page titles.
+ * NOTE(slim/html-export-pseudo-icons): I can't tagref this because it will
+ * flag as a duplicate tag after codegen.
+ */
+.icon[data-emoji]::before {
+	content: attr(data-emoji);
+}
+
+img.icon {
+	border-radius: 3px;
+}
+
+.callout img.notion-static-icon {
+	width: 1em;
+	height: 1em;
+}
+
+.callout p {
+	margin: 0;
+}
+
+.callout h1,
+.callout h2,
+.callout h3 {
+	margin: 0 0 0.6rem;
+}
+
+.user-icon {
+	width: 1.5em;
+	height: 1.5em;
+	border-radius: 100%;
+	margin-right: 0.5rem;
+}
+
+.user-icon-inner {
+	font-size: 0.8em;
+}
+
+.text-icon {
+	border: 1px solid #000;
+	text-align: center;
+}
+
+.page-cover-image {
+	display: block;
+	object-fit: cover;
+	width: 100%;
+	max-height: 30vh;
+}
+
+.page-header-icon {
+	font-size: 3rem;
+	margin-bottom: 1rem;
+}
+
+.page-header-icon-with-cover {
+	margin-top: -0.72em;
+	margin-left: 0.07em;
+}
+
+.page-header-icon img {
+	border-radius: 3px;
+}
+
+.link-to-page {
+	margin: 1em 0;
+	padding: 0;
+	border: none;
+	font-weight: 500;
+}
+
+p > .user {
+	opacity: 0.5;
+}
+
+td > .user,
+td > time {
+	white-space: nowrap;
+}
+
+input[type="checkbox"] {
+	margin-right: 0.4em;
+	vertical-align: middle;
+}
+
+p {
+	margin-top: 0.5em;
+	margin-bottom: 0.5em;
+}
+
+.image {
+	border: none;
+	margin: 1.5em 0;
+	padding: 0;
+	border-radius: 0;
+	text-align: center;
+}
+
+.code,
+code {
+	background: rgba(135, 131, 120, 0.15);
+	border-radius: 3px;
+	padding: 0.2em 0.4em;
+	border-radius: 3px;
+	font-size: 85%;
+	tab-size: 2;
+}
+
+code {
+	color: #eb5757;
+}
+
+.code {
+	padding: 1.5em 1em;
+}
+
+.code-wrap {
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.code > code {
+	background: none;
+	padding: 0;
+	font-size: 100%;
+	color: inherit;
+}
+
+blockquote {
+	font-size: 1em;
+	margin: 1em 0;
+	padding-left: 1em;
+	border-left: 3px solid rgb(55, 53, 47);
+}
+
+blockquote.quote-large {
+	font-size: 1.25em;
+}
+
+.bookmark {
+	text-decoration: none;
+	max-height: 8em;
+	padding: 0;
+	display: flex;
+	width: 100%;
+	align-items: stretch;
+}
+
+.bookmark-title {
+	font-size: 0.85em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	height: 1.75em;
+	white-space: nowrap;
+}
+
+.bookmark-text {
+	display: flex;
+	flex-direction: column;
+}
+
+.bookmark-info {
+	flex: 4 1 180px;
+	padding: 12px 14px 14px;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+}
+
+.bookmark-image {
+	width: 33%;
+	flex: 1 1 180px;
+	display: block;
+	position: relative;
+	object-fit: cover;
+	border-radius: 1px;
+}
+
+.bookmark-description {
+	color: rgba(55, 53, 47, 0.6);
+	font-size: 0.75em;
+	overflow: hidden;
+	max-height: 4.5em;
+	word-break: break-word;
+}
+
+.bookmark-href {
+	font-size: 0.75em;
+	margin-top: 0.25em;
+}
+
+.tab {
+	margin: 1.25em 0;
+	padding-inline: 1rem;
+	border: 1px solid rgba(55, 53, 47, 0.09);
+}
+
+.sans { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", "Noto Sans Arabic", "Noto Sans Hebrew", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol"; }
+.code { font-family: "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace; }
+.serif { font-family: Lyon-Text, Georgia, ui-serif, serif; }
+.mono { font-family: iawriter-mono, Nitti, Menlo, Courier, monospace; }
+.pdf .sans { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", "Noto Sans Arabic", "Noto Sans Hebrew", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", 'Twemoji', 'Noto Color Emoji', 'Noto Sans CJK JP'; }
+.pdf:lang(zh-CN) .sans { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", "Noto Sans Arabic", "Noto Sans Hebrew", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", 'Twemoji', 'Noto Color Emoji', 'Noto Sans CJK SC'; }
+.pdf:lang(zh-TW) .sans { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", "Noto Sans Arabic", "Noto Sans Hebrew", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", 'Twemoji', 'Noto Color Emoji', 'Noto Sans CJK TC'; }
+.pdf:lang(ko-KR) .sans { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", "Noto Sans Arabic", "Noto Sans Hebrew", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", 'Twemoji', 'Noto Color Emoji', 'Noto Sans CJK KR'; }
+.pdf .code { font-family: Source Code Pro, "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK JP'; }
+.pdf:lang(zh-CN) .code { font-family: Source Code Pro, "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK SC'; }
+.pdf:lang(zh-TW) .code { font-family: Source Code Pro, "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK TC'; }
+.pdf:lang(ko-KR) .code { font-family: Source Code Pro, "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK KR'; }
+.pdf .serif { font-family: PT Serif, Lyon-Text, Georgia, ui-serif, serif, 'Twemoji', 'Noto Color Emoji', 'Noto Serif CJK JP'; }
+.pdf:lang(zh-CN) .serif { font-family: PT Serif, Lyon-Text, Georgia, ui-serif, serif, 'Twemoji', 'Noto Color Emoji', 'Noto Serif CJK SC'; }
+.pdf:lang(zh-TW) .serif { font-family: PT Serif, Lyon-Text, Georgia, ui-serif, serif, 'Twemoji', 'Noto Color Emoji', 'Noto Serif CJK TC'; }
+.pdf:lang(ko-KR) .serif { font-family: PT Serif, Lyon-Text, Georgia, ui-serif, serif, 'Twemoji', 'Noto Color Emoji', 'Noto Serif CJK KR'; }
+.pdf .mono { font-family: PT Mono, iawriter-mono, Nitti, Menlo, Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK JP'; }
+.pdf:lang(zh-CN) .mono { font-family: PT Mono, iawriter-mono, Nitti, Menlo, Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK SC'; }
+.pdf:lang(zh-TW) .mono { font-family: PT Mono, iawriter-mono, Nitti, Menlo, Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK TC'; }
+.pdf:lang(ko-KR) .mono { font-family: PT Mono, iawriter-mono, Nitti, Menlo, Courier, monospace, 'Twemoji', 'Noto Color Emoji', 'Noto Sans Mono CJK KR'; }
+.highlight-default {
+	color: rgba(44, 44, 43, 1);
+}
+.highlight-gray {
+	color: rgba(125, 122, 117, 1);
+	fill: rgba(125, 122, 117, 1);
+}
+.highlight-brown {
+	color: rgba(159, 118, 90, 1);
+	fill: rgba(159, 118, 90, 1);
+}
+.highlight-orange {
+	color: rgba(210, 123, 45, 1);
+	fill: rgba(210, 123, 45, 1);
+}
+.highlight-yellow {
+	color: rgba(203, 148, 52, 1);
+	fill: rgba(203, 148, 52, 1);
+}
+.highlight-teal {
+	color: rgba(80, 148, 110, 1);
+	fill: rgba(80, 148, 110, 1);
+}
+.highlight-blue {
+	color: rgba(56, 125, 201, 1);
+	fill: rgba(56, 125, 201, 1);
+}
+.highlight-purple {
+	color: rgba(154, 107, 180, 1);
+	fill: rgba(154, 107, 180, 1);
+}
+.highlight-pink {
+	color: rgba(193, 76, 138, 1);
+	fill: rgba(193, 76, 138, 1);
+}
+.highlight-red {
+	color: rgba(207, 81, 72, 1);
+	fill: rgba(207, 81, 72, 1);
+}
+.highlight-default_background {
+	color: rgba(44, 44, 43, 1);
+}
+.highlight-gray_background {
+	background: rgba(42, 28, 0, 0.07);
+}
+.highlight-brown_background {
+	background: rgba(139, 46, 0, 0.086);
+}
+.highlight-orange_background {
+	background: rgba(224, 101, 1, 0.129);
+}
+.highlight-yellow_background {
+	background: rgba(211, 168, 0, 0.137);
+}
+.highlight-teal_background {
+	background: rgba(0, 100, 45, 0.09);
+}
+.highlight-blue_background {
+	background: rgba(0, 124, 215, 0.094);
+}
+.highlight-purple_background {
+	background: rgba(102, 0, 178, 0.078);
+}
+.highlight-pink_background {
+	background: rgba(197, 0, 93, 0.086);
+}
+.highlight-red_background {
+	background: rgba(223, 22, 0, 0.094);
+}
+.block-color-default {
+	color: inherit;
+	fill: inherit;
+}
+.block-color-gray {
+	color: rgba(125, 122, 117, 1);
+	fill: rgba(125, 122, 117, 1);
+}
+.block-color-brown {
+	color: rgba(159, 118, 90, 1);
+	fill: rgba(159, 118, 90, 1);
+}
+.block-color-orange {
+	color: rgba(210, 123, 45, 1);
+	fill: rgba(210, 123, 45, 1);
+}
+.block-color-yellow {
+	color: rgba(203, 148, 52, 1);
+	fill: rgba(203, 148, 52, 1);
+}
+.block-color-teal {
+	color: rgba(80, 148, 110, 1);
+	fill: rgba(80, 148, 110, 1);
+}
+.block-color-blue {
+	color: rgba(56, 125, 201, 1);
+	fill: rgba(56, 125, 201, 1);
+}
+.block-color-purple {
+	color: rgba(154, 107, 180, 1);
+	fill: rgba(154, 107, 180, 1);
+}
+.block-color-pink {
+	color: rgba(193, 76, 138, 1);
+	fill: rgba(193, 76, 138, 1);
+}
+.block-color-red {
+	color: rgba(207, 81, 72, 1);
+	fill: rgba(207, 81, 72, 1);
+}
+.block-color-default_background {
+	color: inherit;
+	fill: inherit;
+}
+.block-color-gray_background {
+	background: rgba(240, 239, 237, 1);
+}
+.block-color-brown_background {
+	background: rgba(245, 237, 233, 1);
+}
+.block-color-orange_background {
+	background: rgba(251, 235, 222, 1);
+}
+.block-color-yellow_background {
+	background: rgba(249, 243, 220, 1);
+}
+.block-color-teal_background {
+	background: rgba(232, 241, 236, 1);
+}
+.block-color-blue_background {
+	background: rgba(229, 242, 252, 1);
+}
+.block-color-purple_background {
+	background: rgba(243, 235, 249, 1);
+}
+.block-color-pink_background {
+	background: rgba(250, 233, 241, 1);
+}
+.block-color-red_background {
+	background: rgba(252, 233, 231, 1);
+}
+.select-value-color-default { background-color: rgba(42, 28, 0, 0.07); }
+.select-value-color-gray { background-color: rgba(28, 19, 1, 0.11); }
+.select-value-color-brown { background-color: rgba(127, 51, 0, 0.156); }
+.select-value-color-orange { background-color: rgba(196, 88, 0, 0.203); }
+.select-value-color-yellow { background-color: rgba(209, 156, 0, 0.282); }
+.select-value-color-green { background-color: rgba(0, 96, 38, 0.156); }
+.select-value-color-blue { background-color: rgba(0, 118, 217, 0.203); }
+.select-value-color-purple { background-color: rgba(92, 0, 163, 0.141); }
+.select-value-color-pink { background-color: rgba(183, 0, 78, 0.152); }
+.select-value-color-red { background-color: rgba(206, 24, 0, 0.164); }
+
+.checkbox {
+	display: inline-flex;
+	vertical-align: text-bottom;
+	width: 16;
+	height: 16;
+	background-size: 16px;
+	margin-left: 2px;
+	margin-right: 5px;
+}
+
+.checkbox-on {
+	background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%0A%3Crect%20width%3D%2216%22%20height%3D%2216%22%20fill%3D%22%2358A9D7%22%2F%3E%0A%3Cpath%20d%3D%22M6.71429%2012.2852L14%204.9995L12.7143%203.71436L6.71429%209.71378L3.28571%206.2831L2%207.57092L6.71429%2012.2852Z%22%20fill%3D%22white%22%2F%3E%0A%3C%2Fsvg%3E");
+}
+
+.checkbox-off {
+	background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%0A%3Crect%20x%3D%220.75%22%20y%3D%220.75%22%20width%3D%2214.5%22%20height%3D%2214.5%22%20fill%3D%22white%22%20stroke%3D%22%2336352F%22%20stroke-width%3D%221.5%22%2F%3E%0A%3C%2Fsvg%3E");
+}
+	
+</style><style>@import url('https://cdn.jsdelivr.net/npm/katex@0.16.25/dist/katex-swap.min.css')</style></head><body><article id="2570fa5b-84fe-8022-8e42-fc55b39396cc" class="page sans" data-notion-page-icon="attachment:efe4cfee-d806-46b3-9587-4e267e0179e1:github-profile-colored.jpg"><header><div class="page-header-icon undefined"><img class="icon" src="DarkPyonix/github-profile-colored.jpg"/></div><h1 class="page-title" dir="auto">DarkPyonix</h1><p class="page-description" dir="auto"></p></header><div class="page-body"><script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js" integrity="sha512-7Z9J3l1+EYfeaPKcGXu3MS/7T+w19WtKQY/n+xzmw4hZhJ9tyYmcUS+4QqAlzhicE5LAfMQSF3iFTK9bQdTxXg==" crossorigin="anonymous" referrerPolicy="no-referrer"></script><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" integrity="sha512-tN7Ec6zAFaVSG3TpNAKtk4DOHNpSwKHxxrsiw4GHKESGPs5njn/0sMCUMl2svV4wo4BK/rCP7juYz+zx+l6oeQ==" crossorigin="anonymous" referrerPolicy="no-referrer"/><pre id="3380fa5b-84fe-801a-9b6b-f839b50f500b" class="code code-wrap" data-notion-code-syntax="mermaid"><code class="language-mermaid" style="white-space:pre-wrap;word-break:break-all">---
+title: Kernel &amp; Kernel Manager
+---
+classDiagram
+	class KernelManager {
+		&lt;&lt;singleton&gt;&gt;
+		-kernels: list[Kernel]
+	}
+	
+	class Kernel {
+		-kernel_id: str
+		-status: str
+		%% 프로세스 스케줄링에서 running, blocked 두 상태 활용. 
+		-scheduling_queue: queue.Queue
+		%% Kernel이 바로 Cell을 실행할건지, Notebook을 통해서 실행할건지 결정하기.
+	}
+	
+	class File {
+	}
+	
+	class CellScheduler {
+	%% Cell Scheduler가 실제로 필요한가? 그냥 들어간대로 나오는 큐 하나만 있으면 되는거 아닌가?
+	}
+	
+	class Cell {
+	}
+	
+	class Execution {
+	%% 얘가 REPL인가?
+	%% REPL의 역할은 그냥 코드 넣어주면 실행 결과 뱉는 애?
+	}
+	
+	class ExecutionStatus {
+	}
+	
+	class StrEnum {
+	}
+	
+	StrEnum &lt;|-- ExecutionStatus
+	
+	KernelManager ..&gt; Kernel : manages
+	Kernel ..&gt; File : manages
+	Kernel ..&gt; Execution : manages
+	Kernel ..&gt; CellScheduler : manages
+	Execution --o ExecutionStatus : has
+	CellScheduler --o Cell : has
+	
+  </code></pre><h2 id="2570fa5b-84fe-8184-90fd-e044daa8488f" class="" dir="auto">프로젝트</h2><p id="2570fa5b-84fe-8141-b61a-c0cbb1abdec7" class="" dir="auto"><mark class="highlight-gray" data-notion-highlight="gray">프로덕트별로 특징, 기능, 도달 범위를 개선하기 위한 이니셔티브와 목표</mark></p><div id="2570fa5b-84fe-81e2-94a8-d127ebb1a8a5" class="collection-content" dir="ltr"><h4 class="collection-title">프로젝트</h4><div class="collection-content-wrapper"><table class="collection-content"><colgroup><col style="width:31.818181818181817%"/><col style="width:22.727272727272727%"/><col style="width:22.727272727272727%"/><col style="width:22.72727272727272%"/></colgroup><thead><tr><th><span class="icon property-icon"><img src="https://app.notion.com/icons/target_gray.svg" style="width:14px;height:14px;display:block"/></span>프로젝트</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/friends_gray.svg" style="width:14px;height:14px;display:block"/></span>담당자</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/dashboard_gray.svg" style="width:14px;height:14px;display:block"/></span>진행률</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/fire_gray.svg" style="width:14px;height:14px;display:block"/></span>우선순위</th></tr></thead><tbody><tr id="2580fa5b-84fe-80a4-9661-f30871fded63"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/vscode%20plugins%202580fa5b84fe80a49661f30871fded63.html" data-notion-page-id="2580fa5b-84fe-80a4-9661-f30871fded63" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">vscode plugins</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr><tr id="27f0fa5b-84fe-802a-ad93-c7db2f8667cb"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/web%20view%20clients+%EB%A7%A4%ED%81%AC%EB%A1%9C+%EC%95%8C%EB%A6%BC%2027f0fa5b84fe802aad93c7db2f8667cb.html" data-notion-page-id="27f0fa5b-84fe-802a-ad93-c7db2f8667cb" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">web view clients+매크로+알림</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr><tr id="27f0fa5b-84fe-8047-8cbb-f077af24e5fa"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%EC%9D%B8%ED%85%94%EB%A6%AC%EC%A0%9C%EC%9D%B4%20%ED%94%8C%EB%9F%AC%EA%B7%B8%EC%9D%B8+%EB%85%B8%ED%8A%B8%EB%B6%81%20%EB%82%B4%EB%B3%B4%EB%82%B4%EA%B8%B0(2%EC%A3%BC%2027f0fa5b84fe80478cbbf077af24e5fa.html" data-notion-page-id="27f0fa5b-84fe-8047-8cbb-f077af24e5fa" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">인텔리제이 플러그인+노트북 내보내기(2주</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr><tr id="27f0fa5b-84fe-80ee-8b78-f1acd3a3f2ee"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%EC%BB%A4%EB%84%90,%20%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC,%20%EC%8B%A4%ED%96%89%EA%B2%B0%EA%B3%BC%20%EC%A0%80%EC%9E%A5,%20WASM%2027f0fa5b84fe80ee8b78f1acd3a3f2ee.html" data-notion-page-id="27f0fa5b-84fe-80ee-8b78-f1acd3a3f2ee" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">커널, 스케줄러, 실행결과 저장, WASM</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr><tr id="27f0fa5b-84fe-8091-9ccc-de10d0cbd865"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%EC%BB%A4%EB%84%90%20%EB%A7%A4%EB%8B%88%EC%A0%80,%20%EB%A1%9C%EA%B7%B8%EC%9D%B8,%20%EC%BD%94%EB%93%9C%EC%8A%A4%ED%8E%98%EC%9D%B4%EC%8A%A4%20%EC%97%B0%EA%B2%B0%2027f0fa5b84fe80919cccde10d0cbd865.html" data-notion-page-id="27f0fa5b-84fe-8091-9ccc-de10d0cbd865" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">커널 매니저, 로그인, 코드스페이스 연결</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr><tr id="27f0fa5b-84fe-8067-8b32-fd10e772d278"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%ED%99%88%ED%8E%98%EC%9D%B4%EC%A7%80%20%EC%84%9C%EB%B2%84(%EC%9D%B8%EC%A6%9D%EC%84%9C)%2027f0fa5b84fe80678b32fd10e772d278.html" data-notion-page-id="27f0fa5b-84fe-8067-8b32-fd10e772d278" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">홈페이지 서버(인증서)</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr><tr id="2570fa5b-84fe-816f-b6f3-ef7e088bdf90"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%ED%81%B4%EB%9D%BC%EC%9A%B0%EB%93%9C%20%EC%97%B0%EB%8F%99%20%EA%B0%95%ED%99%94%202570fa5b84fe816fb6f3ef7e088bdf90.html" data-notion-page-id="2570fa5b-84fe-816f-b6f3-ef7e088bdf90" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><img class="icon notion-static-icon" src="https://app.notion.com/icons/connecting-flight_gray.svg"/>클라우드 연동 강화</a></td><td class="cell-GqTF"><span class="user"><img src="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%ED%81%B4%EB%9D%BC%EC%9A%B0%EB%93%9C%20%EC%97%B0%EB%8F%99%20%EA%B0%95%ED%99%94/Chosen.gif" class="icon user-icon"/>문채운</span><span class="user"><img src="https://lh3.googleusercontent.com/a/ACg8ocLYFZ3xDCV7woV9cjGZtQgg79-TvWE4DFHyfLYzQ3iSF819QkI=s100" class="icon user-icon"/>hndn00</span></td><td class="cell-iDUo">0.4</td><td class="cell-yeOF"><span class="selected-value select-value-color-yellow">P1</span></td></tr><tr id="2570fa5b-84fe-8176-b2d2-ebb974525c8e"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%ED%86%B5%ED%95%A9%20%EA%B8%B0%EA%B8%B0%20%EA%B4%80%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%202570fa5b84fe8176b2d2ebb974525c8e.html" data-notion-page-id="2570fa5b-84fe-8176-b2d2-ebb974525c8e" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><img class="icon notion-static-icon" src="https://app.notion.com/icons/network_gray.svg"/>통합 기기 관리 시스템</a></td><td class="cell-GqTF"><span class="user"><img src="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%ED%81%B4%EB%9D%BC%EC%9A%B0%EB%93%9C%20%EC%97%B0%EB%8F%99%20%EA%B0%95%ED%99%94/Chosen.gif" class="icon user-icon"/>문채운</span><span class="user"><img src="https://lh3.googleusercontent.com/a/ACg8ocLYFZ3xDCV7woV9cjGZtQgg79-TvWE4DFHyfLYzQ3iSF819QkI=s100" class="icon user-icon"/>hndn00</span></td><td class="cell-iDUo">0.3</td><td class="cell-yeOF"><span class="selected-value select-value-color-yellow">P1</span></td></tr><tr id="3630fa5b-84fe-803b-b20c-faabb67d1a5f"><td class="cell-title"><a href="DarkPyonix/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/%EC%A0%9C%EB%AA%A9%20%EC%97%86%EC%9D%8C%203630fa5b84fe803bb20cfaabb67d1a5f.html" data-notion-page-id="3630fa5b-84fe-803b-b20c-faabb67d1a5f" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">제목 없음</a></td><td class="cell-GqTF"></td><td class="cell-iDUo"></td><td class="cell-yeOF"></td></tr></tbody></table></div><br/><br/></div><h2 id="2570fa5b-84fe-8120-8d47-ff75f586a34a" class="" dir="auto">API 명세</h2><p id="2f80fa5b-84fe-80ec-8ee7-e02b575e7da6" class="" dir="auto">DarkPyonix API 명세</p><h1 id="2f80fa5b-84fe-80aa-88c2-e52913487252" class="" dir="auto">⚒️ 데이터 구조</h1><h3 id="2f80fa5b-84fe-8027-a546-e93891766547" class="" dir="auto">1. Kernel Manager</h3><script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js" integrity="sha512-AKaNmg8COK0zEbjTdMHJAPJ0z6VeNqvRvH4/d5M4sHJbQQUToMBtodq4HaV4fa+WV2UTfoperElm66c9/8cKmQ==" crossorigin="anonymous" referrerPolicy="no-referrer"></script><pre id="2f80fa5b-84fe-8054-a043-cf7c239d37ce" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class KernelManager:
+	kernels: list[Kernel]</code></pre><div id="2f80fa5b-84fe-8039-89d2-fb3429ae79ea" class="column-list" data-notion-column-list="" dir="auto"><div id="2f80fa5b-84fe-8035-9c54-c97a84f1476b" style="width:62.5%" class="column" data-notion-column-ratio="0.625" dir="auto"><h3 id="2f80fa5b-84fe-8087-ab3d-c4d43fe799bd" class="" dir="auto">2-A. Kernel</h3><pre id="2f80fa5b-84fe-80fc-81ef-e79f0c961311" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class Kernel:
+    kernel_id: str
+    status: str  #  &quot;running&quot; | &quot;interrupted&quot;</code></pre><ul id="2f80fa5b-84fe-80fb-b666-e9fbe64ee0cd" class="bulleted-list" dir="auto"><li style="list-style-type:disc">커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함</li></ul><ul id="2f80fa5b-84fe-8072-bc91-c6503e382a8c" class="bulleted-list" dir="auto"><li style="list-style-type:disc">공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요</li></ul><p id="3020fa5b-84fe-80c4-a454-f48d59cc5bbc" class="" dir="auto">
+</p></div><div id="2f80fa5b-84fe-80e8-847e-fa943065ff2b" style="width:43.749999999999986%" class="column" data-notion-column-ratio="0.4374999999999999" dir="auto"><h3 id="2f80fa5b-84fe-80f3-92cb-c3b2fbaed9e2" class="" dir="auto">2-B. File</h3><pre id="2f80fa5b-84fe-8001-8ab5-dd357b53d226" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class File:
+	kernel_id: str
+	tokens: dataclass
+	cells: list[Cell]
+</code></pre></div></div><h3 id="2f80fa5b-84fe-8096-8bef-e81ed0ce7c43" class="" dir="auto">3. Cell</h3><pre id="2f80fa5b-84fe-8037-a53a-c2487757bed4" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class Cell:
+	id: str
+	(index: int 클라이언트쪽 전송용)
+	cell_type: str
+	source: str
+	execution_count: int
+	outputs: list[dict]
+	locked: bool = False
+	authorized_to: Optional[str] = None
+	focused_by: list[str] = []
+	status: str = &quot;none&quot;| &quot;pending&quot; | &quot;running&quot; | &quot;completed&quot; | &quot;failed&quot;
+	auto_run
+	collapsed
+	title
+	layout - horizontal</code></pre><p id="2f80fa5b-84fe-802e-89ae-cfb479f4661b" class="" dir="auto">User</p><pre id="2f80fa5b-84fe-80fe-8dd0-c2f5ebc2ddec" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all"></code></pre><p id="2f80fa5b-84fe-80b6-a8da-c7552e0bad06" class="" dir="auto">
+</p><p id="2f80fa5b-84fe-8041-8c22-cb6f4945142b" class="" dir="auto">Code</p><pre id="2f80fa5b-84fe-80d1-b14d-ead0b6d369c9" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class Notebook:
+    kernel_id: Optional[str]  # 연결된 커널
+    cells: list[Cell]</code></pre><div id="2f80fa5b-84fe-80a8-9e02-d3487c7c13cc" class="column-list" data-notion-column-list="" dir="auto"><div id="2f80fa5b-84fe-806e-9d71-e2e217946b95" style="width:100%" class="column" data-notion-column-ratio="1" dir="auto"><p id="2f80fa5b-84fe-8036-8954-d3b7d897f2f6" class="" dir="auto">execution</p><pre id="2f80fa5b-84fe-8097-9a4f-cb42fa735df3" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class Execution:
+    cell_id: str          # 실행된 셀 ID
+    kernel_id: str        # 커널 ID
+    code: str             # 실행된 코드
+    status: Optional[Executionstatus]        # &quot;pending&quot; | &quot;running&quot; | &quot;completed&quot; | &quot;failed&quot; 
+    started_at: datetime  # 실행 시작 시간
+    completed_at: Optional[datetime]  # 실행 완료 시간
+    outputs: list[dict]   # 실행 결과
+    error: Optional[dict] # 오류 정보</code></pre><p id="3280fa5b-84fe-80ae-b1af-dd43b09d7403" class="" dir="auto">
+</p></div><div id="2f80fa5b-84fe-8043-aa71-ef3b3bfa4938" style="width:100%" class="column" data-notion-column-ratio="1" dir="auto"><p id="2f80fa5b-84fe-80ff-a301-d95b35e9e5a9" class="" dir="auto">ExecutionStatus</p><pre id="2f80fa5b-84fe-805c-a74c-ce85f661cf7f" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class ExecutionStatus(StrEnum):
+    PENDING     = &quot;pending&quot;
+    RUNNING     = &quot;running&quot;
+    COMPLETED   = &quot;completed&quot;
+    FAILED      = &quot;failed&quot;</code></pre><p id="33a0fa5b-84fe-8036-94ae-cb72e7e8eb91" class="" dir="auto">
+</p></div></div><p id="2f80fa5b-84fe-8073-a04b-dd87b3c4dbba" class="" dir="auto">
+</p><p id="2f80fa5b-84fe-8074-b355-e960e8e25736" class="" dir="auto">History</p><pre id="2f80fa5b-84fe-800f-a649-ef2cecaec1f1" class="code code-wrap" data-notion-code-syntax="python"><code class="language-python" style="white-space:pre-wrap;word-break:break-all">class History:
+		kernel_id: Optional[str] #연결된 커널
+		executions: list[Execution]</code></pre><p id="2f80fa5b-84fe-8027-a0bd-eab3a8d00000" class="" dir="auto">
+</p><p id="2f80fa5b-84fe-80fa-8bf8-d9132e3c8049" class="" dir="auto">
+</p><div id="2f80fa5b-84fe-806c-80a8-d81154e26747" class="collection-content" dir="ltr"><h4 class="collection-title">API 명세서</h4><div class="collection-content-wrapper"><table class="collection-content"><colgroup><col style="width:18.394648829431436%"/><col style="width:14.715719063545151%"/><col style="width:22.296544035674472%"/><col style="width:22.296544035674472%"/><col style="width:22.296544035674472%"/></colgroup><thead><tr><th><span class="icon property-icon"><img src="https://app.notion.com/icons/font_gray.svg" style="width:14px;height:14px;display:block"/></span>기능</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/arrow-circle-down_gray.svg" style="width:14px;height:14px;display:block"/></span>HTTP 메서드</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/description_gray.svg" style="width:14px;height:14px;display:block"/></span>URI</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/description_gray.svg" style="width:14px;height:14px;display:block"/></span>Request</th><th><span class="icon property-icon"><img src="https://app.notion.com/icons/description_gray.svg" style="width:14px;height:14px;display:block"/></span>Response</th></tr></thead><tbody><tr id="2f80fa5b-84fe-8168-81f0-c4d54fe732a0"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EB%A1%9C%EA%B7%B8%EC%9D%B8%202f80fa5b84fe816881f0c4d54fe732a0.html" data-notion-page-id="2f80fa5b-84fe-8168-81f0-c4d54fe732a0" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">로그인</a></td><td class="cell-`]To"><span class="selected-value select-value-color-brown">GET</span></td><td class="cell-S{t_">/auth</td><td class="cell-X[lr">비밀번호를 세션에 넣어서 진행</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-8199-9b31-e146d3f57964"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EB%B9%84%EB%B0%80%EB%B2%88%ED%98%B8%20%EC%9E%AC%EC%84%A4%EC%A0%95%202f80fa5b84fe81999b31e146d3f57964.html" data-notion-page-id="2f80fa5b-84fe-8199-9b31-e146d3f57964" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">비밀번호 재설정</a></td><td class="cell-`]To"><span class="selected-value select-value-color-red">PUT</span></td><td class="cell-S{t_">/auth/password</td><td class="cell-X[lr">토큰을 인증하고, 새 비밀번호 등록</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-817d-874e-f1116b7d0f47"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EB%A7%88%EC%8A%A4%ED%84%B0%20%ED%86%A0%ED%81%B0%20%EC%9E%AC%EC%84%A4%EC%A0%95%202f80fa5b84fe817d874ef1116b7d0f47.html" data-notion-page-id="2f80fa5b-84fe-817d-874e-f1116b7d0f47" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">마스터 토큰 재설정</a></td><td class="cell-`]To"><span class="selected-value select-value-color-red">PUT</span></td><td class="cell-S{t_">/auth/tokens/master</td><td class="cell-X[lr">비밀번호를 인증하고, 새 토큰 발행</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-811c-89e3-d836353e6dce"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EA%B3%B5%EC%9C%A0%20%ED%86%A0%ED%81%B0%20%EC%9E%AC%EC%84%A4%EC%A0%95%202f80fa5b84fe811c89e3d836353e6dce.html" data-notion-page-id="2f80fa5b-84fe-811c-89e3-d836353e6dce" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">공유 토큰 재설정</a></td><td class="cell-`]To"><span class="selected-value select-value-color-red">PUT</span></td><td class="cell-S{t_">/auth/tokens/shared/{token_type}</td><td class="cell-X[lr">마스터 토큰을 세션에 넣어 인증하고, 각 타입별 공유 토큰 생성</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-8169-acb2-d5b543b73966"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/vscode%20%ED%8F%AC%EC%9B%8C%EB%94%A9%202f80fa5b84fe8169acb2d5b543b73966.html" data-notion-page-id="2f80fa5b-84fe-8169-acb2-d5b543b73966" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">vscode 포워딩</a></td><td class="cell-`]To"><span class="selected-value select-value-color-pink">GET/WS</span></td><td class="cell-S{t_">/code/~</td><td class="cell-X[lr"></td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-810e-ab1f-e542c298998c"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%BB%A4%EB%84%90%20%EC%83%9D%EC%84%B1%202f80fa5b84fe810eab1fe542c298998c.html" data-notion-page-id="2f80fa5b-84fe-810e-ab1f-e542c298998c" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">커널 생성</a></td><td class="cell-`]To"><span class="selected-value select-value-color-default">POST</span></td><td class="cell-S{t_">/kernels/{kernel_id}</td><td class="cell-X[lr">kernel_id: None→ id</td><td class="cell-=upv">커널 파이썬 위치 지정 필요</td></tr><tr id="2f80fa5b-84fe-81c7-a98b-d2fcea1d87e8"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%BB%A4%EB%84%90%20%EC%A1%B0%ED%9A%8C%202f80fa5b84fe81c7a98bd2fcea1d87e8.html" data-notion-page-id="2f80fa5b-84fe-81c7-a98b-d2fcea1d87e8" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">커널 조회</a></td><td class="cell-`]To"><span class="selected-value select-value-color-brown">GET</span></td><td class="cell-S{t_">/kernels/{kernel_id}</td><td class="cell-X[lr"></td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-81b3-8f97-ef13dcbb64d0"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%BB%A4%EB%84%90%20%EC%A0%95%EC%A7%80%202f80fa5b84fe81b38f97ef13dcbb64d0.html" data-notion-page-id="2f80fa5b-84fe-81b3-8f97-ef13dcbb64d0" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">커널 정지</a></td><td class="cell-`]To"><span class="selected-value select-value-color-yellow">PATCH</span></td><td class="cell-S{t_">/kernels/{kernel_id}</td><td class="cell-X[lr">status: running → interrupted</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-813e-af90-f22c370abb92"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%BB%A4%EB%84%90%20%EC%82%AD%EC%A0%9C%202f80fa5b84fe813eaf90f22c370abb92.html" data-notion-page-id="2f80fa5b-84fe-813e-af90-f22c370abb92" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">커널 삭제</a></td><td class="cell-`]To"><span class="selected-value select-value-color-green">DELETE</span></td><td class="cell-S{t_">/kernels/{kernel_id}</td><td class="cell-X[lr">kernel_id : id → None</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-81d0-b68c-e64d7556d7ef"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EC%83%9D%EC%84%B1%202f80fa5b84fe81d0b68ce64d7556d7ef.html" data-notion-page-id="2f80fa5b-84fe-81d0-b68c-e64d7556d7ef" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 생성</a></td><td class="cell-`]To"><span class="selected-value select-value-color-default">POST</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells</td><td class="cell-X[lr">id: str<br/>(index: int 클라이언트쪽 전송용)<br/>cell_type: str<br/>source: str<br/>execution_count: int<br/>outputs: List[dict]<br/>locked: bool = False<br/>authorized_to: Optional[str] = None<br/>focused_by: List[str] = []<br/>status: str = &quot;none&quot; | &quot;running&quot; | &quot;completed&quot; | &quot;failed&quot;<br/>auto_run<br/>collapsed<br/>title<br/>layout - horizontal</td><td class="cell-=upv"> </td></tr><tr id="2f80fa5b-84fe-8172-b376-fcf6821ecfb9"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EB%8F%99%EA%B8%B0%ED%99%94%202f80fa5b84fe8172b376fcf6821ecfb9.html" data-notion-page-id="2f80fa5b-84fe-8172-b376-fcf6821ecfb9" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 동기화</a></td><td class="cell-`]To"><span class="selected-value select-value-color-brown">GET/SSE</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells?nickname={device_name}</td><td class="cell-X[lr">같은 토큰이더라도 어느 클라이언트인지 닉네임으로 구분</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-81e6-8f88-e2ba7a8814b2"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EC%95%8C%EB%9E%8C%202f80fa5b84fe81e68f88e2ba7a8814b2.html" data-notion-page-id="2f80fa5b-84fe-81e6-8f88-e2ba7a8814b2" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 알람</a></td><td class="cell-`]To"><span class="selected-value select-value-color-brown">GET/SSE</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}?watch=status&amp;client_id={uuid}</td><td class="cell-X[lr"></td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-818d-b410-dd6e53468abd"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EC%8B%A4%ED%96%89%202f80fa5b84fe818db410dd6e53468abd.html" data-notion-page-id="2f80fa5b-84fe-818d-b410-dd6e53468abd" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 실행</a></td><td class="cell-`]To"><span class="selected-value select-value-color-yellow">PATCH</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}</td><td class="cell-X[lr">status: none → pending</td><td class="cell-=upv"> </td></tr><tr id="2f80fa5b-84fe-8132-9322-f77f8a25dd0e"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EC%8B%A4%ED%96%89%20%EC%B7%A8%EC%86%8C%202f80fa5b84fe81329322f77f8a25dd0e.html" data-notion-page-id="2f80fa5b-84fe-8132-9322-f77f8a25dd0e" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 실행 취소</a></td><td class="cell-`]To"><span class="selected-value select-value-color-yellow">PATCH</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}</td><td class="cell-X[lr">status: pending → none</td><td class="cell-=upv"></td></tr><tr id="2f80fa5b-84fe-81c5-a7b5-ea8eaf8bbe0c"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%ED%81%B4%EB%A6%AD%202f80fa5b84fe81c5a7b5ea8eaf8bbe0c.html" data-notion-page-id="2f80fa5b-84fe-81c5-a7b5-ea8eaf8bbe0c" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 클릭</a></td><td class="cell-`]To"><span class="selected-value select-value-color-yellow">PATCH</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}</td><td class="cell-X[lr">focus_by.append(user_id)</td><td class="cell-=upv"> </td></tr><tr id="2f80fa5b-84fe-8125-8aee-f8baa613913e"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EB%9D%BD%202f80fa5b84fe81258aeef8baa613913e.html" data-notion-page-id="2f80fa5b-84fe-8125-8aee-f8baa613913e" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 락</a></td><td class="cell-`]To"><span class="selected-value select-value-color-yellow">PATCH</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}</td><td class="cell-X[lr">locked: False → True<br/>authorized_to: None → 유저명</td><td class="cell-=upv"> </td></tr><tr id="2f80fa5b-84fe-8167-9600-e12d1e1cd4e5"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EC%96%B8%EB%9D%BD%202f80fa5b84fe81679600e12d1e1cd4e5.html" data-notion-page-id="2f80fa5b-84fe-8167-9600-e12d1e1cd4e5" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 언락</a></td><td class="cell-`]To"><span class="selected-value select-value-color-yellow">PATCH</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}</td><td class="cell-X[lr">locked: True → False<br/>authorized_to: 유저명 → None<br/></td><td class="cell-=upv"> </td></tr><tr id="2f80fa5b-84fe-81f8-a1ab-c4ce0e8813bc"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EC%85%80%20%EC%82%AD%EC%A0%9C%202f80fa5b84fe81f8a1abc4ce0e8813bc.html" data-notion-page-id="2f80fa5b-84fe-81f8-a1ab-c4ce0e8813bc" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">셀 삭제</a></td><td class="cell-`]To"><span class="selected-value select-value-color-green">DELETE</span></td><td class="cell-S{t_">/kernels/{kernel_id}/cells/{cell_id}</td><td class="cell-X[lr">셀 리스트에서 해당 cell_id를 갖고 있는 셀 삭제</td><td class="cell-=upv"> </td></tr><tr id="2f80fa5b-84fe-81eb-86aa-f017129f3ea7"><td class="cell-title"><a href="DarkPyonix/API%20%EB%AA%85%EC%84%B8%EC%84%9C/%EB%A7%A4%ED%81%AC%EB%A1%9C%20%EC%83%9D%EC%84%B1%202f80fa5b84fe81eb86aaf017129f3ea7.html" data-notion-page-id="2f80fa5b-84fe-81eb-86aa-f017129f3ea7" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">매크로 생성</a></td><td class="cell-`]To"></td><td class="cell-S{t_"></td><td class="cell-X[lr"></td><td class="cell-=upv"></td></tr></tbody></table></div><br/><br/></div><details id="2f80fa5b-84fe-8009-8593-daac6bc7a494" open="" class="toggle" dir="auto"><summary>Request/Response</summary><div class="indented"><div id="2f80fa5b-84fe-81af-8001-fe6de28ac80e" class="collection-content" dir="ltr"><h4 class="collection-title">Request/Response</h4><div class="collection-content-wrapper"><table class="collection-content"><colgroup><col style="width:100%"/></colgroup><thead><tr><th><span class="icon property-icon"><img src="https://app.notion.com/icons/font_gray.svg" style="width:14px;height:14px;display:block"/></span>이름</th></tr></thead><tbody><tr id="2f80fa5b-84fe-8125-91fc-f7c4412727d2"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%202f80fa5b84fe812591fcf7c4412727d2.html" data-notion-page-id="2f80fa5b-84fe-8125-91fc-f7c4412727d2" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}</a></td></tr><tr id="2f80fa5b-84fe-8127-b257-c8c987ff77cf"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20tokens%20initial%202f80fa5b84fe8127b257c8c987ff77cf.html" data-notion-page-id="2f80fa5b-84fe-8127-b257-c8c987ff77cf" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/tokens/initial</a></td></tr><tr id="2f80fa5b-84fe-810b-8fc9-ec7be2dfc589"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%202f80fa5b84fe810b8fc9ec7be2dfc589.html" data-notion-page-id="2f80fa5b-84fe-810b-8fc9-ec7be2dfc589" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}</a></td></tr><tr id="2f80fa5b-84fe-81a0-8a3e-e94fa95c65b5"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20POST%20kernels%20%7Bkernel_id%7D%202f80fa5b84fe81a08a3ee94fa95c65b5.html" data-notion-page-id="2f80fa5b-84fe-81a0-8a3e-e94fa95c65b5" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request POST/kernels/{kernel_id}</a></td></tr><tr id="2f80fa5b-84fe-8143-97df-d987d3f8b4b5"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20POST%20kernels%20%7Bkernel_id%7D%202f80fa5b84fe814397dfd987d3f8b4b5.html" data-notion-page-id="2f80fa5b-84fe-8143-97df-d987d3f8b4b5" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response POST/kernels/{kernel_id}</a></td></tr><tr id="2f80fa5b-84fe-81ff-9d78-deab2cd8b7bb"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20DELETE%20kernels%20%7Bkernel_id%7D%202f80fa5b84fe81ff9d78deab2cd8b7bb.html" data-notion-page-id="2f80fa5b-84fe-81ff-9d78-deab2cd8b7bb" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request DELETE /kernels/{kernel_id}</a></td></tr><tr id="2f80fa5b-84fe-8128-8e7b-fa899c6f7f18"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20DELETE%20kernels%20%7Bkernel_id%7D%202f80fa5b84fe81288e7bfa899c6f7f18.html" data-notion-page-id="2f80fa5b-84fe-8128-8e7b-fa899c6f7f18" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response DELETE /kernels/{kernel_id}</a></td></tr><tr id="2f80fa5b-84fe-816e-90f3-d593e8cf71d5"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20executions%202f80fa5b84fe816e90f3d593e8cf71d5.html" data-notion-page-id="2f80fa5b-84fe-816e-90f3-d593e8cf71d5" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/executions</a></td></tr><tr id="2f80fa5b-84fe-8199-b530-e90bf9994301"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20executions%202f80fa5b84fe8199b530e90bf9994301.html" data-notion-page-id="2f80fa5b-84fe-8199-b530-e90bf9994301" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/executions</a></td></tr><tr id="2f80fa5b-84fe-818d-95c8-f5e709d89092"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%20lock%202f80fa5b84fe818d95c8f5e709d89092.html" data-notion-page-id="2f80fa5b-84fe-818d-95c8-f5e709d89092" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/cells/{cell_id}/lock</a></td></tr><tr id="2f80fa5b-84fe-819e-8abb-e95c9cd5020d"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%20lock%202f80fa5b84fe819e8abbe95c9cd5020d.html" data-notion-page-id="2f80fa5b-84fe-819e-8abb-e95c9cd5020d" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/cells/{cell_id}/lock</a></td></tr><tr id="2f80fa5b-84fe-8106-af54-d78924ed906e"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%20unlock%202f80fa5b84fe8106af54d78924ed906e.html" data-notion-page-id="2f80fa5b-84fe-8106-af54-d78924ed906e" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/cells/{cell_id}/unlock</a></td></tr><tr id="2f80fa5b-84fe-81d9-af45-d838ca208d31"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%20unloc%202f80fa5b84fe81d9af45d838ca208d31.html" data-notion-page-id="2f80fa5b-84fe-81d9-af45-d838ca208d31" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response 
+/kernels/{kernel_id}/cells/{cell_id}/unlock</a></td></tr><tr id="2f80fa5b-84fe-8177-825f-fcb7dfe9756a"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20PUT%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%20lo%202f80fa5b84fe8177825ffcb7dfe9756a.html" data-notion-page-id="2f80fa5b-84fe-8177-825f-fcb7dfe9756a" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request PUT/kernels/{kernel_id}/cells/{cell_id}/lock</a></td></tr><tr id="2f80fa5b-84fe-819b-a418-c34366fc3246"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20PUT%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%20l%202f80fa5b84fe819ba418c34366fc3246.html" data-notion-page-id="2f80fa5b-84fe-819b-a418-c34366fc3246" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response PUT/kernels/{kernel_id}/cells/{cell_id}/lock</a></td></tr><tr id="2f80fa5b-84fe-81eb-9f40-d4fdc1ebbc1e"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20%7Bcell_id%7D%20interrupt%202f80fa5b84fe81eb9f40d4fdc1ebbc1e.html" data-notion-page-id="2f80fa5b-84fe-81eb-9f40-d4fdc1ebbc1e" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/{cell_id}/interrupt</a></td></tr><tr id="2f80fa5b-84fe-818f-a948-fa39eaf31d7a"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20%7Bcell_id%7D%20interrupt%202f80fa5b84fe818fa948fa39eaf31d7a.html" data-notion-page-id="2f80fa5b-84fe-818f-a948-fa39eaf31d7a" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/{cell_id}/interrupt</a></td></tr><tr id="2f80fa5b-84fe-8105-a0ec-c317c3483d6f"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20cells%202f80fa5b84fe8105a0ecc317c3483d6f.html" data-notion-page-id="2f80fa5b-84fe-8105-a0ec-c317c3483d6f" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/cells</a></td></tr><tr id="2f80fa5b-84fe-8157-82d3-db81d8df9534"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20cells%202f80fa5b84fe815782d3db81d8df9534.html" data-notion-page-id="2f80fa5b-84fe-8157-82d3-db81d8df9534" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/cells</a></td></tr><tr id="2f80fa5b-84fe-8160-ba2d-e78a0e5c97a9"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%202f80fa5b84fe8160ba2de78a0e5c97a9.html" data-notion-page-id="2f80fa5b-84fe-8160-ba2d-e78a0e5c97a9" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/cells/{cell_id}</a></td></tr><tr id="2f80fa5b-84fe-817e-9c75-d88bbdce2c77"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20cells%20%7Bcell_id%7D%202f80fa5b84fe817e9c75d88bbdce2c77.html" data-notion-page-id="2f80fa5b-84fe-817e-9c75-d88bbdce2c77" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/cells/{cell_id}</a></td></tr><tr id="2f80fa5b-84fe-810a-98f5-c4fd165cd830"><td class="cell-title"><a href="DarkPyonix/Request%20Response/DTO%20Template%202f80fa5b84fe810a98f5c4fd165cd830.html" data-notion-page-id="2f80fa5b-84fe-810a-98f5-c4fd165cd830" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>DTO Template</a></td></tr><tr id="2f80fa5b-84fe-8112-83d2-e84e2df2e687"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20tokens%20initial%202f80fa5b84fe811283d2e84e2df2e687.html" data-notion-page-id="2f80fa5b-84fe-8112-83d2-e84e2df2e687" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/tokens/initial</a></td></tr><tr id="2f80fa5b-84fe-81eb-9322-f198d9c356b7"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20password%202f80fa5b84fe81eb9322f198d9c356b7.html" data-notion-page-id="2f80fa5b-84fe-81eb-9322-f198d9c356b7" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/password</a></td></tr><tr id="2f80fa5b-84fe-81e4-a85e-e05483bd2fd8"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20password%202f80fa5b84fe81e4a85ee05483bd2fd8.html" data-notion-page-id="2f80fa5b-84fe-81e4-a85e-e05483bd2fd8" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/password</a></td></tr><tr id="2f80fa5b-84fe-816c-9f2a-c6691bb67e19"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20tokens%20auth%202f80fa5b84fe816c9f2ac6691bb67e19.html" data-notion-page-id="2f80fa5b-84fe-816c-9f2a-c6691bb67e19" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/tokens/auth</a></td></tr><tr id="2f80fa5b-84fe-8156-8f7c-d4f3bd5030f8"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20tokens%20auth%202f80fa5b84fe81568f7cd4f3bd5030f8.html" data-notion-page-id="2f80fa5b-84fe-8156-8f7c-d4f3bd5030f8" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/tokens/auth</a></td></tr><tr id="2f80fa5b-84fe-8128-afa3-d940b5cbfced"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20tokens%20%7Btoken%7D%20verify%202f80fa5b84fe8128afa3d940b5cbfced.html" data-notion-page-id="2f80fa5b-84fe-8128-afa3-d940b5cbfced" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request kernels/{kernel_id}/tokens/{token}/verify</a></td></tr><tr id="2f80fa5b-84fe-8153-847a-e0c79c55ffba"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20tokens%20%7Btoken%7D%20verify%202f80fa5b84fe8153847ae0c79c55ffba.html" data-notion-page-id="2f80fa5b-84fe-8153-847a-e0c79c55ffba" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response kernels/{kernel_id}/tokens/{token}/verify</a></td></tr><tr id="2f80fa5b-84fe-8147-b176-cafc8fc7fac9"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20kernels%20%7Bkernel_id%7D%20tokens%20share%202f80fa5b84fe8147b176cafc8fc7fac9.html" data-notion-page-id="2f80fa5b-84fe-8147-b176-cafc8fc7fac9" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /kernels/{kernel_id}/tokens/share</a></td></tr><tr id="2f80fa5b-84fe-81d1-b0b5-e5bc29b50cfd"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20kernels%20%7Bkernel_id%7D%20tokens%20share%202f80fa5b84fe81d1b0b5e5bc29b50cfd.html" data-notion-page-id="2f80fa5b-84fe-81d1-b0b5-e5bc29b50cfd" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /kernels/{kernel_id}/tokens/share</a></td></tr><tr id="2f80fa5b-84fe-814c-9cdd-ffd871b37410"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%20ws%20kernels%20%7Bkernel_id%7D%20token=%7Btoken%7D%202f80fa5b84fe814c9cddffd871b37410.html" data-notion-page-id="2f80fa5b-84fe-814c-9cdd-ffd871b37410" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request /ws/kernels/{kernel_id}?token={token}</a></td></tr><tr id="2f80fa5b-84fe-8107-ad47-dbb95b6ff737"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%20ws%20kernels%20%7Bkernel_id%7D%20token=%7Btoken%7D%202f80fa5b84fe8107ad47dbb95b6ff737.html" data-notion-page-id="2f80fa5b-84fe-8107-ad47-dbb95b6ff737" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response /ws/kernels/{kernel_id}?token={token}</a></td></tr><tr id="2f80fa5b-84fe-810b-b74d-ca31e4beb211"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Request%202f80fa5b84fe810bb74dca31e4beb211.html" data-notion-page-id="2f80fa5b-84fe-810b-b74d-ca31e4beb211" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Request</a></td></tr><tr id="2f80fa5b-84fe-81a2-a566-e1fe8a69bef4"><td class="cell-title"><a href="DarkPyonix/Request%20Response/Response%202f80fa5b84fe81a2a566e1fe8a69bef4.html" data-notion-page-id="2f80fa5b-84fe-81a2-a566-e1fe8a69bef4" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>Response</a></td></tr><tr id="2f80fa5b-84fe-814e-9019-dd5990cac9f0"><td class="cell-title"><a href="DarkPyonix/Request%20Response/%EC%A0%9C%EB%AA%A9%20%EC%97%86%EC%9D%8C%202f80fa5b84fe814e9019dd5990cac9f0.html" data-notion-page-id="2f80fa5b-84fe-814e-9019-dd5990cac9f0" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>제목 없음</a></td></tr></tbody></table></div><br/><br/></div><p id="2f80fa5b-84fe-81a1-816b-f55237b062eb" class="" dir="auto">
+</p><p id="2f80fa5b-84fe-81dc-8fe3-f87585382cd2" class="" dir="auto">
+</p></div></details><p id="2f80fa5b-84fe-80a8-8046-fd4da4f7a383" class="" dir="auto">
+</p><figure id="2f80fa5b-84fe-8088-971c-f5b92fd59061" class="link-to-page"><a href="DarkPyonix/%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EA%B5%AC%EC%A1%B0%20(1)%202f80fa5b84fe8088971cf5b92fd59061.html" data-notion-page-id="2f80fa5b-84fe-8088-971c-f5b92fd59061" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2">데이터 구조 (1)</a></figure><figure id="2f80fa5b-84fe-8001-87a5-ef1741a2cb9d" class="link-to-page"><a href="DarkPyonix/%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EA%B5%AC%EC%A1%B0%20(1)%202f80fa5b84fe800187a5ef1741a2cb9d.html" data-notion-page-id="2f80fa5b-84fe-8001-87a5-ef1741a2cb9d" data-notion-space-id="722ebc71-c523-4658-84ce-14d203acf8b2"><span class="icon" data-emoji="📜"></span>데이터 구조 (1)</a></figure><p id="2f80fa5b-84fe-8095-824b-fc751c443a12" class="" dir="auto">
+</p></div></article><span class="sans" style="font-size:14px;padding-top:2em"></span></body></html>

@@ -1,0 +1,36 @@
+﻿기능,HTTP 메서드,Request,Response,URI
+셀 실행,PATCH,status: none → pending,"제목 없음 (https://app.notion.com/p/23d48f1f340c8034bbb8c64c9ec4c7e1?pvs=21) ",/kernels/{kernel_id}/cells/{cell_id}
+셀 락,PATCH,"locked: False → True
+authorized_to: None → 유저명","제목 없음 (https://app.notion.com/p/23d48f1f340c80899284f1888e2905bf?pvs=21) ",/kernels/{kernel_id}/cells/{cell_id}
+커널 삭제,DELETE,kernel_id : id → None,,/kernels/{kernel_id}
+셀 동기화,GET/SSE,같은 토큰이더라도 어느 클라이언트인지 닉네임으로 구분,,/kernels/{kernel_id}/cells?nickname={device_name}
+커널 생성,POST,kernel_id: None→ id,커널 파이썬 위치 지정 필요,/kernels/{kernel_id}
+로그인,GET,비밀번호를 세션에 넣어서 진행,,/auth
+비밀번호 재설정,PUT,"토큰을 인증하고, 새 비밀번호 등록",,/auth/password
+커널 정지,PATCH,status: running → interrupted,,/kernels/{kernel_id}
+셀 언락,PATCH,"locked: True → False
+authorized_to: 유저명 → None
+","제목 없음 (https://app.notion.com/p/23d48f1f340c80789bddf1e6b597f906?pvs=21) ",/kernels/{kernel_id}/cells/{cell_id}
+셀 클릭,PATCH,focus_by.append(user_id),"제목 없음 (https://app.notion.com/p/23d48f1f340c80ef9e51d60402a66528?pvs=21) ",/kernels/{kernel_id}/cells/{cell_id}
+커널 조회,GET,,,/kernels/{kernel_id}
+셀 알람,GET/SSE,,,/kernels/{kernel_id}/cells/{cell_id}?watch=status&client_id={uuid}
+vscode 포워딩,GET/WS,,,/code/~
+셀 생성,POST,"id: str
+(index: int 클라이언트쪽 전송용)
+cell_type: str
+source: str
+execution_count: int
+outputs: List[dict]
+locked: bool = False
+authorized_to: Optional[str] = None
+focused_by: List[str] = []
+status: str = ""none"" | ""running"" | ""completed"" | ""failed""
+auto_run
+collapsed
+title
+layout - horizontal","제목 없음 (https://app.notion.com/p/23e48f1f340c8074b246f2de35eabf76?pvs=21) ",/kernels/{kernel_id}/cells
+셀 삭제,DELETE,셀 리스트에서 해당 cell_id를 갖고 있는 셀 삭제,"제목 없음 (https://app.notion.com/p/23e48f1f340c80228670f221d63a56f5?pvs=21) ",/kernels/{kernel_id}/cells/{cell_id}
+공유 토큰 재설정,PUT,"마스터 토큰을 세션에 넣어 인증하고, 각 타입별 공유 토큰 생성",,/auth/tokens/shared/{token_type}
+셀 실행 취소,PATCH,status: pending → none,,/kernels/{kernel_id}/cells/{cell_id}
+마스터 토큰 재설정,PUT,"비밀번호를 인증하고, 새 토큰 발행",,/auth/tokens/master
+매크로 생성,,,,
