@@ -37,13 +37,13 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [CLAUDE.md](CLAUDE.md)에
 | M1 | 커널 코어 | 2026-10-10 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1~D2, FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
 | M2 | 매니저·CLI·런타임 API | 2026-10-17 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
 | M3 | 전용 매니저와 공유 | 2026-10-24 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
-| M4 | 허브 | 2026-11-20 | FR-H1~H5, NFR-H1. FR-H6(OpenAI 로그인)은 Q2가 긍정적으로 풀릴 때만 포함 | Q1을 2026-10-24까지 결정, Ember M5와 함께 |
+| M4 | 허브 | 2026-11-20 | FR-H1~H5, NFR-H1. OpenAI 로그인(FR-H6)은 허브가 아니라 ember server에서 함(Q2) | Q1을 2026-10-24까지 결정, Ember M5와 함께 |
 | M5 | 기억으로서의 커널 | 11월 범위 밖 | 네임스페이스 체크포인트·복원 설계(INTENT 1.2 D) | M2 |
 
 **11월 범위에서 뺀 것과 이유**
 - M5 체크포인트·복원: 살아 있는 네임스페이스와 실행 기록(`__runs__`)만으로도 에이전트가 상태를 조회할 수 있습니다(FR-K6, FR-R3). 복원은 pickle 없이 설계해야 해서(INTENT §4) 연구가 먼저 필요합니다.
 - `parallel`/`concurrent`와 interop 셀의 실행 의미(Q7, Q8): 문법은 받아들이고 보존하지만, 실행 의미는 이슈 #5와 #7의 결정이 먼저입니다.
-- FR-H6 OpenAI 로그인: Q2(제3자 제공 여부와 약관)가 확인되기 전에는 넣지 않습니다.
+- FR-H6 허브의 OpenAI 로그인: 원격 호스팅 서비스는 OpenAI 관심 신청서와 승인이 필요하므로 11월에 넣지 않습니다. 사용자 플랜 사용은 ember server(로컬 호스팅)에서 합니다(Q2).
 
 `vscode-darkpyonix`와 `intellij-darkpyonix`가 매니저 API에 붙는 작업은 M2 이후에 시작할 수 있습니다. ember는 M1~M4가 커널 API에 의존하지 않습니다(Ember 구현 담당 확인).
 
@@ -51,11 +51,11 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [CLAUDE.md](CLAUDE.md)에
 
 | ID | 질문 | 상태 |
 |---|---|---|
-| Q1 | 컴퓨터 사이 P2P를 직접 만든 Rust 터널로 할지 "tailcat"으로 할지. 사용자가 쓴 "tailcat"이 Tailscale을 뜻하는지도 확인해야 합니다 | 사용자 확인 필요 |
-| Q2 | OpenAI 계정 로그인을 제3자 서비스가 쓸 수 있는지, Codex 외 Chat 사용량을 쓰는 페이지가 약관상 가능한지 | 조사 필요 |
+| Q1 | 컴퓨터 사이 P2P를 [tailcat](https://github.com/tailscale/tailcat)(Tailscale이 data plane만 떼어 낸 Go 라이브러리·CLI, BSD-3)으로 할지, Rust로 할지([iroh](https://github.com/n0-computer/iroh) 1.0 또는 직접 구현) | 조사 완료(2026-10-03). 리더 권장: tailcat + darkpyonix.dev 자체 DERP 릴레이, 터널은 교체 가능한 인터페이스 뒤에 둠. 사용자 확인 대기 |
+| Q2 | OpenAI 계정 로그인과 ChatGPT 플랜 사용량 | 조사 완료(2026-10-03). "Sign in with ChatGPT"(OAuth 2.0 + OIDC, PKCE, 루프백 리디렉트)로 오픈소스·로컬 호스팅 앱은 사용자의 ChatGPT 플랜으로 Responses API를 쓸 수 있습니다(`store:false`, `stream:true` 필수, 앱별 주간 상한). 유료·원격 호스팅 앱은 관심 신청서가 필요합니다. 그래서 플랜 사용은 사용자가 직접 띄운 ember server에서 하고, darkpyonix.dev 허브는 이 경로를 쓰지 않습니다 |
 | Q3 | Windows 루프백 멀티캐스트의 신뢰성. 안 되면 Windows 기본값을 등록 파일 발견으로 둘지 | M1에서 측정 |
 | Q4 | 기존 Jupyter 도구와의 호환(Jupyter Server REST 흉내)이 필요한지 | 보류 |
-| Q5 | `__runs__/`의 보관 정책(용량 상한, 오래된 실행 정리)과 Git 추적 여부 | 사용자 확인 필요 |
+| Q5 | `__runs__/`의 보관 정책 | Git 추적은 결정됨(기본 포함, 원하면 폴더째 제외, INTENT D8). 용량 상한과 오래된 실행 정리는 FR-R5의 사이드카 외에 두지 않음 |
 | Q6 | `restart hard`에서 OS 잠금이 잠깐 풀리는 틈을 어떻게 막을지(재실행 전 잠금 파일 핸들 상속 등) | M1에서 결정 |
 | Q7 | grid 레이아웃을 여닫는 태그가 필요한지, horizontal/vertical 전환으로 충분한지 | 이슈 #7 |
 | Q8 | `parallel`/`concurrent`와 언어 interop 셀의 실행 의미 | 이슈 #5, #7 |

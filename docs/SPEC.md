@@ -258,7 +258,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 메인 서버가 `https://<name>.darkpyonix.dev` 형식의 주소와 공인 인증서를 얻게 합니다(모바일 웹뷰의 보안 컨텍스트 요건).
 
 ### FR-H6 로그인 — `Draft`
-OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사용량도 쓸 수 있는 페이지를 둡니다. 외부 서비스에 이 방식의 로그인이 열려 있는지부터 확인해야 합니다(PROJECT Q2).
+OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사용량도 쓸 수 있는 페이지를 둡니다. 2026-10-03 조사 결과 ChatGPT 플랜 사용("Sign in with ChatGPT")은 오픈소스·로컬 호스팅 앱에 열려 있고 원격 호스팅은 별도 승인이 필요합니다. 그래서 플랜 사용은 ember server가 맡고(ember SPEC), 허브의 로그인은 승인을 받은 뒤에 다룹니다(PROJECT Q2).
 
 ## 11. 비기능 요구사항
 
