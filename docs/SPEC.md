@@ -106,11 +106,12 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 - 수용 기준: 실행 기록이 `nbformat.validate`를 통과합니다(테스트 환경에 nbformat이 있을 때). 표준 라이브러리 `json`으로 읽은 구조가 위 필드를 모두 가집니다.
 - 테스트: `test_fr_r1_run_log_is_valid_nbformat`, `test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt`
 
-### FR-R2 실행 중 저장 — `Agreed`
+### FR-R2 실행 중 저장 — `Done`
 커널은 실행 중에도 기록을 최대 1초 간격으로 원자적으로(임시 파일 → `os.replace`) 다시 씁니다. `index.json`에는 최신순 실행 요약(`run_id`, `status`, `started_at`, `ended_at`, `mode`)을 둡니다.
 - 수용 기준: 실행 중에 커널을 `SIGKILL`로 죽여도 기록 파일은 유효한 JSON이고, 죽기 1초 전까지의 출력이 들어 있습니다. 상태는 `running`으로 남고, 다음 커널이 그 파일을 열면 `crashed`로 바꿉니다.
-- 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`
-- 상태 메모 (2026-10-03 감사): 기록이 최대 1초 간격으로 원자적으로 다시 쓰이는 것, `RunStore`로 기록하던 프로세스를 `SIGKILL`로 죽여도 유효한 JSON과 `running` 상태가 남는 것, `recover_crashed()`가 `crashed`로 바꾸는 것은 검증했습니다. 시험은 실제 커널 대신 `RunStore`만 쓰는 대역 프로세스를 죽이고 복구 함수를 직접 부르며, 마지막 출력이 죽기 1.3초 전 이내인지 봅니다(기준은 1초). 실제 커널을 실행 중에 죽이고, 다음 커널이 시작하면서 그 기록을 `crashed`로 바꾸는 시험은 아직 없습니다.
+- 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`, `test_fr_r2_real_kernel_killed_mid_run_is_recovered_as_crashed`(실제 커널을 다음 다시 쓰기 직전, 즉 가장 불리한 순간에 `SIGKILL`하고, 셀이 찍은 모든 출력 중 죽기 1초 전보다 오래된 것이 기록에 다 있는지 확인한 뒤, 같은 파일로 새 커널을 띄워 기록이 `crashed`가 되는지 봅니다)
+- 구현 메모: 다시 쓰기 주기는 스냅숏 시작부터 다음 스냅숏 시작까지 0.8초(`runs.WRITE_INTERVAL`)입니다. 1초 주기로는 캡처 라우터의 폴링 지연(최대 20 ms)과 쓰기 시간이 더해져 가장 불리한 순간에 1.01–1.04초 전 출력이 빠졌습니다(2026-10-03 측정).
+- 측정(2026-10-03, Mac mini 8코어, 가장 불리한 순간에 죽임): 기록에 없는 가장 오래된 출력이 죽기 0.79–0.86초 전. CPU를 16개 바쁜 루프로 2배 초과 점유한 상태에서도 0.77–0.86초.
 
 ### FR-R3 매직 변수 `__runs__` — `Agreed`
 커널 네임스페이스에는 `__runs__` 객체가 있습니다.

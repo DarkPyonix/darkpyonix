@@ -33,7 +33,10 @@ from darkpyonix.kernel.protocol import DKPError
 
 RUNS_DIRNAME = "__runs__"
 INDEX_NAME = "index.json"
-WRITE_INTERVAL = 1.0                     # FR-R2: at most one rewrite per second
+# FR-R2: a running log is rewritten this often, measured from the start of one snapshot to
+# the start of the next. Below 1 s so that output reaches the disk within 1 s even after the
+# capture router's poll delay and the write itself.
+WRITE_INTERVAL = 0.8
 DEFAULT_OUTPUT_LIMIT = 16 * 1024 * 1024  # FR-R5
 OUTPUT_LIMIT_ENV = "DARKPYONIX_RUN_OUTPUT_LIMIT"
 UNFINISHED = ("queued", "running")
@@ -293,7 +296,7 @@ class RunStore(object):
             self._index_put(_summary(to_notebook_meta(run)))
 
     def update(self, run: Run) -> None:
-        """Mark ``run`` changed. The log is rewritten within ~1 s, never more than once a second."""
+        """Mark ``run`` changed. The log is rewritten within ``WRITE_INTERVAL``, never more often."""
         with self._cond:
             self._dirty[run.run_id] = run
             if self._writer is None or not self._writer.is_alive():
@@ -350,6 +353,7 @@ class RunStore(object):
 
     def _write(self, run: Run) -> None:
         """Render and write ``run`` atomically, appending FR-R5 overflow first. Holds _lock."""
+        self._last_write = time.monotonic()   # the schedule follows snapshots (FR-R2)
         nb, spilled = _render(run, self.limit)
         self._ensure_dir()
         for index, rest in spilled.items():
@@ -361,7 +365,6 @@ class RunStore(object):
                     f.write(rest[done:])
                 self._spilled[key] = len(rest)
         _write_atomic(self.path_of(run.run_id), _dumps(nb))
-        self._last_write = time.monotonic()
 
     # ---- index.json
 
