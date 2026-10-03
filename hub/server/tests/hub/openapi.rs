@@ -39,7 +39,7 @@ async fn test_hub_every_operation_answers_with_a_documented_status() {
             continue;
         }
         // Not served until the relay trim (SPEC FR-H3: the relay asks the Worker whom to admit
-        // and takes disconnects at /admin/v1/disconnect).
+        // and takes disconnects at /admin/disconnect).
         if path.starts_with("/admin/") {
             continue;
         }

@@ -108,12 +108,12 @@ impl Manager {
         (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
     }
 
-    /// POST /api/v1/kernels: launch (or attach to) the kernel of `path`.
+    /// POST /api/kernels: launch (or attach to) the kernel of `path`.
     async fn start_kernel(&self, path: &Path) -> Value {
         let (status, body) = self
             .call(
                 reqwest::Method::POST,
-                "/api/v1/kernels",
+                "/api/kernels",
                 Some(json!({"path": path.to_string_lossy()})),
             )
             .await;
@@ -134,13 +134,13 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
     sorted[i]
 }
 
-/// `GET /api/v1/kernels{query}` `n` times; sorted latencies.
+/// `GET /api/kernels{query}` `n` times; sorted latencies.
 async fn time_list(m: &Manager, query: &str, n: usize, expect: usize) -> Vec<Duration> {
     let mut lat = Vec::with_capacity(n);
     for _ in 0..n {
         let t = Instant::now();
         let (status, body) = m
-            .call(reqwest::Method::GET, &format!("/api/v1/kernels{query}"), None)
+            .call(reqwest::Method::GET, &format!("/api/kernels{query}"), None)
             .await;
         lat.push(t.elapsed());
         assert_eq!(status, 200, "{body}");
@@ -186,7 +186,7 @@ async fn test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms() {
         ("first list of a fresh manager", &first),
     ] {
         eprintln!(
-            "MEASURE NFR-M1 GET /api/v1/kernels ({what}), {KERNELS} kernels: n={} p50 {:?} p99 {:?} max {:?}",
+            "MEASURE NFR-M1 GET /api/kernels ({what}), {KERNELS} kernels: n={} p50 {:?} p99 {:?} max {:?}",
             lat.len(),
             percentile(lat, 0.5),
             percentile(lat, 0.99),
@@ -226,7 +226,7 @@ const NFR_M2_BOUND: Duration = Duration::from_millis(100);
 
 /// NFR-M2: a kernel's output reaches a manager SSE subscriber within p99 100 ms, the kernel's
 /// 50 ms stream merge included. The cell prints `T=<time.time()>` lines; the subscriber notes
-/// the wall clock when each line's newline arrives on `GET /api/v1/kernels/{id}/events`.
+/// the wall clock when each line's newline arrives on `GET /api/kernels/{id}/events`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99() {
     let dir = scratch("m2");
@@ -247,7 +247,7 @@ async fn test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99() {
 
     let mut sse = m
         .http
-        .get(format!("{}/api/v1/kernels/{kid}/events", m.url))
+        .get(format!("{}/api/kernels/{kid}/events", m.url))
         .bearer_auth(&m.token)
         .send()
         .await
@@ -257,7 +257,7 @@ async fn test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99() {
     let (status, body) = m
         .call(
             reqwest::Method::POST,
-            &format!("/api/v1/kernels/{kid}/runs"),
+            &format!("/api/kernels/{kid}/runs"),
             Some(json!({"mode": "all"})),
         )
         .await;

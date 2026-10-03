@@ -2,13 +2,13 @@
 //
 // A device joins an account through a device link, the shape of OAuth device authorization
 // (RFC 8628) with key possession added:
-//   1. the device asks: POST /v1/device-links {endpoint_id, name, role} -> link_id, user_code, challenge
+//   1. the device asks: POST /device-links {endpoint_id, name, role} -> link_id, user_code, challenge
 //   2. a person signed in with GitHub (or the account's main server) approves the user code:
-//      POST /v1/link-codes/{user_code} {"approve": true}
+//      POST /link-codes/{user_code} {"approve": true}
 //      (an account has one main server, Ember INTENT D3: a second main_server link is approved
 //      only as an explicit replacement, {"approve": true, "replace": "<current endpoint_id>"})
 //   3. the device claims its token, signing the challenge with its iroh secret key:
-//      POST /v1/device-links/{link_id}/token {"signature": hex(sign("darkpyonix-hub/v2/link\n<link_id>\n<challenge>"))}
+//      POST /device-links/{link_id}/token {"signature": hex(sign("darkpyonix-hub/v2/link\n<link_id>\n<challenge>"))}
 
 import { verifyEd25519 } from "./ed25519";
 import type { Deps, Env } from "./env";
@@ -118,7 +118,7 @@ function clientIp(request: Request): string {
 
 // ---------------------------------------------------------------- device list version (FR-H9)
 
-/** Longest `wait` of a long-poll on `GET /v1/devices`. */
+/** Longest `wait` of a long-poll on `GET /devices`. */
 export const MAX_WAIT_SECS = 25;
 /** How often a long-poll re-reads the account's version. */
 export const WAIT_POLL_MS = 2000;
@@ -146,7 +146,7 @@ function ifNoneMatches(header: string | null, etag: string): boolean {
   return header.split(",").some((tag) => tag.trim() === "*" || opaque(tag) === opaque(etag));
 }
 
-// ---------------------------------------------------------------- /v1/me
+// ---------------------------------------------------------------- /me
 
 export async function me(request: Request, env: Env, deps: Deps): Promise<Response> {
   const p = await principal(request, env, nowSecs(deps.nowMs()));
@@ -243,7 +243,7 @@ async function pendingLinkByCode(env: Env, rawCode: string, now: number): Promis
   return link;
 }
 
-/** `GET /v1/link-codes/{user_code}`: what the approver is about to let in. */
+/** `GET /link-codes/{user_code}`: what the approver is about to let in. */
 export async function getLinkCode(request: Request, env: Env, deps: Deps, code: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const accountId = requireAccountAdmin(await principal(request, env, now));
@@ -261,7 +261,7 @@ export async function getLinkCode(request: Request, env: Env, deps: Deps, code: 
   });
 }
 
-/** `POST /v1/link-codes/{user_code}` `{"approve": bool, "replace"?: "<endpoint_id>"}` */
+/** `POST /link-codes/{user_code}` `{"approve": bool, "replace"?: "<endpoint_id>"}` */
 export async function decideLinkCode(request: Request, env: Env, deps: Deps, code: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const p = await principal(request, env, now);
@@ -312,7 +312,7 @@ export async function decideLinkCode(request: Request, env: Env, deps: Deps, cod
 
 const LINK_ID_RE = /^l_[0-9a-f]{32}$/;
 
-/** `GET /v1/device-links/{link_id}`: the link's status, for a device that restarted while waiting. */
+/** `GET /device-links/{link_id}`: the link's status, for a device that restarted while waiting. */
 export async function getLink(_request: Request, env: Env, deps: Deps, linkId: string): Promise<Response> {
   const link = LINK_ID_RE.test(linkId)
     ? await env.DB.prepare("SELECT * FROM device_links WHERE link_id = ?").bind(linkId).first<LinkRow>()
@@ -334,7 +334,7 @@ export async function getLink(_request: Request, env: Env, deps: Deps, linkId: s
   });
 }
 
-/** `POST /v1/device-links/{link_id}/token` `{"signature": "<128 hex>"}` */
+/** `POST /device-links/{link_id}/token` `{"signature": "<128 hex>"}` */
 export async function claimLink(request: Request, env: Env, deps: Deps, linkId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const body = await readJson<{ signature?: unknown }>(request);
@@ -431,7 +431,7 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
   return json(201, { device: deviceJson(device), device_token: token, resolve_token: resolveToken });
 }
 
-/** `POST /v1/me/resolve-token`: a new read-only resolve token; the old one stops working (NFR-H2). */
+/** `POST /me/resolve-token`: a new read-only resolve token; the old one stops working (NFR-H2). */
 export async function rotateResolveToken(request: Request, env: Env, deps: Deps): Promise<Response> {
   const device = requireDevice(await principal(request, env, nowSecs(deps.nowMs()), { deviceOnly: true }));
   const resolveToken = newToken(RESOLVE_TOKEN_PREFIX);
@@ -444,7 +444,7 @@ export async function rotateResolveToken(request: Request, env: Env, deps: Deps)
 // ---------------------------------------------------------------- devices
 
 /**
- * `GET /v1/devices[?wait=<secs>]` with `If-None-Match`: 304 when unchanged; with `wait`, held
+ * `GET /devices[?wait=<secs>]` with `If-None-Match`: 304 when unchanged; with `wait`, held
  * until the account's device list changes or `wait` passes (FR-H9).
  */
 export async function listDevices(request: Request, env: Env, deps: Deps): Promise<Response> {
@@ -498,7 +498,7 @@ function requireSelfOrAccountAdmin(p: Principal, endpointId: string): string {
 }
 
 /**
- * `PATCH /v1/devices/{endpoint_id}` `{"name"?: string, "app"?: DeviceApp | null}`.
+ * `PATCH /devices/{endpoint_id}` `{"name"?: string, "app"?: DeviceApp | null}`.
  * `name`: the device itself or account rights. `app`: the device itself only (FR-H10).
  */
 export async function updateDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
@@ -535,7 +535,7 @@ export async function updateDevice(request: Request, env: Env, deps: Deps, endpo
   return json(200, deviceJson(await accountDevice(env, p, endpointId)));
 }
 
-/** `POST /v1/devices/{endpoint_id}/readmit`: the owner lets a removed key link again (FR-H11). */
+/** `POST /devices/{endpoint_id}/readmit`: the owner lets a removed key link again (FR-H11). */
 export async function readmitDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const p = await principal(request, env, now);
@@ -552,10 +552,10 @@ export async function readmitDevice(request: Request, env: Env, deps: Deps, endp
   return json(200, { endpoint_id: endpointId, expires_at: expiresAt });
 }
 
-/** Most removed devices `GET /v1/removed-devices` lists (FR-H11). */
+/** Most removed devices `GET /removed-devices` lists (FR-H11). */
 export const MAX_REMOVED_LISTED = 100;
 
-/** `GET /v1/removed-devices`: the account's removed devices, newest first, for re-admission (FR-H11). */
+/** `GET /removed-devices`: the account's removed devices, newest first, for re-admission (FR-H11). */
 export async function listRemovedDevices(request: Request, env: Env, deps: Deps): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const p = await principal(request, env, now);
@@ -586,7 +586,7 @@ export async function listRemovedDevices(request: Request, env: Env, deps: Deps)
 async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Promise<void> {
   if (!env.RELAY_ADMIN_URL || !env.RELAY_SHARED_SECRET) return;
   await deps
-    .fetch(`${env.RELAY_ADMIN_URL}/admin/v1/disconnect`, {
+    .fetch(`${env.RELAY_ADMIN_URL}/admin/disconnect`, {
       method: "POST",
       headers: { authorization: `Bearer ${env.RELAY_SHARED_SECRET}`, "content-type": "application/json" },
       body: JSON.stringify({ endpoint_id: endpointId }),

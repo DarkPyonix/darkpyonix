@@ -8,8 +8,8 @@
 //!
 //! Still to do here (needs a build, so it is a separate change): drop `api.rs` down to
 //! `/ping`, `/generate_204` and `/health`, drop `db.rs` and `dns.rs`, replace `HubAccess`'s
-//! SQLite lookups with `POST https://darkpyonix.dev/internal/v1/relay/admit` (honouring
-//! `cache_secs`) plus `/internal/v1/relay/presence` reports, add `POST /admin/v1/disconnect`,
+//! SQLite lookups with `POST https://darkpyonix.dev/internal/relay/admit` (honouring
+//! `cache_secs`) plus `/internal/relay/presence` reports, add `POST /admin/disconnect`,
 //! and replace the `fr_h1`/`fr_h2`/`fr_h4`/`fr_h5` tests (now covered by `hub/worker/test/`)
 //! with relay tests against a stub admission endpoint. Until then the API code below is the
 //! pre-D15 implementation and is not deployed.
@@ -60,7 +60,7 @@ pub struct HubConfig {
     pub public_url: Option<Url>,
     /// DNS zone for names, e.g. `darkpyonix.dev`.
     pub zone: String,
-    /// If set, `POST /v1/accounts` requires this in `X-Hub-Signup-Secret`.
+    /// If set, `POST /accounts` requires this in `X-Hub-Signup-Secret`.
     pub signup_secret: Option<String>,
     /// Directory with the built ash viewer, served under `/ash/`.
     pub ash_dir: Option<PathBuf>,

@@ -187,17 +187,17 @@ type St = State<Arc<FakeState>>;
 
 fn router(state: Arc<FakeState>) -> Router {
     let api = Router::new()
-        .route("/api/v1/manager", get(manager_info))
-        .route("/api/v1/kernels", get(list_kernels).post(start_kernel))
-        .route("/api/v1/kernels/{kid}", get(get_kernel).delete(delete_kernel))
-        .route("/api/v1/kernels/{kid}/interrupt", post(interrupt))
-        .route("/api/v1/kernels/{kid}/restart", post(restart))
-        .route("/api/v1/kernels/{kid}/namespace", get(namespace))
-        .route("/api/v1/kernels/{kid}/runs", post(start_run))
-        .route("/api/v1/kernels/{kid}/runs/{run_ref}", get(get_run))
-        .route("/api/v1/kernels/{kid}/events", get(events))
-        .route("/api/v1/kernels/{kid}/shares", post(share))
-        .route("/api/v1/documents", get(document))
+        .route("/api/manager", get(manager_info))
+        .route("/api/kernels", get(list_kernels).post(start_kernel))
+        .route("/api/kernels/{kid}", get(get_kernel).delete(delete_kernel))
+        .route("/api/kernels/{kid}/interrupt", post(interrupt))
+        .route("/api/kernels/{kid}/restart", post(restart))
+        .route("/api/kernels/{kid}/namespace", get(namespace))
+        .route("/api/kernels/{kid}/runs", post(start_run))
+        .route("/api/kernels/{kid}/runs/{run_ref}", get(get_run))
+        .route("/api/kernels/{kid}/events", get(events))
+        .route("/api/kernels/{kid}/shares", post(share))
+        .route("/api/documents", get(document))
         .layer(middleware::from_fn(auth));
     Router::new().route("/health", get(health)).merge(api).with_state(state)
 }

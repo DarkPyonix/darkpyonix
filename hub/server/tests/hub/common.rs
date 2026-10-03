@@ -168,7 +168,7 @@ impl TestHub {
     pub async fn create_account(&self) -> (String, String) {
         let res = self
             .client
-            .post(self.url("/v1/accounts"))
+            .post(self.url("/accounts"))
             .send()
             .await
             .unwrap();
@@ -183,7 +183,7 @@ impl TestHub {
     pub async fn challenge(&self, account_token: &str) -> String {
         let res = self
             .client
-            .post(self.url("/v1/challenges"))
+            .post(self.url("/challenges"))
             .bearer_auth(account_token)
             .send()
             .await
@@ -203,7 +203,7 @@ impl TestHub {
         role: &str,
     ) -> reqwest::Response {
         self.client
-            .post(self.url("/v1/devices"))
+            .post(self.url("/devices"))
             .bearer_auth(account_token)
             .json(&json!({
                 "endpoint_id": endpoint_id,
@@ -262,7 +262,7 @@ impl TestHub {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             let (status, body) = self
-                .get_json(&format!("/v1/devices/{endpoint_id}"), token)
+                .get_json(&format!("/devices/{endpoint_id}"), token)
                 .await;
             if status == 200 && body["online"].as_bool() == Some(want) {
                 return true;
@@ -282,7 +282,7 @@ impl TestHub {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let (status, body) = self
-                .get_json(&format!("/v1/devices/{endpoint_id}/addresses"), token)
+                .get_json(&format!("/devices/{endpoint_id}/addresses"), token)
                 .await;
             if status == 200 && pred(&body) {
                 return body;

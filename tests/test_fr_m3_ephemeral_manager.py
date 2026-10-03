@@ -58,9 +58,9 @@ def test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain(dp_home, scr
 
         with httpx.Client(base_url=record["url"], headers={"Authorization": "Bearer " + record["token"]},
                           timeout=5) as c:
-            assert c.get("/api/v1/kernels/%s" % announce["kernel_id"]).json()["pid"] == kernel.pid
+            assert c.get("/api/kernels/%s" % announce["kernel_id"]).json()["pid"] == kernel.pid
             # An open event stream keeps the manager alive past its idle timeout.
-            with c.stream("GET", "/api/v1/kernels/%s/events" % announce["kernel_id"]) as s:
+            with c.stream("GET", "/api/kernels/%s/events" % announce["kernel_id"]) as s:
                 assert s.status_code == 200
                 time.sleep(2.0)
                 assert manager.poll() is None

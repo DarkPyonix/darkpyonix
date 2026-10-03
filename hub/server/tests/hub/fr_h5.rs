@@ -22,7 +22,7 @@ async fn test_fr_h5_name_reservation_and_acme_txt() {
 
     let reserve = |token: &str, name: &str| {
         hub.client
-            .put(hub.url(&format!("/v1/names/{name}")))
+            .put(hub.url(&format!("/names/{name}")))
             .bearer_auth(token)
             .send()
     };
@@ -41,7 +41,7 @@ async fn test_fr_h5_name_reservation_and_acme_txt() {
     assert_eq!(reserve(&main_token, "studio").await.unwrap().status(), 200);
     assert_eq!(reserve(&rival_token, "studio").await.unwrap().status(), 409);
 
-    let (status, body) = hub.get_json("/v1/names", &account.1).await;
+    let (status, body) = hub.get_json("/names", &account.1).await;
     assert_eq!(status, 200);
     assert_eq!(body["names"][0]["name"], "studio");
 
@@ -49,7 +49,7 @@ async fn test_fr_h5_name_reservation_and_acme_txt() {
     let fqdn = "_acme-challenge.studio.darkpyonix.test";
     let challenge = |token: &str, body: Value| {
         hub.client
-            .put(hub.url("/v1/names/studio/acme-challenge"))
+            .put(hub.url("/names/studio/acme-challenge"))
             .bearer_auth(token)
             .json(&body)
             .send()
@@ -94,7 +94,7 @@ async fn test_fr_h5_name_reservation_and_acme_txt() {
 
     let res = hub
         .client
-        .delete(hub.url("/v1/names/studio/acme-challenge"))
+        .delete(hub.url("/names/studio/acme-challenge"))
         .bearer_auth(&main_token)
         .send()
         .await
@@ -105,7 +105,7 @@ async fn test_fr_h5_name_reservation_and_acme_txt() {
     // Releasing the name frees it.
     let res = hub
         .client
-        .delete(hub.url("/v1/names/studio"))
+        .delete(hub.url("/names/studio"))
         .bearer_auth(&account.1)
         .send()
         .await

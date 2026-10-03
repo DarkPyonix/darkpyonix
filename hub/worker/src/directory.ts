@@ -72,7 +72,7 @@ export async function storedAddresses(env: Env, endpointId: string) {
   return { payload, timestampUs: parts.timestampUs, ...endpointAddresses(z32Encode(key), answers) };
 }
 
-/** `GET /v1/devices/{endpoint_id}/addresses` */
+/** `GET /devices/{endpoint_id}/addresses` */
 export async function deviceAddresses(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const p = await principal(request, env, nowSecs(deps.nowMs()));
   await accountDevice(env, p, endpointId);

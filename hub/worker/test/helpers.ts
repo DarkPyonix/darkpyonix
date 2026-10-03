@@ -186,15 +186,15 @@ export async function linkDeviceTokens(
   name = "test device",
   approval: Record<string, unknown> = {},
 ): Promise<{ device_token: string; resolve_token: string }> {
-  const created = await call(deps, "POST", "/v1/device-links", {
+  const created = await call(deps, "POST", "/device-links", {
     json: { endpoint_id: device.endpointId, name, role },
   });
   if (created.status !== 201) throw new Error(`link: ${created.status} ${await created.text()}`);
   const link = (await created.json()) as { link_id: string; user_code: string; challenge: string };
-  const decided = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { ...approver, json: { approve: true, ...approval } });
+  const decided = await call(deps, "POST", `/link-codes/${link.user_code}`, { ...approver, json: { approve: true, ...approval } });
   if (decided.status !== 204) throw new Error(`approve: ${decided.status} ${await decided.text()}`);
   const signature = toHex(await device.sign(utf8(`darkpyonix-hub/v2/link\n${link.link_id}\n${link.challenge}`)));
-  const claimed = await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } });
+  const claimed = await call(deps, "POST", `/device-links/${link.link_id}/token`, { json: { signature } });
   if (claimed.status !== 201) throw new Error(`claim: ${claimed.status} ${await claimed.text()}`);
   return (await claimed.json()) as { device_token: string; resolve_token: string };
 }

@@ -44,7 +44,7 @@ SHARE_LINK = "https://darkpyonix.dev/s/%s#%s"
 KERNEL_ID_RE = re.compile(r"^k_[0-9a-f]{20}$")
 RUN_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
 SHARE_ID_RE = re.compile(r"^s_[0-9a-f]{16}$")
-EVENTS_PATH_RE = re.compile(r"^/api/v1/kernels/[^/]+/events$")
+EVENTS_PATH_RE = re.compile(r"^/api/kernels/[^/]+/events$")
 OUTPUT_EVENTS = ("output", "output.clear")
 
 
@@ -308,7 +308,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
     async def get_health():
         return {"status": "ok", "version": VERSION}
 
-    @app.get("/api/v1/manager", operation_id="getManager", tags=["System"], responses=_responses(200, 401))
+    @app.get("/api/manager", operation_id="getManager", tags=["System"], responses=_responses(200, 401))
     async def get_manager(p: Principal = Depends(principal)):
         return {"version": VERSION, "mode": state.mode, "pid": state.pid, "started_at": state.started_at,
                 "idle_timeout": int(state.idle_timeout) if state.idle_timeout is not None else None,
@@ -316,12 +316,12 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
 
     # -------------------------------------------------- Kernels
 
-    @app.get("/api/v1/kernels", operation_id="listKernels", tags=["Kernels"], responses=_responses(200, 401))
+    @app.get("/api/kernels", operation_id="listKernels", tags=["Kernels"], responses=_responses(200, 401))
     async def list_kernels(refresh: Optional[str] = Query(None), p: Principal = Depends(principal)):
         kernels = await directory.list(refresh=_flag(refresh))
         return {"kernels": [kernel_view(k) for k in kernels if p.can_see(k["kernel_id"])]}
 
-    @app.post("/api/v1/kernels", operation_id="startKernel", tags=["Kernels"], status_code=201,
+    @app.post("/api/kernels", operation_id="startKernel", tags=["Kernels"], status_code=201,
               responses=_responses(200, 201, 400, 401, 403, 504))
     async def start_kernel(body: StartKernelRequest, p: Principal = Depends(principal)):
         _require(p, "admin")
@@ -331,13 +331,13 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
             raise _from_dkp(exc)
         return JSONResponse(result.kernel, 201 if result.created else 200)
 
-    @app.get("/api/v1/kernels/{kernel_id}", operation_id="getKernel", tags=["Kernels"],
+    @app.get("/api/kernels/{kernel_id}", operation_id="getKernel", tags=["Kernels"],
              responses=_responses(200, 401, 404))
     async def get_kernel(kernel_id: str, p: Principal = Depends(principal)):
         announce = await visible(p, kernel_id)
         return await kernel_info(kernel_id, announce)
 
-    @app.delete("/api/v1/kernels/{kernel_id}", operation_id="shutdownKernel", tags=["Kernels"],
+    @app.delete("/api/kernels/{kernel_id}", operation_id="shutdownKernel", tags=["Kernels"],
                 status_code=202, responses=_responses(202, 401, 403, 404))
     async def shutdown_kernel(kernel_id: str, force: Optional[str] = Query(None),
                               p: Principal = Depends(principal)):
@@ -356,7 +356,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
             spawn(_kill_after(int(announce["pid"]), FORCE_KILL_GRACE))
         return JSONResponse({"shutting_down": True}, 202)
 
-    @app.post("/api/v1/kernels/{kernel_id}/interrupt", operation_id="interruptKernel", tags=["Kernels"],
+    @app.post("/api/kernels/{kernel_id}/interrupt", operation_id="interruptKernel", tags=["Kernels"],
               responses=_responses(200, 401, 403, 404))
     async def interrupt_kernel(kernel_id: str, p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -368,7 +368,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
             out["run_id"] = result["run_id"]
         return out
 
-    @app.post("/api/v1/kernels/{kernel_id}/restart", operation_id="restartKernel", tags=["Kernels"],
+    @app.post("/api/kernels/{kernel_id}/restart", operation_id="restartKernel", tags=["Kernels"],
               responses=_responses(200, 401, 403, 404), openapi_extra=RESTART_BODY)
     async def restart_kernel(kernel_id: str, request: Request, p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -391,7 +391,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
             announce = fresh or announce
         return await kernel_info(kernel_id, announce)
 
-    @app.get("/api/v1/kernels/{kernel_id}/namespace", operation_id="getNamespace", tags=["Kernels"],
+    @app.get("/api/kernels/{kernel_id}/namespace", operation_id="getNamespace", tags=["Kernels"],
              responses=_responses(200, 401, 403, 404))
     async def get_namespace(kernel_id: str, limit: Optional[str] = Query(None), p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -408,13 +408,13 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
         except FileNotFoundError:
             raise ApiError(404, "not_found", "no such file: %s" % path)
 
-    @app.get("/api/v1/kernels/{kernel_id}/document", operation_id="getKernelDocument", tags=["Documents"],
+    @app.get("/api/kernels/{kernel_id}/document", operation_id="getKernelDocument", tags=["Documents"],
              responses=_responses(200, 401, 404))
     async def get_kernel_document(kernel_id: str, p: Principal = Depends(principal)):
         announce = await visible(p, kernel_id)
         return await document(announce["path"], kernel_id, p.at_least("viewer2"))
 
-    @app.get("/api/v1/documents", operation_id="getDocument", tags=["Documents"],
+    @app.get("/api/documents", operation_id="getDocument", tags=["Documents"],
              responses=_responses(200, 400, 401, 403, 404))
     async def get_document(path: str = Query(...), p: Principal = Depends(principal)):
         _require(p, "admin")
@@ -426,7 +426,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
 
     # -------------------------------------------------- Runs
 
-    @app.get("/api/v1/kernels/{kernel_id}/runs", operation_id="listRuns", tags=["Runs"],
+    @app.get("/api/kernels/{kernel_id}/runs", operation_id="listRuns", tags=["Runs"],
              responses=_responses(200, 401, 403, 404))
     async def list_runs(kernel_id: str, limit: Optional[str] = Query(None), p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -435,7 +435,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
         result = await call(kernel_id, "runs.list", {"limit": _clamp(limit, 20, 1, 500)}) or {}
         return {"runs": result.get("runs", [])}
 
-    @app.post("/api/v1/kernels/{kernel_id}/runs", operation_id="startRun", tags=["Runs"], status_code=202,
+    @app.post("/api/kernels/{kernel_id}/runs", operation_id="startRun", tags=["Runs"], status_code=202,
               responses=_responses(202, 400, 401, 403, 404, 409))
     async def start_run(kernel_id: str, body: RunRequest, p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -453,7 +453,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
         if not (RUN_ID_RE.match(run_ref) or run_ref in ("latest", "current")):
             raise ApiError(404, "not_found", "no such run: %s" % run_ref)
 
-    @app.get("/api/v1/kernels/{kernel_id}/runs/{run_ref}", operation_id="getRun", tags=["Runs"],
+    @app.get("/api/kernels/{kernel_id}/runs/{run_ref}", operation_id="getRun", tags=["Runs"],
              responses=_responses(200, 401, 403, 404))
     async def get_run(kernel_id: str, run_ref: str, format: Optional[str] = Query(None),
                       p: Principal = Depends(principal)):
@@ -468,7 +468,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
             return run_summary(notebook, announce.get("path"))
         return notebook
 
-    @app.delete("/api/v1/kernels/{kernel_id}/runs/{run_ref}", operation_id="cancelRun", tags=["Runs"],
+    @app.delete("/api/kernels/{kernel_id}/runs/{run_ref}", operation_id="cancelRun", tags=["Runs"],
                 responses=_responses(200, 401, 403, 404))
     async def cancel_run(kernel_id: str, run_ref: str, p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -483,7 +483,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
 
     # -------------------------------------------------- Events (SSE)
 
-    @app.get("/api/v1/kernels/{kernel_id}/events", operation_id="streamEvents", tags=["Events"],
+    @app.get("/api/kernels/{kernel_id}/events", operation_id="streamEvents", tags=["Events"],
              responses=_responses(200, 401, 404))
     async def stream_events(kernel_id: str, request: Request, since: Optional[str] = Query(None),
                             p: Principal = Depends(principal)):
@@ -541,14 +541,14 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
 
     # -------------------------------------------------- Sharing (FR-A3; persistence is #19)
 
-    @app.get("/api/v1/kernels/{kernel_id}/shares", operation_id="listShares", tags=["Sharing"],
+    @app.get("/api/kernels/{kernel_id}/shares", operation_id="listShares", tags=["Sharing"],
              responses=_responses(200, 401, 403, 404))
     async def list_shares(kernel_id: str, p: Principal = Depends(principal)):
         check_id(p, kernel_id)
         _require(p, "admin")
         return {"shares": auth.list_shares(kernel_id)}
 
-    @app.post("/api/v1/kernels/{kernel_id}/shares", operation_id="createShare", tags=["Sharing"],
+    @app.post("/api/kernels/{kernel_id}/shares", operation_id="createShare", tags=["Sharing"],
               status_code=201, responses=_responses(201, 401, 403, 404))
     async def create_share(kernel_id: str, body: CreateShareRequest, p: Principal = Depends(principal)):
         check_id(p, kernel_id)
@@ -563,7 +563,7 @@ def create_app(directory: KernelDirectory, auth: Auth, state: Optional[ManagerSt
         share["url"] = SHARE_LINK % (share["share_id"], share["token"])
         return JSONResponse(share, 201)
 
-    @app.delete("/api/v1/kernels/{kernel_id}/shares/{share_id}", operation_id="revokeShare", tags=["Sharing"],
+    @app.delete("/api/kernels/{kernel_id}/shares/{share_id}", operation_id="revokeShare", tags=["Sharing"],
                 status_code=204, responses=_responses(204, 401, 403, 404))
     async def revoke_share(kernel_id: str, share_id: str, p: Principal = Depends(principal)):
         check_id(p, kernel_id)

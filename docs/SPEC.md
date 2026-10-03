@@ -494,7 +494,7 @@ iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{ke
 - 수용 기준: 링크로 받은 조회 토큰으로 `?token=` 조회가 200이고, 같은 조회 토큰으로 `GET /devices`·`GET /me`는 401입니다. 쿼리의 기기 토큰은 401 `invalid_credentials`입니다. 조회 토큰을 교체하면 이전 것은 401이고 새 것은 200입니다. 지운 기기의 조회 토큰은 401 `device_removed`입니다. 조회 요청(성공, 401, 404, 처리되지 않은 예외)을 처리하는 동안 Worker가 쓰는 `console` 출력에 토큰이 나타나지 않습니다. `wrangler.toml`의 호출 로그 설정이 꺼져 있습니다.
 - 테스트(`hub/worker/test/tokens.test.ts`): `test_nfr_h2_resolve_token_reads_records_and_nothing_else`, `test_nfr_h2_query_refuses_device_tokens`, `test_nfr_h2_resolve_token_rotates`, `test_nfr_h2_removed_device_resolve_token_is_device_removed`, `test_nfr_h2_worker_never_logs_the_query`, `test_nfr_h2_invocation_logs_are_off`
 
-### NFR-V1 버전 없는 REST API — `Agreed`
+### NFR-V1 버전 없는 REST API — `Done`
 INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, …)이 없습니다. 매니저는 `/api/...`, 허브는 접두 없이 `/devices`, `/config`처럼 씁니다. 계약은 더하기만 합니다: 필드·선택 요청 필드·경로·오류 `code`를 더할 수 있고, 있는 것의 이름·타입·뜻을 바꾸거나 지우지 않습니다. 클라이언트는 모르는 필드를 무시합니다. 바꿔야 하면 새 필드나 경로를 더하고 옛것은 OpenAPI에서 `deprecated: true`로 남깁니다.
 - 수용 기준: `docs/api/manager.openapi.yaml`과 `docs/api/hub.openapi.yaml`의 어떤 경로에도 `v<숫자>` 조각이 없습니다. 예전 버전 경로(`/api/v1/manager`, `/v1/config`)는 404입니다.
 - 테스트: `test_nfr_v1_no_version_segment_in_any_rest_path`, `test_nfr_v1_versioned_manager_path_is_not_served`(`tests/test_fr_m_manager.py`), `test_nfr_v1_versioned_hub_path_is_not_served`(`hub/worker/test/config.test.ts`)

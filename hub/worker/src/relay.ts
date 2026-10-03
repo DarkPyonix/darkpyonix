@@ -16,7 +16,7 @@ function requireRelay(request: Request, env: Env): void {
   }
 }
 
-/** `POST /internal/v1/relay/admit` `{"endpoint_id": hex, "token": string|null}` */
+/** `POST /internal/relay/admit` `{"endpoint_id": hex, "token": string|null}` */
 export async function admit(request: Request, env: Env, deps: Deps): Promise<Response> {
   requireRelay(request, env);
   const body = await readJson<{ endpoint_id?: unknown; token?: unknown }>(request);
@@ -44,7 +44,7 @@ export async function admit(request: Request, env: Env, deps: Deps): Promise<Res
   return json(200, { allow: false, reason: "not a registered device and no valid relay pass", cache_secs: 0 });
 }
 
-/** `POST /internal/v1/relay/presence` `{"endpoint_id": hex, "online": bool}` */
+/** `POST /internal/relay/presence` `{"endpoint_id": hex, "online": bool}` */
 export async function presence(request: Request, env: Env, deps: Deps): Promise<Response> {
   requireRelay(request, env);
   const body = await readJson<{ endpoint_id?: unknown; online?: unknown }>(request);

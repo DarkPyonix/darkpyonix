@@ -67,28 +67,28 @@ impl IntoResponse for ApiError {
 pub(crate) fn router(state: Shared) -> Router {
     let mut router = Router::new()
         .route("/health", get(health))
-        .route("/v1/accounts", post(create_account))
-        .route("/v1/challenges", post(create_challenge))
-        .route("/v1/devices", get(list_devices).post(register_device))
+        .route("/accounts", post(create_account))
+        .route("/challenges", post(create_challenge))
+        .route("/devices", get(list_devices).post(register_device))
         .route(
-            "/v1/devices/{endpoint_id}",
+            "/devices/{endpoint_id}",
             get(get_device).delete(remove_device),
         )
-        .route("/v1/devices/{endpoint_id}/addresses", get(device_addresses))
+        .route("/devices/{endpoint_id}/addresses", get(device_addresses))
         .route("/pkarr/{key}", put(pkarr_put).get(pkarr_get))
         .route("/ping", get(ping))
         .route("/generate_204", get(generate_204))
-        .route("/v1/shares", post(publish_share))
+        .route("/shares", post(publish_share))
         .route(
-            "/v1/shares/{share_id}",
+            "/shares/{share_id}",
             get(resolve_share).delete(unpublish_share),
         )
         .route("/s/{share_id}", get(share_page))
         .route("/ash/", get(ash_index))
-        .route("/v1/names", get(list_names))
-        .route("/v1/names/{name}", put(reserve_name).delete(release_name))
+        .route("/names", get(list_names))
+        .route("/names/{name}", put(reserve_name).delete(release_name))
         .route(
-            "/v1/names/{name}/acme-challenge",
+            "/names/{name}/acme-challenge",
             put(set_acme_challenge).delete(clear_acme_challenge),
         );
     if state.ash_dir.is_some() {
@@ -634,7 +634,7 @@ const SHARE_PAGE: &str = r#"<!doctype html>
 <pre id="route"></pre>
 </main>
 <script>
-fetch("/v1/shares/__SHARE_ID__").then(function (r) { return r.json(); }).then(function (j) {
+fetch("/shares/__SHARE_ID__").then(function (r) { return r.json(); }).then(function (j) {
   document.getElementById("route").textContent = "host: " + j.endpoint_id + "\nrelay: " + j.relay_url;
 });
 </script>

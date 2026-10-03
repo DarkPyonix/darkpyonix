@@ -66,7 +66,7 @@ pub struct KernelInfo {
     pub port: u16,
 }
 
-/// `POST /api/v1/kernels` body.
+/// `POST /api/kernels` body.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StartKernel {
     pub path: String,

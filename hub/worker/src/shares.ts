@@ -24,7 +24,7 @@ async function shareHost(env: Env, shareId: string): Promise<ShareHost | null> {
     .first<ShareHost>();
 }
 
-/** `POST /v1/shares` `{"share_id": "s_..."}` with the hosting device's token. */
+/** `POST /shares` `{"share_id": "s_..."}` with the hosting device's token. */
 export async function publishShare(request: Request, env: Env, deps: Deps): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const device = requireDevice(await principal(request, env, now, { deviceOnly: true }));
@@ -46,7 +46,7 @@ export async function publishShare(request: Request, env: Env, deps: Deps): Prom
   return json(201, { share_id: shareId, url: `${env.PUBLIC_URL}/s/${shareId}` });
 }
 
-/** `GET /v1/shares/{share_id}`: public. Returns the host and a fresh guest relay pass. */
+/** `GET /shares/{share_id}`: public. Returns the host and a fresh guest relay pass. */
 export async function resolveShare(_request: Request, env: Env, deps: Deps, shareId: string): Promise<Response> {
   const host = await shareHost(env, shareId);
   if (!host) throw ApiError.notFound();
@@ -71,7 +71,7 @@ export async function resolveShare(_request: Request, env: Env, deps: Deps, shar
   });
 }
 
-/** `DELETE /v1/shares/{share_id}`: the hosting device, or the account (session / main server). */
+/** `DELETE /shares/{share_id}`: the hosting device, or the account (session / main server). */
 export async function unpublishShare(request: Request, env: Env, deps: Deps, shareId: string): Promise<Response> {
   const p = await principal(request, env, nowSecs(deps.nowMs()));
   const host = await shareHost(env, shareId);

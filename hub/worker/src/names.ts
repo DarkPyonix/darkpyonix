@@ -36,7 +36,7 @@ export async function listNames(request: Request, env: Env, deps: Deps): Promise
   return json(200, { names: results.map((n) => nameJson(env, n)) });
 }
 
-/** `PUT /v1/names/{name}` with the main server's device token. */
+/** `PUT /names/{name}` with the main server's device token. */
 export async function reserveName(request: Request, env: Env, deps: Deps, name: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const device = requireDevice(await principal(request, env, now, { deviceOnly: true }));
@@ -83,7 +83,7 @@ function dnsFailure(err: unknown): never {
   throw err;
 }
 
-/** `PUT /v1/names/{name}/acme-challenge` `{"values": ["<43 base64url>", ...]}` */
+/** `PUT /names/{name}/acme-challenge` `{"values": ["<43 base64url>", ...]}` */
 export async function setAcmeChallenge(request: Request, env: Env, deps: Deps, name: string): Promise<Response> {
   const device = requireDevice(await principal(request, env, nowSecs(deps.nowMs()), { deviceOnly: true }));
   const row = await ownedName(env, device, name, false);

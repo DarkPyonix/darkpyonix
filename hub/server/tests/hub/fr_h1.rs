@@ -26,7 +26,7 @@ async fn test_fr_h1_register_two_iroh_endpoints() {
     hub.register(&account, a.secret_key(), "main_server").await;
     hub.register(&account, b.secret_key(), "computer").await;
 
-    let (status, body) = hub.get_json("/v1/devices", &account.1).await;
+    let (status, body) = hub.get_json("/devices", &account.1).await;
     assert_eq!(status, 200);
     let ids: Vec<&str> = body["devices"]
         .as_array()
@@ -93,7 +93,7 @@ async fn test_fr_h1_registration_requires_key_possession() {
     // Without the account token.
     let res = hub
         .client
-        .post(hub.url("/v1/challenges"))
+        .post(hub.url("/challenges"))
         .send()
         .await
         .unwrap();
@@ -107,16 +107,16 @@ async fn test_fr_h1_devices_are_scoped_to_their_account() {
     let theirs = hub.create_account().await;
     let key = SecretKey::generate();
     let device_token = hub.register(&mine, &key, "computer").await;
-    let path = format!("/v1/devices/{}", key.public());
+    let path = format!("/devices/{}", key.public());
 
     assert_eq!(hub.get_json(&path, &mine.1).await.0, 200);
     // The device's own token sees its account too.
     assert_eq!(hub.get_json(&path, &device_token).await.0, 200);
     assert_eq!(hub.get_json(&path, &theirs.1).await.0, 404);
-    let (status, body) = hub.get_json("/v1/devices", &theirs.1).await;
+    let (status, body) = hub.get_json("/devices", &theirs.1).await;
     assert_eq!(status, 200);
     assert_eq!(body["devices"], Value::Array(vec![]));
-    assert_eq!(hub.get_json("/v1/devices", "dpa_not-a-token").await.0, 401);
+    assert_eq!(hub.get_json("/devices", "dpa_not-a-token").await.0, 401);
 }
 
 #[tokio::test]
@@ -159,7 +159,7 @@ async fn test_fr_h1_removed_device_is_revoked() {
     conn.close(0u32.into(), b"done");
 
     // A device token cannot remove devices; the account token can.
-    let path = format!("/v1/devices/{}", key_a.public());
+    let path = format!("/devices/{}", key_a.public());
     let res = hub
         .client
         .delete(hub.url(&path))
@@ -178,7 +178,7 @@ async fn test_fr_h1_removed_device_is_revoked() {
     assert_eq!(res.status(), 204);
 
     // Its token is dead, it is not listed, and its key cannot come back.
-    assert_eq!(hub.get_json("/v1/devices", &token_a).await.0, 401);
+    assert_eq!(hub.get_json("/devices", &token_a).await.0, 401);
     assert_eq!(hub.get_json(&path, &account.1).await.0, 404);
     let challenge = hub.challenge(&account.1).await;
     let sig = sign_registration(&key_a, &account.0, &challenge);

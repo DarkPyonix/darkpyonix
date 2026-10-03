@@ -28,7 +28,7 @@ export function sharePlaceholderPage(shareId: string): string {
 <code>${id}</code>; the access token after <code>#</code> stays in your browser.</p>
 <pre id="route"></pre>
 <script>
-fetch("/v1/shares/${id}").then(function (r) { return r.json(); }).then(function (j) {
+fetch("/shares/${id}").then(function (r) { return r.json(); }).then(function (j) {
   document.getElementById("route").textContent = "host: " + j.endpoint_id + "\\nrelay: " + j.relay_url;
 });
 </script>
@@ -63,7 +63,7 @@ var replace = null;
 function show(text) { document.getElementById("status").textContent = text; }
 function lookup(code) {
   current = code;
-  fetch("/v1/link-codes/" + encodeURIComponent(code)).then(function (r) {
+  fetch("/link-codes/" + encodeURIComponent(code)).then(function (r) {
     if (!r.ok) { document.getElementById("device").hidden = true; show("Unknown or expired code."); return; }
     return r.json().then(function (j) {
       document.getElementById("name").textContent = j.name;
@@ -78,7 +78,7 @@ function lookup(code) {
   });
 }
 function decide(approve) {
-  fetch("/v1/link-codes/" + encodeURIComponent(current), {
+  fetch("/link-codes/" + encodeURIComponent(current), {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(approve && replace ? { approve: true, replace: replace } : { approve: approve })
   }).then(function (r) {
     document.getElementById("device").hidden = true;
