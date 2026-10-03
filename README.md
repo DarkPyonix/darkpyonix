@@ -39,12 +39,14 @@ To browse the API locally: `python3 -m http.server -d docs/api 8000` and open <h
 ## Repository layout
 
 ```
-kernel/darkpyonix/            runtime API + notebook parser (stdlib only)
-kernel/darkpyonix/kernel/     the kernel process (stdlib only)
-kernel/darkpyonix/manager/    the manager and the darkpyonix CLI
-hub/worker/                   darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
-hub/server/                   relay.darkpyonix.dev iroh relay host (Rust)
-docs/                         design documents
+darkpyonix/kernel/darkpyonix/            runtime API + notebook parser (stdlib only)
+darkpyonix/kernel/darkpyonix/kernel/     the kernel process (stdlib only)
+darkpyonix/kernel/darkpyonix/manager/    the superseded Python manager prototype
+darkpyonix/manager/                      the manager and the darkpyonix CLI (Rust workspace)
+hub/worker/                              darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
+hub/server/                              relay.darkpyonix.dev iroh relay host (Rust)
+docs/                                    design documents
+tests/                                   Python test suite
 ```
 
 ## License

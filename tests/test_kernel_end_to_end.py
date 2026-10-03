@@ -1,6 +1,6 @@
 """The integrated kernel process over DKP/1: launch, run, log, interrupt, busy, survival.
 
-These drive the real kernel main (kernel/darkpyonix/kernel/__main__.py) through the public
+These drive the real kernel main (darkpyonix/kernel/darkpyonix/kernel/__main__.py) through the public
 surfaces: launcher, discovery, KernelClient.
 """
 from __future__ import annotations

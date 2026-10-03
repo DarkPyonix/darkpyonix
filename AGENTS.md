@@ -7,13 +7,15 @@ Guidance for working in this repository.
 `darkpyonix` (repo `DarkPyonix/darkpyonix`, checked out as `darkpyonix-core`) is the
 DarkPyonix kernel stack:
 
-- `kernel/darkpyonix/kernel/`: the **file-bound kernel**. One kernel per source file,
-  independent of any manager, standard library only, runnable by any Python 3.8+ interpreter
-  without installation.
-- `kernel/darkpyonix/manager/`: the **kernel manager**. A disposable HTTP front for kernels.
-  It discovers running kernels, launches new ones, and serves IDEs, agents and the shared
-  notebook (ash).
-- `kernel/darkpyonix/` (top level): the **runtime API** that notebook files import
+- `darkpyonix/kernel/darkpyonix/kernel/`: the **file-bound kernel**. One kernel per source
+  file, independent of any manager, standard library only, runnable by any Python 3.8+
+  interpreter without installation.
+- `darkpyonix/manager/`: the **kernel manager** and the `darkpyonix` CLI, a Rust workspace
+  (INTENT D10). A disposable HTTP front for kernels. It discovers running kernels, launches
+  new ones, and serves IDEs, agents and the shared notebook (ash). It embeds the Python kernel
+  sources from `darkpyonix/kernel/`. `darkpyonix/kernel/darkpyonix/manager/` is the superseded
+  Python prototype.
+- `darkpyonix/kernel/darkpyonix/` (top level): the **runtime API** that notebook files import
   (`darkpyonix.markdown`, `darkpyonix.params`, `darkpyonix.binding`, …). Standard library only.
 - `hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine connections, HTTPS,
   and hosting of the official darkpyonix-ash viewer.
@@ -32,6 +34,29 @@ Documents:
 - `docs/FORMAT.md`: the `.py` / `.pynb` notebook file format.
 - `docs/api/*.openapi.yaml`: the HTTP APIs. `docs/api/index.html` renders them.
 - `darkpyonix.mermaid`: the class diagram of the object model.
+
+## Repository root
+
+The root holds exactly these entries:
+
+- `.gitignore`: ignored paths.
+- `.github/`: CI workflows (when present).
+- `AGENTS.md`: these working agreements.
+- `CLAUDE.md`: a pointer to `AGENTS.md`.
+- `LICENSE`: MIT.
+- `PROJECT.md`: scope, milestones, open questions.
+- `README.md`: what the project is and how it is laid out.
+- `darkpyonix.mermaid`: the class diagram of the object model.
+- `darkpyonix/`: the product code: `kernel/` (Python kernel and runtime API) and `manager/`
+  (Rust manager and CLI).
+- `docs/`: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT and the OpenAPI files.
+- `hub/`: `darkpyonix.dev` (Cloudflare Worker and relay host).
+- `pyproject.toml`: the Python package and pytest configuration.
+- `tests/`: the Python test suite.
+
+**Do not add a top-level folder or file without the user's approval.** Propose what you want
+to add and why, explain why no existing directory fits, then wait for the answer. Ignored
+local work areas (`.scratch/`, `.claude/worktrees/`) are not part of the tree.
 
 ## Spec Driven Development
 
@@ -82,7 +107,9 @@ Never introduce anything that violates these. If a task seems to require it, sto
 2. Where inside:
    - worktrees: `.claude/worktrees/<name>/` (ignored by git);
    - throwaway work, probes, downloads, test run directories: `.scratch/<name>/` (ignored);
-   - experiments worth keeping: `experiments/<name>/`, committed.
+   - Rust build output: `darkpyonix/manager/target/` and `hub/server/target/` (ignored);
+   - experiments worth keeping: ask first (see "Repository root"); there is no top-level
+     `experiments/` folder.
 3. The one exception is what the product itself writes at run time on a user's machine
    (`~/.darkpyonix/`, `__runs__/` beside a notebook). Tests point those at `.scratch/`
    through `DARKPYONIX_HOME` instead of writing to the real home directory.
@@ -90,10 +117,14 @@ Never introduce anything that violates these. If a task seems to require it, sto
 
 ## Sub-agents and builds
 
-- **Sub-agents never run Rust builds** (`cargo build/test/clippy/run`, or anything that compiles
-  Rust such as `maturin`). They write code and tests, research, and write documents. The session
-  that spawned them builds and tests, one cargo invocation at a time with `CARGO_BUILD_JOBS=2`,
-  or pushes the branch and lets GitHub Actions run it. (User rule, 2026-10-03.)
+- **Coding, research and documentation sub-agents never build** (`cargo build/test/clippy/run`,
+  or anything that compiles Rust such as `maturin`).
+- **Builds and tests go to one temporary builder sub-agent** that does only that job. Run one
+  builder at a time, with `CARGO_BUILD_JOBS=2`. The session (the leader) never builds itself, so
+  it stays free for other work. (User rule, 2026-10-03: "빌드 작업 니가 직접 하지 말고 서브
+  에이전트 하나 임시로 만들어서 개한테 시켜야지", "니가 작업 붙잡고 있으면 다른 일들도 진행이
+  안되잖아".)
+- When no builder is used, push the branch and let CI run it.
 - Never share one `CARGO_TARGET_DIR` between worktrees: path crates from different worktrees
   overwrite each other's artifacts.
 - Python test runs are allowed in sub-agents; keep them inside `.scratch/` and kill every process
@@ -101,7 +132,14 @@ Never introduce anything that violates these. If a task seems to require it, sto
 
 ## Git
 
-- Branches: `develop` (integration, where work lands) and `main` (protected, default).
+- Branches: `develop` (integration, where work lands) and `main` (protected, default). The
+  remote keeps only `main`, `develop` and `release` as long-lived branches.
+- Work branches are named `feat/<topic>`, made off `develop` in a worktree under
+  `.claude/worktrees/<name>/`.
+- Merge with `gh pr merge --delete-branch`, then remove the local branch and its worktree.
+- Merged branches are deleted periodically. A branch whose history is worth keeping gets an
+  `archive/<name>` tag first; verify the tag equals the branch head
+  (`git rev-parse archive/<name>` = `git rev-parse origin/<branch>`) before deleting it.
 - **Push right after every commit.** Never push to `main` directly. Force-push only with the
   user's confirmation.
 - **New features:** search issues first

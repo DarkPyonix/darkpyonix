@@ -30,8 +30,8 @@ dev = [
 darkpyonix = "darkpyonix.manager.cli:main"
 
 [tool.pdm.build]
-package-dir = "kernel"
-includes = ["kernel/darkpyonix"]
+package-dir = "darkpyonix/kernel"
+includes = ["darkpyonix/kernel/darkpyonix"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

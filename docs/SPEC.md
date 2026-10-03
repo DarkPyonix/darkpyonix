@@ -29,7 +29,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 ### FR-K2 파일에 묶인 커널 ID — `Done`
 커널 ID는 PROTOCOL §2.6의 규칙으로 만듭니다.
 - 수용 기준: 같은 파일의 절대 경로, 상대 경로, 심볼릭 링크가 같은 ID를 냅니다. 다른 파일은 다른 ID를 냅니다.
-- 테스트: `test_fr_k2_kernel_id_is_stable_across_path_spellings`, Rust `fr_m2_kernel_id_matches_python`(`manager/crates/dpx-kernel/tests/discovery_launch.rs`, 매니저의 ID가 파이썬과 같음)
+- 테스트: `test_fr_k2_kernel_id_is_stable_across_path_spellings`, Rust `fr_m2_kernel_id_matches_python`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`, 매니저의 ID가 파이썬과 같음)
 
 ### FR-K3 파일당 커널 하나 — `Done`
 커널은 시작할 때 `locks/<kernel_id>.lock`에 OS 배타 잠금(POSIX `fcntl.flock`, Windows `msvcrt.locking`)을 겁니다. 잠그지 못하면 종료 코드 3으로 끝나고, 표준 오류에 이미 떠 있는 커널의 announce 본문을 씁니다.
@@ -147,7 +147,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ### FR-R4 기록과 셀 맵핑 — `Done`
 매니저의 `GET /kernels/{id}/document`는 파일의 셀 목록에 최신 실행의 출력을 붙여서 돌려줍니다. 맵핑 순서는 `id` → `source_sha256` → `index`이고, 소스 해시가 다르면 `stale: true`로 표시합니다.
 - 수용 기준: 실행 뒤 셀 하나를 고치면 그 셀만 `stale: true`이고 출력은 남아 있습니다.
-- 테스트: `test_fr_r4_document_maps_latest_outputs_and_marks_stale`, `test_fr_r4_document_without_runs`, Rust `fr_r4_document_is_built_by_the_embedded_python`(`manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_r4_document_maps_latest_outputs_and_marks_stale`, `test_fr_r4_document_without_runs`, Rust `fr_r4_document_is_built_by_the_embedded_python`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-R5 큰 출력 — `Done`
 셀 하나의 스트림 출력이 기록 안에서 `DARKPYONIX_RUN_OUTPUT_LIMIT`(기본 16 MiB)를 넘으면, 넘는 부분은 `<run_id>.cell<index>.log`에 이어 쓰고 노트북에는 그 사실을 알리는 스트림 한 줄을 남깁니다. 실시간 이벤트에는 제한이 없습니다.
@@ -159,12 +159,12 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ### FR-D1 멀티캐스트 발견 — `Done`
 PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다.
 - 수용 기준: 커널 세 개를 띄우고 query 하나를 보내면 세 개의 announce를 받습니다. 다른 `user_tag`의 query에는 응답하지 않습니다.
-- 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-D2 등록 파일 보조 — `Done`
 커널은 announce 본문을 `kernels/<kernel_id>.json`에 둡니다. 매니저는 멀티캐스트 결과와 등록 파일을 합치되, `pid`가 살아 있지 않은 등록은 지웁니다. `DARKPYONIX_DISCOVERY=registry`이면 등록 파일만 씁니다.
 - 수용 기준: 멀티캐스트를 끈 상태에서도 매니저가 커널을 찾습니다. `kill -9`로 죽은 커널의 등록은 다음 발견에서 사라집니다.
-- 테스트: `test_fr_d2_registry_fallback_finds_kernels`, `test_fr_d2_stale_registry_is_pruned`, `test_fr_d2_registry_ignores_other_users`, Rust `fr_d2_registry_fallback_finds_kernels`, `fr_d2_stale_registry_is_pruned`(`manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_d2_registry_fallback_finds_kernels`, `test_fr_d2_stale_registry_is_pruned`, `test_fr_d2_registry_ignores_other_users`, Rust `fr_d2_registry_fallback_finds_kernels`, `fr_d2_stale_registry_is_pruned`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ## 6. 런타임 API와 파일 형식 (F)
 
@@ -199,29 +199,29 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ### FR-M1 HTTP API — `Done`
 매니저는 [api/manager.openapi.yaml](api/manager.openapi.yaml)의 경로를 모두, 그리고 그 경로만 냅니다. 이벤트 스트림은 SSE(`text/event-stream`)이고 SSE `id`는 커널의 `seq`입니다. `Last-Event-ID` 헤더나 `since` 쿼리로 이어 받습니다.
-- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_undocumented_methods_are_not_served`(`manager/crates/dpx-server/tests/openapi.rs`), `test_fr_m1_events_stream_resumes_with_last_event_id`, `test_fr_m1_events_errors_and_keepalive`(`manager/crates/dpx-server/tests/sse.rs`), 각 경로의 동작 테스트(`manager/crates/dpx-server/tests/api.rs`). 파이썬 시제품 기준 `test_fr_m1_*`(`tests/test_fr_m_manager.py`)
+- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), `test_fr_m1_events_stream_resumes_with_last_event_id`, `test_fr_m1_events_errors_and_keepalive`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`), 각 경로의 동작 테스트(`darkpyonix/manager/crates/dpx-server/tests/api.rs`). 파이썬 시제품 기준 `test_fr_m1_*`(`tests/test_fr_m_manager.py`)
 
 ### FR-M2 커널 시작은 멱등 — `Done`
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
-- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry`(`manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-M3 임시 모드 수명 — `Done`
 임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. `managers/<pid>.json`(0600)에 주소와 토큰을 쓰고, 열린 SSE 스트림이 없고 HTTP 요청도 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 끝날 때 등록을 지우고 커널은 건드리지 않습니다.
-- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `manager/crates/dpx-server/tests/lifecycle.rs`, 파이썬 시제품), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`
+- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`, 파이썬 시제품), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`
 
 ### FR-M4 전용 모드 — `Done`
 `darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다.
-- 테스트: Rust `test_fr_m4_dedicated_manager_never_idles_and_requires_token`(`manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m4_shares_are_stored_hashed_and_survive_restart`(`manager/crates/dpx-server/tests/api.rs`)
+- 테스트: Rust `test_fr_m4_dedicated_manager_never_idles_and_requires_token`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m4_shares_are_stored_hashed_and_survive_restart`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`)
 
 ### FR-M5 매니저 여러 개 공존 — `Done`
 같은 사용자의 매니저 여러 개가 같은 커널에 동시에 붙을 수 있고, 각자 같은 이벤트를 받습니다.
-- 테스트: `test_fr_m5_two_managers_share_one_kernel`(파이썬 시제품), Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
+- 테스트: `test_fr_m5_two_managers_share_one_kernel`(파이썬 시제품), Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
 
 ## 8. CLI (C)
 
 ### FR-C1 매니저 찾기 — `Done`
 `darkpyonix` CLI는 `managers/*.json`에서 살아 있는 매니저를 고르고, 없으면 임시 매니저를 띄웁니다. 에이전트가 기존 매니저의 토큰을 몰라도 같은 OS 사용자라면 그대로 동작합니다.
-- 테스트: Rust `test_fr_c1_cli_spawns_manager_when_none_is_running`, `test_fr_c1_skips_dead_and_unhealthy_registrations`, `test_fr_c1_spawn_failure_is_reported`(`manager/crates/darkpyonix/tests/cli.rs`)
+- 테스트: Rust `test_fr_c1_cli_spawns_manager_when_none_is_running`, `test_fr_c1_skips_dead_and_unhealthy_registrations`, `test_fr_c1_spawn_failure_is_reported`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
 
 ### FR-C2 명령 — `Done`
 
@@ -239,7 +239,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 | `darkpyonix manager [--ephemeral\|--dedicated] [--host H] [--port P] [--idle-timeout S]` | 매니저 실행. 기본은 `--ephemeral`(FR-M3: 루프백, 유휴 시 종료, `managers/<pid>.json`에 토큰), `--dedicated`는 FR-M4. 둘을 함께 주면 오류입니다 |
 
 - 수용 기준: `darkpyonix run a.py`를 두 번째로 실행하면 종료 코드 75와 함께 현재 실행 정보와 `--queue`/`stop` 안내를 출력합니다.
-- 테스트: Rust `test_fr_c2_cli_commands`, `test_fr_c2_second_run_exits_75_with_hint`, `test_fr_c2_run_follows_outputs_and_exits_0`, `test_fr_c2_run_error_exits_1_with_traceback`, `test_fr_c2_ctrl_c_interrupts_the_run_and_exits_130`, `test_fr_c2_second_ctrl_c_detaches_and_the_run_continues`, `test_fr_c2_detach_prints_the_run_id_and_does_not_follow`, `test_fr_c2_run_options_reach_the_api`, `test_fr_c2_logs_follow_replays_the_executing_run`(`manager/crates/darkpyonix/tests/cli.rs`), `test_fr_c2_every_command_parses`, `test_fr_c2_invalid_usage_is_rejected`(`manager/crates/darkpyonix/src/args.rs`)
+- 테스트: Rust `test_fr_c2_cli_commands`, `test_fr_c2_second_run_exits_75_with_hint`, `test_fr_c2_run_follows_outputs_and_exits_0`, `test_fr_c2_run_error_exits_1_with_traceback`, `test_fr_c2_ctrl_c_interrupts_the_run_and_exits_130`, `test_fr_c2_second_ctrl_c_detaches_and_the_run_continues`, `test_fr_c2_detach_prints_the_run_id_and_does_not_follow`, `test_fr_c2_run_options_reach_the_api`, `test_fr_c2_logs_follow_replays_the_executing_run`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`), `test_fr_c2_every_command_parses`, `test_fr_c2_invalid_usage_is_rejected`(`darkpyonix/manager/crates/darkpyonix/src/args.rs`)
 - 상태 메모 (2026-10-03 감사): `attach`, 전용 매니저에서의 `share`, `manager` 하위 명령은 인자 파싱 시험만 있고 동작 시험은 없습니다.
 
 ## 9. 인증과 공유 (A)
@@ -250,7 +250,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 
 ### FR-A2 매니저 토큰 — `Done`
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`)와 공유 링크만 `?token=`을 받습니다. `/health`만 인증 없이 열립니다.
-- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`manager/crates/darkpyonix/tests/cli.rs`)
+- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
 
 ### FR-A3 공유 권한 — `Done`
 공유 토큰은 커널(파일)마다 발급하고 권한은 아래와 같습니다(2025 설계 유지).
@@ -264,7 +264,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 | `admin`(마스터) | ✓ | ✓ | ✓ | ✓ |
 
 작업별 최소 권한: 커널·실행 기록 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다.
-- 테스트: Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`manager/crates/dpx-server/tests/sse.rs`)
+- 테스트: Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`)
 
 ## 10a. 협업 문서 (S)
 
@@ -274,7 +274,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 커널은 파일을 파싱한 문서(셀 목록)를 메모리에 두고 문서 버전 `doc_version`을 관리합니다. `doc_version`은 셀 생성·수정·삭제·이동과 바깥 편집으로 다시 읽기(`doc.reloaded`)에서만 1 늘어나고, 잠금·해제·충돌 표시·접속자 이벤트에서는 늘지 않습니다(그 이벤트들도 현재 `doc_version`을 담습니다, PROTOCOL §4). 셀마다 커널 수명 동안 바뀌지 않는 `cell_id`를 둡니다. 파일에 `# @id`가 있으면 그 값을 쓰고, 없으면 `c_<hex>`를 만들되 파일에는 쓰지 않습니다. 첫 동기화 스냅숏(`GET /kernels/{id}/document`)에는 셀(`cell_id`, 셀별 `version`, 소스, 최신 출력), 잠금, 접속자, `doc_version`, 그리고 `seq`가 함께 들어 있습니다. `seq`는 **스냅숏에 이미 반영된 마지막 이벤트의 번호**이고, 클라이언트는 `since=seq`로 구독해 `seq`보다 큰 이벤트만 적용합니다. 커널은 상태 변경·이벤트 발행·스냅숏을 한 잠금 안에서 하므로, 스냅숏과 경쟁한 편집은 빠지지도 두 번 적용되지도 않습니다. 셀의 `source`는 파서가 낸 본문 그대로(다음 표식 앞의 빈 줄 포함)이고, `type`은 정규 타입, `raw_type`은 표식에 쓰인 타입 원문(없으면 `null`)입니다.
 - 수용 기준: 두 클라이언트가 같은 스냅숏을 받은 뒤 한쪽이 편집하면, 다른 쪽은 이벤트만으로 같은 문서 상태에 도달합니다(셀 순서, 소스, 버전이 같음).
 - 테스트: `test_fr_s1_snapshot_plus_events_converge`, `test_fr_s1_snapshot_racing_edits_is_exact`, `test_fr_s1_doc_version_bumps_only_on_content`, `test_fr_s1_s2_s3_s5_s8_two_clients_edit_converge_save_and_run` (실제 커널 프로세스)
-- 상태 메모: 커널의 `doc.snapshot`과 `doc.*` 이벤트를 검증했습니다. 스냅숏에 셀별 최신 출력을 합치는 일(`cell.*` 이벤트의 `cell_id`와 실행 기록으로)은 매니저가 맡고, Rust `test_fr_s1_document_combines_snapshot_and_outputs`, `test_fr_s1_snapshot_cells_find_their_outputs_after_a_move`(`manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+- 상태 메모: 커널의 `doc.snapshot`과 `doc.*` 이벤트를 검증했습니다. 스냅숏에 셀별 최신 출력을 합치는 일(`cell.*` 이벤트의 `cell_id`와 실행 기록으로)은 매니저가 맡고, Rust `test_fr_s1_document_combines_snapshot_and_outputs`, `test_fr_s1_snapshot_cells_find_their_outputs_after_a_move`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
 
 ### FR-S2 셀 편집 — `Done`
 셀 생성(위치는 `after`/`before` `cell_id`, 둘 다 없으면 문서 끝에 붙임; 타입, 제목, 소스, 메타데이터), 소스·타입·제목·메타데이터 수정, 삭제, 이동을 지원합니다. 수정은 `base_version`(그 셀의 버전)을 받고, 다르면 `409 conflict`와 현재 셀을 돌려줍니다. 다른 클라이언트가 잠근 셀의 수정·삭제는 `409 locked`입니다. 편집마다 `doc.cell.*` 이벤트를 모든 구독자에게 보내고, 이벤트에는 누가 했는지(`by`)가 들어갑니다. 편집·잠금·접속자 요청은 클라이언트가 고른 `request_id`(1–64자)를 받을 수 있고, 그 요청으로 생긴 이벤트에 그대로 돌아옵니다. 같은 `client_id`를 쓰는 두 창이 자기 편집을 구별하는 데 씁니다(HTTP 헤더 `X-DarkPyonix-Request`).
@@ -289,7 +289,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 ### FR-S4 접속자, 포커스, 커서 — `Done`
 클라이언트는 접속할 때 `client_id`(기기마다 고유)와 `nickname`(기기 이름, 2025 `?nickname=`)을 알립니다. 사용자 이름과 아바타는 토큰에서 정해지고, 없으면 클라이언트가 준 값을 씁니다. 접속자 목록은 다음을 담습니다: 사용자, 기기, 권한, 포커스한 셀(`focused_cell_id`, `focused_at`), 커서(`cell_id`, `line`, `column`, 선택 범위). 포커스, 블러, 커서 변경은 `presence.update` 이벤트로 퍼집니다(커서는 클라이언트마다 초당 최대 20회로 합칩니다). 이벤트 스트림이 끊기고 30초가 지나면 그 클라이언트는 `presence.leave`가 됩니다.
 - 테스트: `test_fr_s4_presence_focus_cursor_and_leave`, `test_fr_s4_presence_and_leave_release_locks_through_kernel`
-- 상태 메모: 커널 쪽(`presence.update`/`presence.leave`, 30초 유예)을 검증했습니다. 이벤트 스트림이 열려 있는 동안 약 10초마다 `presence.update` 하트비트를 보내는 일은 매니저가 맡고, Rust `test_fr_s4_event_stream_with_client_id_heartbeats_presence`(`manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+- 상태 메모: 커널 쪽(`presence.update`/`presence.leave`, 30초 유예)을 검증했습니다. 이벤트 스트림이 열려 있는 동안 약 10초마다 `presence.update` 하트비트를 보내는 일은 매니저가 맡고, Rust `test_fr_s4_event_stream_with_client_id_heartbeats_presence`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
 
 ### FR-S5 디스크 파일과의 동기화 — `Done`
 - 클라이언트 편집은 300ms 디바운스 뒤 파일에 원자적으로 저장합니다(FORMAT 직렬화, 손대지 않은 셀은 바이트 그대로).
@@ -305,12 +305,12 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 ### FR-S7 알람 — `Done`
 SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, 웹훅 대체)를 위해 롱폴링을 둡니다. `GET /kernels/{id}/runs/{run_ref}/wait?timeout=`는 그 실행이 끝나면 바로, 아니면 `timeout`(기본 60초, 최대 300초) 뒤에 돌려줍니다. 응답은 끝났을 때 실행 요약, 아직이면 `status: running`과 진행 정보이고, 다시 부를 때 쓸 `next` 정보가 들어 있습니다(2025 `executions/{cell_id}/wait`의 timeout·재폴링 모델). 실행이 끝나면 `run.finished` 이벤트가 모든 구독자에게 가므로, Ember는 이 이벤트로 휴대폰 푸시를 보냅니다.
 - 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`
-- 상태 메모: 커널의 `runs.wait`(끝나면 바로, 아니면 `timeout` 뒤)를 검증했습니다. HTTP 응답의 `next` 정보는 매니저가 붙이고, Rust `test_fr_s7_wait_returns_on_finish_or_timeout`(`manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+- 상태 메모: 커널의 `runs.wait`(끝나면 바로, 아니면 `timeout` 뒤)를 검증했습니다. HTTP 응답의 `next` 정보는 매니저가 붙이고, Rust `test_fr_s7_wait_returns_on_finish_or_timeout`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
 
 ### FR-S8 권한 — `Done`
 셀 편집(FR-S2)과 잠금(FR-S3)은 `editor` 이상만 할 수 있습니다. `editor`는 `viewer3`(실행 가능)에 셀 편집을 더한 공유 권한이고, 2025 설계의 `user_permission: "write"`에 해당합니다. 접속자 표시와 포커스(FR-S4)는 `viewer1`부터 할 수 있습니다. FR-A3 표에 `editor`를 더합니다.
 - 테스트: `test_fr_a3_permission_matrix` (FR-A3과 공유), `test_fr_s8_edit_and_lock_need_editor`, `test_fr_s1_s2_s3_s5_s8_two_clients_edit_converge_save_and_run`
-- 상태 메모: 커널의 권한 검사(`client.permission`)를 검증했습니다. 매니저 쪽은 Rust `test_fr_a3_permission_matrix`(`manager/crates/dpx-server/tests/api.rs`)와 `test_fr_s8_permission_matrix_for_collaboration`(`manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+- 상태 메모: 커널의 권한 검사(`client.permission`)를 검증했습니다. 매니저 쪽은 Rust `test_fr_a3_permission_matrix`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`)와 `test_fr_s8_permission_matrix_for_collaboration`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
 
 ## 10. 허브 (H)
 
@@ -454,7 +454,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 측정 기록 (2026-10-03, macOS arm64): `DARKPYONIX_TEST_PYTHONS`에 CPython 3.8.20, 3.9.6, 3.10.20, 3.11.10, 3.12.13, 3.13.0(intel64), 3.14.7, 3.15.0rc1을 넣어 39개 × 8개 인터프리터 = 312개 중 304개 통과, 8개는 `DARKPYONIX_SKIP_PERF=1`로 뺀 NFR-K3 측정입니다(NFR-K3는 따로 돌려 통과). 3.8·3.10·3.12는 `uv python install`로 `.scratch/` 아래에 받은 인터프리터입니다.
 
 ### NFR-K2 표준 라이브러리 전용 — `Done`
-`kernel/darkpyonix/kernel/`, `kernel/darkpyonix/*.py`, `kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `kernel/darkpyonix/kernel/mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
+`darkpyonix/kernel/darkpyonix/kernel/`, `darkpyonix/kernel/darkpyonix/*.py`, `darkpyonix/kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `darkpyonix/kernel/darkpyonix/kernel/mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
 - 테스트: `test_nfr_k2_kernel_imports_stdlib_only`, `test_nfr_k2_no_kernel_code_imports_the_matplotlib_backend`
 
 ### NFR-K3 출력 오버헤드 — `Done`
@@ -469,17 +469,17 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 
 ### NFR-M1 발견 지연 — `Done`
 매니저의 커널 목록 조회는 커널 20개에서 300 ms 이하입니다.
-- 테스트: Rust `test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms`(`manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널 20개, 캐시·`refresh=true`·새 매니저의 첫 조회)
+- 테스트: Rust `test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널 20개, 캐시·`refresh=true`·새 매니저의 첫 조회)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 커널 20개에서 캐시 조회 p50 2.2 ms·p99 4.9 ms, `refresh=true` p50 3.9 ms·p99 5.1 ms, 새 매니저의 첫 조회 p50 4.6 ms·최대 4.7 ms입니다.
 
 ### NFR-M2 이벤트 지연 — `Done`
 커널의 출력이 매니저 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함).
-- 테스트: Rust `test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99`(`manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널의 `print` 시각부터 SSE 수신까지)
+- 테스트: Rust `test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널의 `print` 시각부터 SSE 수신까지)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 10 ms 간격 200줄에서 p50 31 ms, p99 61 ms, 최대 63 ms입니다(50 ms 병합 창 포함).
 
 ### NFR-M3 문서와 코드의 일치 — `Done`
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
-- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`manager/crates/dpx-server/tests/openapi.rs`), 파이썬 시제품 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
+- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), 파이썬 시제품 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
 
 ### NFR-H1 종단 간 암호화 — `Agreed`
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.

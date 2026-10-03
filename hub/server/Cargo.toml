@@ -7,7 +7,7 @@ repository = "https://github.com/DarkPyonix/darkpyonix"
 description = "darkpyonix.dev: device registry, address directory, iroh relay, share links and HTTPS names"
 publish = false
 
-# Its own workspace: the hub is deployed separately from the manager (manager/Cargo.toml).
+# Its own workspace: the hub is deployed separately from the manager (darkpyonix/manager/Cargo.toml).
 [workspace]
 
 [lib]
