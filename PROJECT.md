@@ -29,17 +29,18 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 
 ## 마일스톤
 
-사용자 지시(2026-10-03, thisisthepy 리더 경유): "실제 사용할 수 있는 정도의 수준으로 개발 완료는 전부 2026년 11월 안으로 당겨야 한다." 그래서 쓸 수 있는 수준의 완료는 모두 2026-11-30 이전이고, 그 안에 못 들어가는 것은 이유와 함께 범위에서 뺍니다. 품질 기준은 낮추지 않습니다. 날짜는 2026-10-03에 리더가 정한 목표입니다. 근거는 남은 작업량과 의존 관계이고, 이 저장소에 아직 구현 이력이 없어서 실측 속도는 반영되지 않았습니다. M1을 마친 뒤 실제 속도로 다시 맞춥니다.
+사용자 지시(2026-10-02): "10월 셋째쭈 구현까지 기간 당겨야 해. 기간을 당기고 서브 에이전트를 충분히 활용하는걸로 하자." 그래서 쓸 수 있는 수준의 구현은 모두 10월 셋째 주, 2026-10-18까지 끝냅니다. 이 문서에 먼저 기록돼 있던 "11월 안으로" 지시(thisisthepy 리더 경유)를 대체하는 일정이고, 서브 에이전트를 병렬로 써서 기간을 줄입니다. 그 안에 못 들어가는 것은 이유와 함께 범위에서 뺍니다. 품질 기준은 낮추지 않습니다. 아래 목표일은 GitHub 마일스톤의 기한과 같습니다. 이 저장소의 실측 구현 속도가 쌓이면 다시 맞춥니다.
 
 | # | 이름 | 목표일 | 완료 조건 (SPEC) | 의존 |
 |---|---|---|---|---|
 | M0 | 문서 확정 | 2026-10-03 | INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT, OpenAPI, 클래스 다이어그램이 `develop`에 있음 | — |
-| M1 | 커널 코어 | 2026-10-10 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1~D2, FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
-| M2 | 매니저·CLI·런타임 API | 2026-10-17 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
-| M3 | 전용 매니저와 공유 | 2026-10-24 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
-| M4 | 허브 | 2026-11-20 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`hub/worker/`), 계정은 GitHub 로그인(FR-H6), 릴레이는 `relay.darkpyonix.dev`(`hub/server/`, FR-H3). 릴레이를 VPS에 둘지 Container로 옮길지는 Ember NFR-N1의 QAD 켬/끔 측정으로 정함(Q9). 사용자 준비물: Cloudflare 존·API 토큰, GitHub OAuth App, 릴레이 VPS | Q1을 2026-10-24까지 결정, Ember M5와 함께 |
+| M1 | 커널 코어 | 2026-10-06 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1~D2, FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
+| M2 | 매니저·CLI·런타임 API | 2026-10-10 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
+| M3 | 전용 매니저와 공유 | 2026-10-13 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
+| M3b | 노트북 렌더러 확장 | 2026-10-16 | `vscode-darkpyonix`(Ember 기본 설치)와 `intellij-darkpyonix`가 `.py`/`.pynb` 셀을 그리고, 매니저 API로 `__runs__`의 최근 실행 기록을 셀에 맞춰 보여 줌(FR-R4). 실행·중지와 SSE 실시간 출력. VS Code 먼저, IntelliJ 다음. 코드는 확장 저장소에 있고 여기서는 추적만 함 | M2 |
+| M4 | 허브 | 2026-10-18 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`hub/worker/`), 계정은 GitHub 로그인(FR-H6), 릴레이는 `relay.darkpyonix.dev`(`hub/server/`, FR-H3). 릴레이를 VPS에 둘지 Container로 옮길지는 Ember NFR-N1의 QAD 켬/끔 측정으로 정함(Q9). 사용자 준비물: Cloudflare 존·API 토큰, GitHub OAuth App, 릴레이 VPS | Q1(조건부 결정됨, iroh로 시작), Ember M5와 함께 |
 
-**11월 범위에서 뺀 것과 이유**
+**10월 셋째 주 범위에서 뺀 것과 이유**
 - (변수 체크포인트·복원은 범위가 아닙니다. 변수는 실행 기록에 남은 코드로 재현합니다. INTENT 1.2 D.)
 - `parallel`/`concurrent`와 interop 셀의 실행 의미(Q7, Q8): 문법은 받아들이고 보존하지만, 실행 의미는 이슈 #5와 #7의 결정이 먼저입니다.
 
