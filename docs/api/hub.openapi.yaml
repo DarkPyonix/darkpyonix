@@ -480,6 +480,36 @@ paths:
           description: No valid session or device token.
         "404":
           description: No such device in the caller's account.
+    patch:
+      tags: [Devices]
+      operationId: updateDevice
+      summary: Rename a device
+      description: |
+        Account rights, or the device's own token. Fields left out are unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                name: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        "200":
+          description: The updated device.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Device"}
+        "400":
+          description: Malformed body, unknown field or bad value.
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: Another device's token without account rights, or a cross-origin cookie request.
+        "404":
+          description: No such device in the caller's account.
     delete:
       tags: [Devices]
       operationId: removeDevice
