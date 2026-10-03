@@ -355,9 +355,11 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 
 ### NFR-M1 발견 지연 — `Agreed`
 매니저의 커널 목록 조회는 커널 20개에서 300 ms 이하입니다.
+- 테스트: Rust `test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms`(`manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널 20개, 캐시·`refresh=true`·새 매니저의 첫 조회)
 
 ### NFR-M2 이벤트 지연 — `Agreed`
 커널의 출력이 매니저 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함).
+- 테스트: Rust `test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99`(`manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널의 `print` 시각부터 SSE 수신까지)
 
 ### NFR-M3 문서와 코드의 일치 — `Done`
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
