@@ -82,6 +82,7 @@ def _summary(run_meta: Dict[str, Any]) -> Dict[str, Any]:
         "mode": run_meta.get("mode"), "cells": list(run_meta.get("cells") or []),
         "params": dict(run_meta.get("params") or {}),
         "started_at": started, "ended_at": ended, "duration": _duration(started, ended),
+        "started_by": run_meta.get("started_by"), "interrupted_by": run_meta.get("interrupted_by"),
     }
 
 
@@ -177,6 +178,8 @@ def _render(run: Run, limit: Optional[int]) -> Tuple[Dict[str, Any], Dict[int, s
         "params": copy.deepcopy(run.params), "status": run.status,
         "started_at": run.started_at, "ended_at": run.ended_at,
         "python": python, "host": run.host,
+        "started_by": copy.deepcopy(run.started_by),
+        "interrupted_by": copy.deepcopy(run.interrupted_by),
     }
     cells = []
     spilled = {}  # type: Dict[int, str]
@@ -519,6 +522,8 @@ def to_notebook_meta(run: Run) -> Dict[str, Any]:
         "run_id": run.run_id, "status": run.status, "mode": run.mode,
         "cells": list(run.cell_indexes), "params": copy.deepcopy(run.params),
         "started_at": run.started_at, "ended_at": run.ended_at,
+        "started_by": copy.deepcopy(run.started_by),
+        "interrupted_by": copy.deepcopy(run.interrupted_by),
     }
 
 

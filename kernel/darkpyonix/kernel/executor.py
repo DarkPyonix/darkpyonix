@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from darkpyonix import format as fmt
 from darkpyonix.kernel import hostctx
 from darkpyonix.kernel.capture import FdCapture, OutputRouter, StreamCapture
+from darkpyonix.kernel.collab import by_of
 from darkpyonix.kernel.display import format_bundle
 from darkpyonix.kernel.model import CellRecord, Run, RunRequest
 from darkpyonix.kernel.protocol import DKPError, new_run_id, now_iso
@@ -86,6 +87,7 @@ class Executor(object):
         self._stopping = False
         self._reset_requested = False
         self._interrupt_target = None           # type: Optional[str]
+        self._interrupted_by = None             # type: Optional[Dict[str, Any]]  FR-S6
         self._in_user = False                   # True only while user code runs
 
         self.execution_count = 0
@@ -103,6 +105,10 @@ class Executor(object):
         self._saved_sigint = None
         # The real stderr while capture is installed (for kernel diagnostics).
         self.original_stderr = sys.stderr
+        # Called on the main thread right before a run reads the file. The kernel main sets
+        # it to write pending shared-document edits and return the document's cell ids
+        # (or None); the ids are added to cell.* events (FR-S1, FR-S6).
+        self.before_load = None                 # type: Optional[Callable[[], Optional[List[str]]]]
 
         script_dir = os.path.dirname(self.path)
         if script_dir not in sys.path:
@@ -138,7 +144,8 @@ class Executor(object):
                 self._current_req = req     # picked up by run_forever right away
             self._cond.notify_all()
         if busy:
-            self.emit("run.queued", {"run_id": req.run_id, "position": position})
+            self.emit("run.queued", {"run_id": req.run_id, "position": position,
+                                     "started_by": req.started_by})
             return {"run_id": req.run_id, "state": "queued", "position": position}
         return {"run_id": req.run_id, "state": "running"}
 
@@ -170,8 +177,10 @@ class Executor(object):
             raise DKPError("bad_request", "on_busy must be 'reject' or 'queue'")
         if cells:
             self._check_cell_indexes(cells, source)
+        client = params.get("client")
         return RunRequest(new_run_id(), mode=mode, cells=cells, source=source,
-                          params=run_params, on_busy=on_busy)
+                          params=run_params, on_busy=on_busy,
+                          started_by=by_of(client) if isinstance(client, dict) else None)
 
     def _check_cell_indexes(self, cells: List[int], source: Optional[str]) -> None:
         try:
@@ -191,7 +200,8 @@ class Executor(object):
             return None
         return {"run_id": req.run_id, "status": "running", "mode": req.mode,
                 "cells": list(req.cells),
-                "params": dict(req.params), "started_at": None, "ended_at": None}
+                "params": dict(req.params), "started_at": None, "ended_at": None,
+                "started_by": req.started_by, "interrupted_by": None}
 
     def cancel(self, run_id: str) -> Dict[str, Any]:
         """Cancel a queued run (a running run is stopped with ``interrupt``)."""
@@ -202,15 +212,18 @@ class Executor(object):
                     break
             else:
                 return {"cancelled": False}
-        self.emit("run.finished", {"run_id": run_id, "status": "cancelled", "duration": 0.0})
+        self.emit("run.finished", {"run_id": run_id, "status": "cancelled", "duration": 0.0,
+                                   "started_by": req.started_by})
         return {"cancelled": True}
 
-    def interrupt(self) -> Dict[str, Any]:
-        """Raise ``KeyboardInterrupt`` in the running cell (FR-X4). The queue is kept."""
+    def interrupt(self, client: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Raise ``KeyboardInterrupt`` in the running cell (FR-X4). The queue is kept.
+        ``client`` (FR-S6) becomes the run's ``interrupted_by``."""
         with self._lock:
             req = self._current_req
             if req is None:
                 return {"interrupted": False}
+            self._interrupted_by = by_of(client) if isinstance(client, dict) else None
             self._interrupt_locked(req.run_id)
             return {"interrupted": True, "run_id": req.run_id}
 
@@ -381,6 +394,7 @@ class Executor(object):
                         self._current_req = self._pending.popleft()
                     req = self._current_req
                     self._interrupt_target = None
+                    self._interrupted_by = None
                 try:
                     self._execute(req)
                 except KeyboardInterrupt:
@@ -404,7 +418,7 @@ class Executor(object):
                 self._pending.clear()
             for req in dropped:
                 self.emit("run.finished", {"run_id": req.run_id, "status": "cancelled",
-                                           "duration": 0.0})
+                                           "duration": 0.0, "started_by": req.started_by})
             self.emit("kernel.status", {"status": "stopping"})
             self._uninstall()
 
@@ -496,6 +510,12 @@ class Executor(object):
         t0 = time.monotonic()
         doc = text = None
         load_error = None
+        cell_ids = None  # type: Optional[List[str]]
+        if self.before_load is not None:
+            try:
+                cell_ids = self.before_load()
+            except Exception as exc:
+                self._log("before_load failed: %r" % (exc,))
         try:
             doc, text = self._load_document(req.source)
         except Exception as exc:
@@ -518,12 +538,16 @@ class Executor(object):
                 self._preamble_done = True
         else:
             indexes = []
+        if doc is None or cell_ids is None or len(cell_ids) != len(doc.cells):
+            cell_ids = None
         with self._lock:
             self._current = run
         self.emit("kernel.status", {"status": "busy", "run_id": run.run_id})
         self._store_call("begin", run)
         self.emit("run.started", {"run_id": run.run_id, "mode": run.mode, "cells": indexes,
-                                  "params": dict(run.params)})
+                                  "cell_ids": [cell_ids[i] if cell_ids is not None and i < len(cell_ids)
+                                               else None for i in indexes],
+                                  "params": dict(run.params), "started_by": run.started_by})
         status = "ok"
         if load_error is not None:
             status = "error"
@@ -539,7 +563,8 @@ class Executor(object):
                     status = "error"
                     self._log("run %s: no cell %d" % (run.run_id, idx))
                     break
-                cstatus = self._run_cell(run, doc.cells[idx], lines.get(idx))
+                cstatus = self._run_cell(run, doc.cells[idx], lines.get(idx),
+                                         cell_ids[idx] if cell_ids is not None else None)
                 if cstatus != "ok":
                     status = cstatus
                     break
@@ -547,11 +572,16 @@ class Executor(object):
                     break
         self._exit_requested = False
         run.status = status
+        if status == "interrupted" and self._interrupt_target == run.run_id:
+            run.interrupted_by = self._interrupted_by
         run.ended_at = now_iso()
         self.router.flush()
         self._store_call("finish", run)
-        self.emit("run.finished", {"run_id": run.run_id, "status": status,
-                                   "duration": round(time.monotonic() - t0, 6)})
+        finished = {"run_id": run.run_id, "status": status,
+                    "duration": round(time.monotonic() - t0, 6), "started_by": run.started_by}
+        if status == "interrupted":
+            finished["interrupted_by"] = run.interrupted_by
+        self.emit("run.finished", finished)
 
     def _store_call(self, method: str, run: Run) -> None:
         try:
@@ -575,7 +605,8 @@ class Executor(object):
             pos = i + len(src)
         return out
 
-    def _run_cell(self, run: Run, cell: Any, line_offset: Optional[int]) -> str:
+    def _run_cell(self, run: Run, cell: Any, line_offset: Optional[int],
+                  doc_cell_id: Optional[str] = None) -> str:
         rec = CellRecord(cell.index, cell.type, cell.source, cell.source_sha256,
                          title=cell.title, cell_id=cell.id, metadata=cell.metadata)
         self.execution_count += 1
@@ -586,8 +617,9 @@ class Executor(object):
         if cell.index == 0:
             self._preamble_done = True
         self.emit("cell.started", {"run_id": run.run_id, "index": cell.index,
-                                   "execution_count": count})
-        self.router.begin_cell(run, rec)
+                                   "cell_id": doc_cell_id, "execution_count": count,
+                                   "started_by": run.started_by})
+        self.router.begin_cell(run, rec, doc_cell_id)
         t0 = time.monotonic()
         status, error = self._exec_cell(run, cell, line_offset, count)
         if error is not None:
@@ -598,7 +630,9 @@ class Executor(object):
         rec.status = status
         rec.ended_at = now_iso()
         self.emit("cell.finished", {"run_id": run.run_id, "index": cell.index,
-                                    "status": status, "duration": round(time.monotonic() - t0, 6)})
+                                    "cell_id": doc_cell_id, "status": status,
+                                    "duration": round(time.monotonic() - t0, 6),
+                                    "started_by": run.started_by})
         self._store_call("update", run)
         return status
 
