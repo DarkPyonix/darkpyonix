@@ -33,7 +33,7 @@ export function makeDeps(overrides: Partial<Deps> = {}): Deps & { github: FakeGi
     const url = request.url;
     github.calls.push(`${request.method} ${url}`);
     if (url === "https://github.com/login/oauth/access_token" && request.method === "POST") {
-      const form = new URLSearchParams(await request.text());
+      const form = new URLSearchParams(new TextDecoder().decode(await request.arrayBuffer()));
       const issued = github.codes.get(form.get("code") ?? "");
       if (!issued) return Response.json({ error: "bad_verification_code" });
       const verifier = form.get("code_verifier") ?? "";

@@ -205,7 +205,7 @@ export function parseDnsAnswers(bytes: Uint8Array): DnsAnswer[] | null {
         while (o < rdata.length) {
           const n = rdata[o];
           if (o + 1 + n > rdata.length) throw new Error("truncated txt");
-          txt += new TextDecoder("utf-8", { fatal: true }).decode(rdata.subarray(o + 1, o + 1 + n));
+          txt += new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(rdata.subarray(o + 1, o + 1 + n));
           o += 1 + n;
         }
         answer.txt = txt;

@@ -1,25 +1,24 @@
-import path from "node:path";
-import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
+import { fileURLToPath } from "node:url";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { defineConfig } from "vitest/config";
 
-export default defineWorkersConfig(async () => {
-  const migrations = await readD1Migrations(path.join(__dirname, "migrations"));
-  return {
-    test: {
-      setupFiles: ["./test/apply-migrations.ts"],
-      poolOptions: {
-        workers: {
-          singleWorker: true,
-          wrangler: { configPath: "./wrangler.toml" },
-          miniflare: {
-            bindings: {
-              TEST_MIGRATIONS: migrations,
-              GITHUB_CLIENT_ID: "Iv1.testclient",
-              GITHUB_CLIENT_SECRET: "test-secret",
-              RELAY_SHARED_SECRET: "relay-secret",
-            },
-          },
+// Tests run inside workerd (the pool's own Miniflare), with the bindings of wrangler.toml:
+// D1 (migrated per test file by test/apply-migrations.ts), the assets and the rate limiter.
+export default defineConfig({
+  plugins: [
+    cloudflareTest(async () => ({
+      wrangler: { configPath: "./wrangler.toml" },
+      miniflare: {
+        bindings: {
+          TEST_MIGRATIONS: await readD1Migrations(fileURLToPath(new URL("./migrations", import.meta.url))),
+          GITHUB_CLIENT_ID: "Iv1.testclient",
+          GITHUB_CLIENT_SECRET: "test-secret",
+          RELAY_SHARED_SECRET: "relay-secret",
         },
       },
-    },
-  };
+    })),
+  ],
+  test: {
+    setupFiles: ["./test/apply-migrations.ts"],
+  },
 });

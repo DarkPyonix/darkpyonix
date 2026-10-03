@@ -59,4 +59,18 @@ describe("address directory", () => {
     expect((await call(deps, "GET", `/pkarr/${a.z32}`, { cookie: bob })).status).toBe(404);
     expect((await call(deps, "GET", "/pkarr/not-a-key")).status).toBe(400);
   });
+
+  it("test_fr_h2_unauthenticated_publishes_are_rate_limited", async () => {
+    // wrangler.toml binds WRITE_LIMITER (30 per key per minute); the pool runs the real binding.
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 25, login: "owner" });
+    const a = await newDevice();
+    await linkDevice(deps, { cookie }, a);
+    const statuses: number[] = [];
+    for (let ts = 1n; ts <= 31n; ts++) {
+      statuses.push((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: await irohRecord(a, RELAY, [], ts) })).status);
+    }
+    expect(statuses.slice(0, 30).every((s) => s === 204)).toBe(true);
+    expect(statuses[30]).toBe(429);
+  });
 });

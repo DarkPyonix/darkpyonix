@@ -72,6 +72,8 @@ describe("shares", () => {
     const ash = await call(deps, "GET", "/ash/");
     expect(ash.status).toBe(200);
     expect(ash.headers.get("content-type")).toContain("text/html");
+    // Read through the ASSETS binding from public/ash/index.html, not the Worker's fallback text.
+    expect(await ash.text()).toContain('<meta name="darkpyonix-ash" content="placeholder">');
   });
 });
 
