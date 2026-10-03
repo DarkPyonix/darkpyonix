@@ -1,4 +1,5 @@
-"""FR-K1, FR-K3, FR-K4: kernel process plumbing (launch, lock, detached lifetime)."""
+"""FR-K1, FR-K3, FR-K4, FR-K7: kernel process plumbing (launch, lock, detached
+lifetime, hard restart)."""
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ import signal
 import stat
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -171,3 +173,53 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
             wait_pid_gone(pid)
     # A clean shutdown removes the registry entry (PROTOCOL §2.5).
     assert not os.path.exists(os.path.join(_home.kernels_dir(), kid + ".json"))
+
+
+def _announce_from(kid, pid, newer_than, timeout=20.0):
+    """Wait for ``kid``'s announce from ``pid`` whose ``started_at`` differs from ``newer_than``."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        info = launcher.wait_for_announce(kid, pid=pid, timeout=1.0)
+        if info is not None and info["started_at"] != newer_than:
+            return info
+        time.sleep(0.05)
+    return None
+
+
+def test_fr_k7_hard_restart_keeps_kernel_id(python, dp_home, scratch):
+    path = write_notebook(scratch, "restart.py", """
+        # %% [code]
+        before_restart = 1
+        """)
+    kid = kernel_id_for(path)
+    pid = launcher.launch(path, python=python)
+    try:
+        old = launcher.wait_for_announce(kid, pid=pid, timeout=15)
+        assert old is not None
+        c = connect(old)
+        try:
+            assert run_and_wait(c)[0] == "ok"
+            assert "before_restart" in {v["name"] for v in c.request("namespace")["variables"]}
+            assert c.request("restart", {"hard": True}) == {"restarted": True}
+        finally:
+            c.close()
+        # The process re-executes itself (same pid on POSIX, os.execv) and comes back.
+        new = _announce_from(kid, pid, old["started_at"])
+        assert new is not None, "kernel did not come back after a hard restart"
+        assert new["kernel_id"] == kid
+        assert new["pid"] != old["pid"] or new["started_at"] != old["started_at"]
+        assert new["started_at"] > old["started_at"]
+        assert new["python"] == old["python"] and new["path"] == old["path"]
+        c = connect(new)
+        try:
+            names = {v["name"] for v in c.request("namespace")["variables"]}
+            assert "before_restart" not in names
+            assert c.request("status")["started_at"] == new["started_at"]
+        finally:
+            c.close()
+    finally:
+        kill(pid, signal.SIGTERM)
+        if not wait_pid_gone(pid):
+            kill(pid, signal.SIGKILL)
+            wait_pid_gone(pid)
+
