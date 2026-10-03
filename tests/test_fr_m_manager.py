@@ -84,15 +84,20 @@ def _operations(schema):
 
 
 @prototype_only
-def test_fr_m1_served_schema_matches_spec(dp_home):
+def test_fr_m1_prototype_operations_match_spec(dp_home):
+    # The Rust manager (INTENT D10) must serve the whole spec; that equality is asserted in
+    # manager/crates/dpx-server/tests/api.rs. The Python prototype stopped at the pre-collaboration
+    # API, so here every operation it does serve must keep the spec's operationId and may only
+    # answer with status codes the spec lists.
     with open(SPEC) as f:
         spec = yaml.safe_load(f)
     app = create_app(KernelDirectory(FakeBackend(b"k" * 32)), Auth(), ManagerState())
     served = _operations(app.openapi())
     expected = _operations(spec)
-    assert sorted(served) == sorted(expected)
-    for key in expected:
-        assert served[key] == expected[key], key
+    assert served and set(served) <= set(expected), sorted(set(served) - set(expected))
+    for key in served:
+        assert served[key][0] == expected[key][0], key
+        assert set(served[key][1]) <= set(expected[key][1]), key
     # Routes outside the schema are only the API reference page.
     hidden = {r.path for r in app.routes if not getattr(r, "include_in_schema", True)}
     assert hidden == {"/docs", "/docs/", "/docs/{name}"}
