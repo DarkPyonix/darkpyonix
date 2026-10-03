@@ -212,3 +212,6 @@ __marimo__/
 
 # Rust manager build output
 manager/target/
+
+# Rust hub build output
+hub/server/target/

@@ -25,7 +25,7 @@ Design is fixed (milestone M0); implementation starts with M1. See [PROJECT.md](
 | Document | Content |
 |---|---|
 | [PROJECT.md](PROJECT.md) | Scope, milestones with dates, open questions |
-| [docs/INTENT.md](docs/INTENT.md) | Why, decisions (D1–D13), rejected alternatives |
+| [docs/INTENT.md](docs/INTENT.md) | Why, decisions (D1–D15), rejected alternatives |
 | [docs/SPEC.md](docs/SPEC.md) | Requirements and acceptance criteria |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How kernel, manager, hub, Ember and ash fit together |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | DKP/1: discovery datagrams and the kernel control channel |
@@ -42,7 +42,8 @@ To browse the API locally: `python3 -m http.server -d docs/api 8000` and open <h
 kernel/darkpyonix/            runtime API + notebook parser (stdlib only)
 kernel/darkpyonix/kernel/     the kernel process (stdlib only)
 kernel/darkpyonix/manager/    the manager and the darkpyonix CLI
-hub/                          darkpyonix.dev
+hub/worker/                   darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
+hub/server/                   relay.darkpyonix.dev iroh relay host (Rust)
 docs/                         design documents
 ```
 

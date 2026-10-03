@@ -314,25 +314,137 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 
 ## 10. 허브 (H)
 
-허브는 터널 방식(PROJECT Q1)과 로그인 방식(Q2)이 정해진 뒤에 `Agreed`로 올립니다.
+전송은 iroh 1.x로 정했습니다(PROJECT Q1, 2026-10-03, 조건부: ember SPEC NFR-N1을 못 맞추면 직접 구현을 검토). 그래서 허브는 직접 만든 랑데부·중계 대신 iroh가 이미 쓰는 프로토콜을 그대로 받습니다. 기기는 iroh 엔드포인트이고, 기기 ID는 그 엔드포인트 ID(ed25519 공개 키, 소문자 hex 64자)입니다.
 
-### FR-H1 기기 등록 — `Draft`
-기기(메인 서버·지부)는 허브에 공개 키로 등록하고, 허브는 계정별 기기 목록을 냅니다.
+**두 호스트(INTENT D15, 2026-10-03).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다.
 
-### FR-H2 랑데부와 홀펀칭 — `Draft`
-허브는 기기 사이의 연결 후보를 교환하는 시그널링과 공인 주소 반사를 제공해, 사용자가 연결을 신경 쓰지 않아도 P2P가 맺어지게 합니다.
+| 호스트 | 구현 | 맡는 일 |
+|---|---|---|
+| `https://darkpyonix.dev` | Cloudflare Worker `hub/worker/` (TypeScript, D1, 정적 자산, Cron) | GitHub 로그인(FR-H6), 기기 등록(FR-H1), 주소 디렉터리(FR-H2), 릴레이 입장 판정 API(FR-H3), 공유와 ash 호스팅(FR-H4), 이름과 ACME TXT(FR-H5), Flathub 검증 파일(FR-H7), 설정 발견(FR-H8) |
+| `https://relay.darkpyonix.dev` | 릴레이 호스트 `hub/server/` (Rust, `iroh-relay` 서버 크레이트) | iroh 릴레이 `/relay`, `/ping`, `/generate_204`, UDP 7842의 QUIC 주소 발견(QAD). 누구를 들일지는 Worker에 묻습니다 |
+
+- Worker는 apex(`darkpyonix.dev`)에만 붙습니다(custom domain). `relay.darkpyonix.dev`는 Cloudflare 프록시를 끈(DNS only) A/AAAA 레코드로 릴레이 호스트를 가리킵니다. 프록시는 UDP 7842를 넘기지 않고, QAD는 릴레이 호스트 자신의 TLS 인증서를 쓰기 때문입니다.
+- Worker의 부하: iroh `PkarrPublisher`는 5분마다(그리고 주소가 바뀔 때) 다시 올립니다. 기기 10대면 하루 약 3,000번의 `PUT /pkarr`와 그만큼의 D1 쓰기 두 번이고, 요청마다 ed25519 검증 한 번과 D1 질의 몇 개입니다. Workers 무료 한도(하루 10만 요청, D1 쓰기 10만)의 몇 % 수준이라 "가볍다"는 조건을 만족합니다. 운영은 CPU 한도 여유를 위해 Workers Paid를 권합니다.
+- 언어는 TypeScript입니다. 근거는 INTENT D15에 있습니다.
+
+계약은 [api/hub.openapi.yaml](api/hub.openapi.yaml) 하나이고, 릴레이 호스트가 답하는 연산은 경로 단위 `servers: relay.darkpyonix.dev`로 표시합니다. Worker 테스트가 Worker의 모든 연산이 문서의 상태 코드로만 답하고 Worker의 라우트와 문서의 연산이 정확히 같음을 확인합니다(`test_hub_every_operation_answers_with_a_documented_status`, `test_hub_every_worker_route_is_documented_and_vice_versa`). 릴레이 호스트의 같은 이름 테스트(`hub/server/tests/hub/openapi.rs`)는 `servers`가 붙은 연산만 확인합니다.
+
+전송 계층 교체 가능성: 허브가 iroh에 묶이는 곳은 릴레이 호스트와 주소 레코드 형식(pkarr 서명 패킷)뿐입니다. 계정, 기기 등록, 공유, 이름은 "ed25519 공개 키 하나 = 기기"라는 가정만 씁니다. 직접 구현으로 바꾸면 그 두 곳만 바꿉니다.
+
+**인증 모델.** 계정은 GitHub 사용자입니다(FR-H6). 사람은 브라우저에서 GitHub로 로그인해 세션 쿠키(`__Host-dp_session`)를 받고, 기기는 기기 링크(FR-H1)로 계정에 들어와 기기 토큰을 받습니다. "계정 권한"은 로그인한 세션 또는 그 계정의 `main_server` 기기 토큰입니다. 단, `main_server` 역할을 들이는 승인(메인 서버 바꾸기 포함, FR-H1)은 세션만 할 수 있습니다. 토큰과 세션 ID는 SHA-256 해시로만 저장하고, GitHub 액세스 토큰은 사용자 정보를 한 번 읽은 뒤 바로 폐기(revoke)하며 저장하지 않습니다. 쿠키로 인증한 쓰기 요청은 `Origin`이 `https://darkpyonix.dev`가 아니면 403입니다. 자격 증명 오류(401)의 본문은 `{"error": <설명>, "code": <코드>}`이고, `code`는 `device_removed`(지운 기기의 토큰. 다시 시도해도 소용없으니 기기는 토큰을 버리고 사용자에게 알립니다) 또는 `invalid_credentials`(없거나 모르는 토큰·세션)입니다. 상태 코드는 둘 다 401입니다. 410은 자원이 사라졌다는 뜻이지 자격 증명이 틀렸다는 뜻이 아니고, 401을 유지하면 "401이면 다시 인증"하는 기존 클라이언트가 그대로 동작합니다(FR-H1). OpenAI 로그인("Sign in with ChatGPT")과 ChatGPT 플랜 사용은 허브 기능이 아니고, 사용자가 직접 띄운 ember server가 합니다(PROJECT Q2).
+
+### FR-H1 기기 등록 — `Agreed`
+기기는 iroh 엔드포인트 ID로 계정에 들어옵니다. 흐름은 OAuth 기기 인증(RFC 8628) 모양에 키 소유 증명을 더한 **기기 링크**입니다.
+1. 기기가 `POST /v1/device-links {endpoint_id, name, role}`로 요청하고 `link_id`, 사용자 코드(`BCDF-GHJK` 형식, 모음 없는 20글자), 챌린지, 만료(15분)를 받습니다.
+2. 사람이 `https://darkpyonix.dev/link?code=<사용자 코드>`를 열어 GitHub로 로그인한 상태에서 기기 이름·역할·엔드포인트 ID를 확인하고 승인하거나 거절합니다(`POST /v1/link-codes/{user_code} {"approve": bool}`). 같은 계정의 메인 서버도 기기 토큰으로 승인할 수 있어서, 새 컴퓨터는 브라우저 없이 메인 서버(ember server)를 거쳐 들어올 수 있습니다. `computer` 기기 토큰으로는 승인할 수 없습니다(403). **`main_server` 역할을 요청한 링크는 로그인한 브라우저 세션만 승인할 수 있습니다.** 메인 서버의 기기 토큰으로 그런 링크를 승인하면 403이고(거절은 됩니다), 그래서 새어 나간 메인 서버 토큰 하나로 계정 권한을 가진 기기를 더 만들 수 없습니다. 사용자 코드는 짧으므로 코드 조회와 결정은 계정당 분당 30번으로 제한합니다(429). 링크 요청도 주소당 분당 30번입니다.
+3. 기기는 `interval`마다 `POST /v1/device-links/{link_id}/token`을 부르며, 매번 `darkpyonix-hub/v2/link\n<link_id>\n<challenge>`에 대한 자기 키 서명을 냅니다. 결정 전에는 202, 승인되면 한 번만 201과 기기 토큰, 거절되면 403입니다.
+4. 다시 시작한 기기는 `GET /v1/device-links/{link_id}`로 링크 상태(`pending`, `approved`, `denied`, `claimed`, `expired`)와 사용자 코드, 챌린지, 만료를 다시 읽습니다. 자격 증명은 필요 없습니다. `link_id`는 128비트 난수라 기기만 알고, 챌린지는 비밀이 아니며(서명에는 기기 키가 필요), 토큰은 이 응답에 없습니다. 만료된 링크는 시간마다 지워지므로 그 뒤에는 404입니다. `claimed`인데 기기가 토큰을 잃었다면 그 키는 지우고 다시 들입니다(FR-H11).
+
+**역할 [provisional].** 기기의 역할은 셋입니다. 권한이 가장 좁은 쪽을 기본으로 둡니다.
+
+| 역할 | 무엇 | 계정 권한 | 기기 지우기 | 이름(FR-H5) | 공유 게시(FR-H4) | 주소 게시·조회, 릴레이 |
+|---|---|---|---|---|---|---|
+| `main_server` | 사용자의 메인 서버(ember server). 계정에 하나 | 있음 | 자기 자신, `computer`, `client` | 가짐 | 됨 | 됨 |
+| `computer` | 커널을 돌리는 다른 컴퓨터 | 없음 | 자기 자신만 | 못 가짐(403) | 됨 | 됨 |
+| `client` | 남의 기기에 붙기만 하는 기기(휴대폰, 노트북의 ember 앱) | 없음 | 자기 자신만 | 못 가짐(403) | 안 됨(403) | 됨 |
+
+로그인한 브라우저 세션은 계정의 어느 기기든 지울 수 있습니다. 메인 서버는 계정에 하나뿐이므로(아래) 메인 서버 토큰이 지울 다른 `main_server`는 없고, 메인 서버가 다른 기기로 넘어가는 것은 **바꾸기 승인**으로만 일어납니다. 그 승인은 `main_server` 링크 승인이라 세션만 할 수 있으므로, 새어 나간 메인 서버 토큰 하나로 진짜 메인 서버를 밀어내고 이름을 가져갈 수 없습니다. 메인 서버가 `computer`·`client`를 지우는 것은 그대로 둡니다(브라우저 없이 기기를 정리하는 것이 메인 서버의 역할이고, 그 기기들은 계정 권한이 없어 잃는 것이 적습니다).
+
+`client` 링크는 `computer` 링크처럼 세션이나 메인 서버 토큰이 승인합니다. `client`가 공유를 게시하지 못하는 이유: 공유는 그것을 연 기기로 손님을 들이는 것(FR-H4)인데, 아무것도 서비스하지 않는 기기가 손님 통행권을 만들 이유가 없고, 잃어버리기 쉬운 휴대폰 토큰으로 할 수 있는 일을 줄입니다. 주소 게시는 허용합니다(상대가 휴대폰으로 되걸 수 있게). 역할은 링크로 정하고 바꾸지 않습니다. 바꾸려면 지우고 다시 들입니다(FR-H11). Ember의 실제 사용으로 확정할 때까지 `[provisional]`입니다.
+
+**메인 서버는 계정에 하나 [Ember INTENT D3].** 메인 서버 한 대가 모든 대화·셸·계정을 가진다는 사용자 결정(darkpyonix-ember `docs/INTENT.md` D3, `[user]`)에 따라, 계정에는 지우지 않은 `main_server` 기기가 많아야 하나입니다.
+- 메인 서버가 없는 계정에서는 `main_server` 링크를 보통처럼 `{"approve": true}`로 승인합니다.
+- 메인 서버가 있는 계정에서 `main_server` 링크를 `{"approve": true}`로만 승인하면 409이고 `code`는 `main_server_exists`입니다. 승인하려면 **바꾸기**를 분명히 적습니다: `{"approve": true, "replace": "<지금 메인 서버의 endpoint_id>"}`. `replace`가 지금 메인 서버가 아니면(다른 기기이거나 메인 서버가 없으면) 409 `replace_mismatch`입니다. `replace`는 `main_server` 링크를 승인할 때만 쓰고, 거절이나 다른 역할의 링크에 붙이면 400입니다. 승인 화면이 무엇을 바꾸는지 보여 줄 수 있도록 `GET /v1/link-codes/{user_code}`는 `main_server` 링크에 대해 계정의 지금 메인 서버(`current_main_server: {endpoint_id, name}`, 없거나 다른 역할의 링크면 `null`)를 함께 줍니다.
+- 바꾸기는 새 기기가 토큰을 받을 때(3단계) 한 트랜잭션으로 일어납니다: 옛 메인 서버를 지우고(그 토큰은 401 `device_removed`, 지운 기기 목록에 나옴, 공유·주소 레코드는 지우고 릴레이 연결을 끊음), **옛 메인 서버의 이름(FR-H5)을 새 메인 서버로 옮기고**, 새 기기를 등록합니다. 이름을 옮기는 이유: 사용자의 주소(`https://<name>.darkpyonix.dev`)가 기계를 바꿔도 그대로 통해야 하기 때문입니다. 옛 메인 서버가 게시한 ACME TXT는 지우고, 새 메인 서버가 자기 키로 인증서를 다시 받습니다.
+- 승인 뒤 받기 전에 계정의 메인 서버가 바뀌었으면(그사이 다른 `main_server` 링크가 먼저 받음) 받기는 409 `main_server_exists`이고 그 링크는 거절 상태가 됩니다. 계정당 하나는 D1의 부분 유일 인덱스(`role = 'main_server' AND revoked_at IS NULL`)가 보장합니다.
+- 메인 서버를 지우면 계정에 메인 서버가 없어지고, 그 뒤의 `main_server` 링크는 `replace` 없이 승인합니다. 지운 메인 서버를 다시 들일 때도(FR-H11) 같은 규칙입니다.
+
+기기는 계정 하나에만 속하고, 기기 목록과 조회는 같은 계정 안에서만 보입니다. 기기 이름은 `PATCH /v1/devices/{endpoint_id} {"name": …}`로 바꿉니다(1~64자). 계정 권한이나 그 기기 자신만 바꿀 수 있고, 다른 `computer`/`client` 토큰은 403입니다. 기기를 지우면(위 표의 권한: 세션, `computer`·`client`를 지우는 메인 서버 토큰, 또는 그 기기 자신의 기기 토큰: 앱을 지우거나 계정에서 나갈 때 기기가 스스로 나갑니다) 그 키는 폐기되어 계정 주인이 다시 들이기 전에는(FR-H11) 다시 등록할 수 없고, 그 기기의 이름·공유·주소 레코드가 지워지며, Worker가 릴레이 호스트에 연결을 끊으라고 알립니다(`POST /admin/v1/disconnect`, FR-H3).
+- 수용 기준: 두 엔드포인트가 기기 링크로 등록되면 계정의 기기 목록에 두 엔드포인트 ID가 나옵니다. 다른 키의 서명이나 다른 메시지의 서명은 400입니다. 승인 전 폴링은 202, 거절된 링크는 403, 한 번 받은 링크를 다시 받으면 404입니다. 링크 상태 조회는 대기·승인·받음·거절·만료를 그대로 보여 주고, 모르는 링크는 404입니다. 메인 서버 토큰은 `computer` 링크를 승인하지만 `main_server` 링크의 승인은 403이고, 같은 링크를 세션은 승인합니다. 이미 등록되었거나 지운 키의 링크 요청은 409입니다. 기기 이름은 세션과 그 기기 자신이 바꾸고 다른 `computer` 토큰은 403, 빈 이름은 400입니다. `client`로 들어온 기기는 목록·주소 게시와 조회가 되고, 공유 게시·이름 예약·승인은 403입니다. 다른 계정에서는 그 기기가 보이지 않습니다(404). `computer` 기기 토큰으로 다른 기기를 지우면 403이고 자기 자신은 지울 수 있습니다(204). 메인 서버 토큰으로 `computer`를 지우고 자기 자신도 지울 수 있습니다(204). 메인 서버가 있는 계정에서 `replace` 없는 `main_server` 승인은 409 `main_server_exists`, 지금 메인 서버가 아닌 `replace`는 409 `replace_mismatch`, 거절이나 `computer` 링크에 붙인 `replace`는 400이고, 링크 코드 조회는 지금 메인 서버를 `current_main_server`로 보여 줍니다. `replace`로 승인하고 받으면 기기 목록의 `main_server`는 새 기기 하나이고, 옛 메인 서버의 토큰은 401 `device_removed`이며 지운 기기 목록에 `main_server`로 나오고, 그 이름은 새 메인 서버의 것이 되며 옛 ACME TXT와 공유는 지워지고 릴레이에 끊기를 알립니다. 메인 서버가 없을 때 승인된 `main_server` 링크 둘 중 먼저 받은 것은 201, 나중 것은 409 `main_server_exists`이고 그 링크는 `denied`입니다. 지운 기기의 토큰은 401이고 `code`가 `device_removed`이며, 모르는 토큰은 401에 `invalid_credentials`입니다. 실제 iroh 엔드포인트(Rust `SecretKey::sign`)의 서명이 받아들여지는 것은 ember 전송 크레이트 연동 시험에서 확인합니다.
+- 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h1_register_two_iroh_endpoints`, `test_fr_h1_link_shows_code_and_polls_pending_until_approved`, `test_fr_h1_registration_requires_key_possession`, `test_fr_h1_denied_link_is_refused`, `test_fr_h1_restarted_device_reads_its_link_status`, `test_fr_h1_main_server_approves_computers_but_a_computer_cannot`, `test_fr_h1_only_a_session_approves_a_main_server_link`, `test_fr_h1_devices_are_scoped_to_their_account`, `test_fr_h1_removed_device_is_revoked`, `test_fr_h1_removed_device_token_is_told_apart_from_a_bad_token`, `test_fr_h1_a_device_removes_itself_but_not_others`, `test_fr_h1_only_a_session_removes_another_main_server`, `test_fr_h1_client_role_joins_and_connects_but_cannot_share_or_name`, `test_fr_h1_rename_by_the_device_or_the_account`, `test_fr_h1_link_request_is_validated`
+
+### FR-H2 주소 디렉터리와 발견 — `Agreed`
+기기는 현재 iroh 주소(릴레이 URL과 직접 주소)를 자기 키로 서명한 pkarr 패킷으로 허브에 올리고, 같은 계정의 기기는 엔드포인트 ID만으로 서로의 주소를 찾습니다.
+- 프로토콜: iroh의 pkarr 릴레이 HTTP 프로토콜을 그대로 씁니다. `PUT /pkarr/<z32 키>`로 올리고 `GET /pkarr/<z32 키>`로 받습니다. 본문은 `서명(64) || 타임스탬프 µs 빅엔디언(8) || DNS 패킷(최대 1000바이트)`이고, 서명 대상은 BEP 44 형식 `3:seqi<ts>e1:v<len>:<dns>`입니다(iroh-dns 1.3 `SignedPacket`). Worker는 이 형식과 DNS 응답 파싱(이름 압축 포함), `_iroh` TXT의 `relay=`/`addr=` 속성 해석을 TypeScript로 다시 구현합니다. 그래서 iroh의 기본 `PkarrPublisher`·`PkarrResolver`를 `https://darkpyonix.dev/pkarr?token=<조회 토큰>`에 그대로 붙일 수 있습니다. 쿼리 문자열에는 기기 토큰이 아니라 조회 전용 토큰만 넣습니다(NFR-H2). 같은 내용을 JSON으로 보는 `GET /v1/devices/{endpoint_id}/addresses`도 둡니다.
+- 받는 쪽 검사: 서명이 맞고, DNS 패킷이 파싱되고, 키가 폐기되지 않은 등록 기기이고, 타임스탬프가 저장된 것보다 큰 것만 받습니다(아니면 400/403/409). "더 새 것만"은 D1의 조건부 upsert 한 문장이라 동시 요청에도 원자적입니다. 너무 잦은 게시는 429입니다(Workers Rate Limiting, 키당 분당 30번).
+- 조회 범위: `GET`은 같은 계정의 기기 토큰이나 세션이 있어야 합니다. 조회가 공개되지 않으므로 기기는 직접 주소까지 올려도(`AddrFilter::unfiltered`) 공인 IP가 계정 밖으로 새지 않습니다.
+- DNS 발견(iroh-dns-server, `_iroh.<z32>.<도메인>` TXT)은 쓰지 않습니다. DNS 질의에는 계정 범위를 걸 수 없고, 우리 기기는 모두 허브와 HTTPS로 말하므로 얻는 것이 없습니다.
+- 수용 기준: 기기가 올린 패킷을 같은 계정의 기기가 `?token=<조회 토큰>`으로 바이트 그대로 받고, JSON 조회가 릴레이 URL·직접 주소·타임스탬프를 풀어 냅니다. 같거나 오래된 타임스탬프는 409, 등록되지 않은 키의 `PUT`은 403, 남의 키로 서명한 패킷은 400, 토큰 없는 `GET`은 401, 다른 계정의 `GET`은 404입니다. 두 실제 iroh 엔드포인트가 기본 `PkarrPublisher`/`PkarrResolver`로 이 Worker를 거쳐 연결하는 것은 배포 후 연동 시험으로 확인합니다(Rust 쪽이 만든 패킷 바이트를 시험 벡터로 Worker 테스트에 넣는 것도 그때 함).
+- 테스트(`hub/worker/test/pkarr.test.ts`, `directory.test.ts`): `test_fr_h2_z32_round_trips_a_published_pkarr_key`, `test_fr_h2_verifies_an_iroh_style_record_and_decodes_addresses`, `test_fr_h2_rejects_a_tampered_or_foreign_packet`, `test_fr_h2_dns_parser_follows_compression_pointers`, `test_fr_h2_publish_and_resolve_like_stock_iroh`, `test_fr_h2_only_newer_packets_replace_the_stored_one`, `test_fr_h2_directory_rejects_unregistered_and_foreign`
 
 ### FR-H3 중계 — `Draft`
-홀펀칭이 실패하면 허브가 암호화된 바이트를 중계합니다.
+iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 HTTPS 위 WebSocket이라 TCP로 되지만, iroh 1.x가 공인 주소를 알아내는 QUIC 주소 발견(QAD)은 UDP 7842가 필요하고, Workers와 Containers는 들어오는 UDP를 받지 않습니다(들어오는 TCP는 2026년 8월부터 Spectrum으로 가능). iroh는 STUN을 쓰지 않으므로 STUN 서버는 두지 않습니다.
+- 비교:
+  - (A) **작은 VPS 한 대에 `hub/server`(iroh-relay + QAD)**: 릴레이와 QAD가 모두 됩니다. 한 달 수 달러 수준의 VPS 한 대를 따로 운영해야 하고(OS 갱신, 인증서, 감시), 그 한 대가 단일 장애점입니다.
+  - (B) **Cloudflare Container에 iroh-relay(HTTPS/WebSocket만, QAD 없음)**: 운영할 서버가 없고 Worker와 같은 계정·배포로 묶입니다. 대신 QAD가 없어 기기가 자기 공인 주소를 모르므로 직접 연결 비율이 떨어지고 릴레이를 거치는 연결이 늘어납니다. 요청은 Worker → Durable Object → 컨테이너로 한 번 더 거치고, 모든 기기가 같은 릴레이 인스턴스를 만나야 하므로 인스턴스 하나에 몰립니다. 상시 켜진 인스턴스의 실행 시간과 전송량이 과금됩니다.
+  - (C) **둘 다(Container 릴레이 + QAD 전용 VPS)**: iroh에서 QAD는 릴레이 목록(`RelayMap`)의 항목마다 붙고(`RelayConfig::quic`), 그 호스트는 릴레이 URL의 호스트입니다. 그래서 "QAD만 하는 VPS"도 릴레이 항목으로 올라가야 하고, 기기가 그것을 홈 릴레이로 고를 수 있으니 결국 릴레이도 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 되므로 이득이 없습니다.
+- **권장: (A)로 시작하고, ember NFR-N1 측정으로 (B)로 옮길지 정합니다.** ember NFR-N1의 기준은 대칭 NAT를 뺀 조합에서 직접 경로 성공률 85% 이상입니다. iroh가 말하는 약 90% 직접 연결은 QAD를 전제로 한 수치라, QAD 없이 이 기준을 맞춘다는 근거가 아직 없습니다. 측정은 (A) 위에서 두 번 합니다. 클라이언트 `RelayMap`에 QAD를 켠 경우(`quic: Some(7842)`)와 끈 경우(`quic: None`, (B)와 같은 조건)입니다. QAD를 끈 경우도 85%를 넘으면 릴레이를 Container로 옮기고 VPS를 없앱니다(`hub/worker/wrangler.toml`에 주석으로 둔 컨테이너 바인딩). 못 넘으면 (A)를 유지합니다. 사용자 확인 전이라 `Draft`입니다.
+- 입장 정책: 릴레이 핸드셰이크가 증명한 엔드포인트 ID와 클라이언트가 낸 인증 토큰(있으면)을 릴레이 호스트가 `POST https://darkpyonix.dev/internal/v1/relay/admit`로 묻습니다(공유 비밀 `RELAY_SHARED_SECRET`). 폐기되지 않은 등록 기기면 허용(`cache_secs` 60초 동안 새 연결에 재사용 가능), 유효한 손님 통행권(FR-H4가 발급, 그 공유가 아직 게시 중)이 있으면 허용(캐시 안 함), 그 밖에는 거절입니다. 릴레이 호스트는 엔드포인트의 첫 연결이 열리고 마지막 연결이 닫힐 때 `POST /internal/v1/relay/presence`로 알려 기기 목록의 `online`을 갱신합니다. 기기를 지우면 Worker가 `POST https://relay.darkpyonix.dev/admin/v1/disconnect`로 끊습니다.
+- 릴레이 호스트 상태: `hub/server`는 지금 D15 이전 구현(API·SQLite 포함)이고, 릴레이 전용으로 줄이는 작업(위 입장 API 사용, `/admin/v1/disconnect` 추가, API·DB 제거)은 빌드가 필요한 별도 변경입니다(`hub/server/src/lib.rs` 머리 주석).
+- 수용 기준: 두 등록 기기가 IP 전송을 끈 릴레이 전용 모드로 우리 릴레이를 거쳐 연결하고 데이터를 주고받습니다(선택된 경로가 릴레이). 같은 두 기기가 루프백에서 직접 경로로도 연결합니다. 등록되지 않은 엔드포인트는 릴레이가 거절해 연결하지 못하고, 지운 기기의 연결은 끊깁니다. Worker 쪽: 등록 기기는 허용, 지운 기기와 통행권 없는 엔드포인트는 거절, 비밀이 틀리면 401, presence가 `online`을 바꿉니다. 루프백 처리량과 왕복 지연, NFR-N1의 QAD 켬/끔 직접 연결 비율을 측정해 여기에 적습니다.
+- 테스트: Worker `test_fr_h3_relay_admits_registered_and_refuses_removed_devices`, `test_fr_h3_relay_callbacks_need_the_shared_secret`, `test_fr_h3_presence_marks_devices_online`(`hub/worker/test/shares.test.ts`). 릴레이 호스트 `test_fr_h3_relay_only_connection_through_hub`, `test_fr_h3_direct_connection_on_loopback`, `test_fr_h3_relay_rejects_unregistered_endpoint`, `test_fr_h3_relay_throughput_and_latency`(지금은 D15 이전 구현 기준, 릴레이 축소 때 스텁 입장 API로 바꿈)
+- 측정 기록: (구현 후 기입)
 
-### FR-H4 ash 호스팅과 공유 링크 — `Draft`
-`https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 호스팅하고, `https://darkpyonix.dev/s/<share_id>` 링크로 공유 커널에 연결합니다.
+### FR-H4 ash 호스팅과 공유 링크 — `Agreed`
+`https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 Workers 정적 자산으로 호스팅하고(`hub/worker/public/ash/`에 darkpyonix-ash 빌드 결과를 넣어 배포), 공유 링크 `https://darkpyonix.dev/s/<share_id>#<token>`을 그 공유를 연 기기로 이어 줍니다. 공유 토큰은 URL 조각(`#` 뒤)에 있어서 허브로 가지 않습니다. 권한 검사는 끝단의 전용 매니저가 합니다(FR-A3).
+- 기기는 `POST /v1/shares`로 자기 공유를 게시하고, 누구나 `GET /v1/shares/{share_id}`로 그 공유를 연 기기의 엔드포인트 ID와 릴레이 URL(기기가 올린 홈 릴레이, 없으면 `https://relay.darkpyonix.dev/`), 10분짜리 손님 릴레이 통행권을 받습니다. ash(브라우저 iroh, 릴레이 전용)는 그 통행권으로 릴레이에 붙어 기기에 연결합니다. `GET /s/{share_id}`는 ash 뷰어 페이지를 냅니다(뷰어가 배포되기 전까지는 자리표시 페이지). 공유를 내리면 그 공유의 통행권도 더는 통하지 않습니다.
+- 수용 기준: 게시한 공유가 기기 ID와 통행권으로 풀리고, 기기가 주소를 올린 뒤에는 그 홈 릴레이 URL로 풀립니다. 다른 기기가 같은 공유 ID를 게시하면 409입니다. 그 통행권으로 미등록 엔드포인트의 릴레이 입장이 허용되고, 통행권이 없거나 위조이거나 공유를 내린 뒤면 거절됩니다. 게시를 지우면 404입니다. `/s/{share_id}`와 `/ash/`가 HTML을 냅니다. 브라우저 ash가 실제로 릴레이를 거쳐 기기에 붙는 것은 릴레이 호스트 연동 시험으로 확인합니다.
+- 테스트(`hub/worker/test/shares.test.ts`): `test_fr_h4_share_resolves_to_hosting_device`, `test_fr_h4_share_ids_belong_to_one_device`, `test_fr_h4_guest_pass_admits_an_unregistered_endpoint_at_the_relay`, `test_fr_h4_viewer_pages_are_served`
 
-### FR-H5 HTTPS — `Draft`
-메인 서버가 `https://<name>.darkpyonix.dev` 형식의 주소와 공인 인증서를 얻게 합니다(모바일 웹뷰의 보안 컨텍스트 요건).
+### FR-H5 HTTPS 이름 — `Agreed`
+메인 서버가 `https://<name>.darkpyonix.dev` 주소와 공인 인증서를 얻게 합니다(모바일 웹뷰의 보안 컨텍스트 요건, ember FR-N4).
+- 방식 비교:
+  - (A) **ACME DNS-01을 허브가 대신 게시.** 메인 서버가 자기 개인 키로 인증서를 받고, 허브는 `_acme-challenge.<name>.darkpyonix.dev` TXT만 게시합니다. TLS가 메인 서버에서 끝나므로 허브는 평문을 보지 않습니다(NFR-H1 유지). 대신 공인 IP가 없는 기기에 브라우저가 직접 닿지 못하므로, ember 앱이 루프백 포워더(127.0.0.1 → iroh)로 그 이름을 열어야 합니다.
+  - (B) **허브가 TLS를 끝내는 HTTPS 엣지.** 아무 브라우저나 닿지만 허브가 평문을 봅니다. NFR-H1을 깨므로 쓰지 않습니다.
+  - (C) **SNI 패스스루 엣지.** 허브가 ClientHello의 SNI만 읽고 TLS 바이트를 그대로 iroh로 기기에 넘깁니다. 앱 없는 브라우저에서도 닿지만 공개 트래픽 대역폭이 허브에 걸리고, Workers로는 할 수 없어(TCP 패스스루) 릴레이 호스트나 Spectrum이 필요합니다.
+- 결정: (A)를 씁니다. (C)는 앱 없는 브라우저 접근이 필요해지면 따로 다룹니다. (B)는 쓰지 않습니다. 허브는 이름을 메인 서버 기기에 예약하고(`PUT /v1/names/{name}`), 그 기기가 요청한 TXT 값을 **Cloudflare DNS API**로 게시합니다(`PUT /v1/names/{name}/acme-challenge`). 기존 값 삭제와 새 값 생성은 `POST /zones/{zone_id}/dns_records/batch` 한 번이라 원자적이고, TTL은 60초입니다. API 토큰은 darkpyonix.dev 존 하나의 `Zone → DNS → Edit`만 가집니다. DNS 공급자는 `DnsProvider` 인터페이스 뒤에 있습니다. 이름을 놓거나 기기를 지우면 그 TXT도 지웁니다. 메인 서버를 바꾸면(FR-H1) 옛 메인 서버의 이름은 지우지 않고 새 메인 서버로 옮겨 가며, TXT만 지웁니다(사용자의 주소가 기계를 바꿔도 그대로 통하도록). 예약어(`www`, `api`, `relay`, `ash`, `hub`, `dns`, `ns1`, `ns2`, `mail`, `admin`, `docs`, `status`, `auth`, `link`, `qad`)는 받지 않습니다.
+- 수용 기준: 메인 서버가 이름을 예약하면 201, 같은 기기가 다시 하면 200, 다른 기기는 409, `computer`는 403, 형식이 틀리거나 예약어면 400입니다. TXT 값 1~4개(각 43자 base64url)를 게시하고 지울 수 있고, 다른 값은 400, 공급자가 거절하면 502입니다. 메인 서버를 바꾸면 이름 목록의 그 이름이 새 메인 서버를 가리키고, 새 메인 서버는 그 이름의 TXT를 게시하며 옛 메인 서버는 401입니다. Cloudflare 클라이언트는 기존 레코드를 조회한 뒤 삭제와 생성을 한 batch로 보냅니다. 실제 존에서 Let's Encrypt 스테이징 인증서를 받는 것은 배포 후 확인합니다.
+- 테스트(`hub/worker/test/names.test.ts`): `test_fr_h5_name_reservation_and_acme_txt`, `test_fr_h5_only_main_servers_hold_names_and_names_are_unique`, `test_fr_h5_bad_values_and_provider_failures`, `test_fr_h5_release_and_device_removal_clear_records`, `test_fr_h5_cloudflare_replaces_txt_in_one_batch`, `test_fr_h5_cloudflare_clear_and_errors`
 
-### FR-H6 로그인 — `Draft`
-OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사용량도 쓸 수 있는 페이지를 둡니다. 2026-10-03 조사 결과 ChatGPT 플랜 사용("Sign in with ChatGPT")은 오픈소스·로컬 호스팅 앱에 열려 있고 원격 호스팅은 별도 승인이 필요합니다. 그래서 플랜 사용은 ember server가 맡고(ember SPEC), 허브의 로그인은 승인을 받은 뒤에 다룹니다(PROJECT Q2).
+### FR-H6 GitHub 로그인 — `Agreed`
+허브 계정은 GitHub 로그인으로 만듭니다(사용자 결정, 2026-10-03: "OpenAI 로그인은 엠버 서버에서 사용자가 자체적으로 하는걸로 하고 허브는 깃허브 로그인으로 하자."). 계정의 정체는 GitHub 사용자의 숫자 ID(바뀌지 않고 재사용되지 않음)이고, 로그인 이름은 표시용으로만 저장합니다.
+- 흐름: GitHub OAuth App, 인가 코드 + PKCE(S256) + state. `GET /auth/login`이 무작위 `state`와 PKCE 검증자를 D1에 10분짜리 일회용 거래로 남기고, `state`를 `__Host-dp_oauth` 쿠키에도 묶은 뒤 `https://github.com/login/oauth/authorize`로 보냅니다. 범위(scope)는 요청하지 않습니다(공개 프로필만 읽음). `GET /auth/callback`은 쿠키의 `state`와 같고 아직 쓰지 않은 거래인지 확인하고, 코드를 검증자와 함께 `https://github.com/login/oauth/access_token`에서 바꾸고, `GET https://api.github.com/user`로 `id`와 `login`을 읽은 뒤 그 GitHub 토큰을 폐기합니다. 그 GitHub ID의 계정을 찾거나 만들고, 30일짜리 세션 쿠키(`__Host-dp_session`, HttpOnly, Secure, SameSite=Lax)를 줍니다. `return_to`는 같은 출처의 경로만 받습니다.
+- 운영자 선택 사항: `GITHUB_ALLOWED_IDS`(쉼표로 구분한 GitHub 사용자 ID)를 두면 그 사람들만 새 계정을 만들 수 있습니다(비우면 누구나).
+- OpenAI / Sign in with ChatGPT는 허브에 넣지 않습니다. 사용자의 ChatGPT 플랜 사용은 사용자가 직접 띄운 ember server가 맡습니다(PROJECT Q2).
+- 수용 기준: 로그인 시작이 `client_id`, 콜백 URL, `state`, S256 `code_challenge`를 담아 GitHub로 보내고 같은 `state`를 쿠키로 둡니다. 같은 GitHub ID로 두 번 로그인하면 같은 계정이고 로그인 이름만 갱신되며, 다른 ID는 다른 계정입니다. GitHub 토큰은 폐기되고 저장되지 않습니다. 다른 브라우저의 `state`, 다시 쓴 `state`, 틀린 PKCE 검증자는 400입니다. 허용 목록 밖의 새 사용자는 403입니다. 밖으로 나가는 `return_to`는 `/`가 됩니다. 로그아웃 뒤 세션은 401입니다. 다른 출처의 쿠키 쓰기는 403입니다. 실제 GitHub OAuth App으로 로그인되는 것은 배포 후 확인합니다.
+- 테스트(`hub/worker/test/github.test.ts`, 가짜 GitHub): `test_fr_h6_login_redirects_to_github_with_pkce_and_state`, `test_fr_h6_callback_creates_one_account_per_github_user`, `test_fr_h6_github_token_is_revoked_and_not_stored`, `test_fr_h6_callback_rejects_state_from_another_browser`, `test_fr_h6_state_is_single_use`, `test_fr_h6_wrong_pkce_verifier_is_refused_by_the_provider`, `test_fr_h6_allowlist_limits_new_accounts`, `test_fr_h6_return_to_stays_on_this_origin`, `test_fr_h6_logout_ends_the_session`, `test_fr_h6_session_writes_need_our_origin`
+
+### FR-H7 Flathub 앱 검증 — `Agreed`
+Flathub의 앱 ID `dev.darkpyonix.Ember`는 도메인 darkpyonix.dev로 검증합니다. Flathub가 주는 토큰을 `https://darkpyonix.dev/.well-known/org.flathub.VerifiedApps.txt`에 평문으로 둡니다. 내용은 Worker 변수 또는 비밀값 `FLATHUB_VERIFICATION_TOKEN`에서 오므로 저장소에 토큰을 넣지 않습니다. 비어 있거나 없으면 404입니다.
+- 수용 기준: 토큰이 있으면 200 `text/plain`이고 본문은 앞뒤 공백을 뺀 토큰입니다. 없거나 공백뿐이면 404입니다. 실제 Flathub 검증은 배포 후 확인합니다.
+- 테스트(`hub/worker/test/flathub.test.ts`): `test_fr_h7_verified_apps_file_serves_the_configured_token`, `test_fr_h7_verified_apps_file_is_absent_without_a_token`
+
+### FR-H8 허브 설정 발견 — `Agreed`
+클라이언트(ember, ash)가 릴레이 주소나 pkarr URL을 코드에 박아 두지 않도록, 허브가 자기 설정을 공개합니다(Ember FR-N2 연동 중 보고, 2026-10-03).
+- `GET /v1/config`(인증 없음, `Cache-Control: public, max-age=300`)는 `{api_version, hub_version, relay_urls, pkarr_url, link_url}`를 냅니다. `api_version`은 정수이고 `/v1` 아래 계약을 깨는 변경이 있을 때만 올립니다(지금 1). `relay_urls`는 기기가 iroh `RelayMap`에 넣을 릴레이 목록(지금은 Worker 변수 `RELAY_URL` 하나), `pkarr_url`은 iroh `PkarrPublisher`/`PkarrResolver`에 줄 기준 URL(`<PUBLIC_URL>/pkarr`, 조회할 때는 `?token=<조회 토큰>`을 붙임, NFR-H2), `link_url`은 기기 링크 승인 페이지입니다.
+- 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`)를 따릅니다.
+- 테스트(`hub/worker/test/config.test.ts`): `test_fr_h8_config_names_relays_and_pkarr_url`, `test_fr_h8_config_follows_the_worker_vars`
+
+### FR-H9 기기 목록 변경 알림 — `Agreed` [provisional]
+Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기는 하트비트 한 번 안에 끊긴다"(ember FR-N3)를 맞출 수 없었습니다(Ember FR-N2 연동 중 보고, 2026-10-03). 허브가 목록이 바뀐 것을 알려 줍니다.
+- **판(version)과 ETag.** 계정마다 기기 목록의 판 번호를 두고, 목록에 보이는 것이 바뀔 때마다 하나 올립니다: 기기 추가·되살림(FR-H11), 삭제, 이름·앱 정보 변경, `online` 변화. `last_seen`만 바뀌는 것(주소 게시, 릴레이 입장)은 판을 올리지 않습니다(5분마다 오는 게시가 모든 대기자를 깨우지 않도록). `GET /v1/devices`는 `ETag: W/"v<판>"`을 붙입니다(약한 ETag: `last_seen`은 판에 들지 않음).
+- **조건부 요청.** `If-None-Match`가 지금 ETag와 같으면 304(본문 없음)입니다.
+- **롱 폴링.** `?wait=<초>`(0~25)를 함께 주면, ETag가 같을 때 바로 304를 내지 않고 판이 바뀌거나 `wait`초가 지날 때까지 기다립니다. 바뀌면 200과 새 목록·새 ETag, 시간이 다 되면 304입니다. Worker는 기다리는 동안 2초마다 그 계정의 판 한 행만 읽습니다. 그래서 변경은 최대 약 2초 뒤에 전해지고, 대기 중인 클라이언트 하나는 25초에 D1 읽기 14번 정도(하루 약 4만8천 번)를 씁니다. 판이 바뀐 뒤에는 자격 증명을 다시 확인하므로, 기다리던 기기 자신이 지워졌으면 401 `device_removed`가 옵니다. 25초 상한은 프록시·모바일 망이 유휴 연결을 끊는 시간보다 짧게 둔 값입니다.
+- **SSE가 아니라 롱 폴링인 이유.** Durable Object 없이 Worker는 다른 요청이 한 쓰기를 밀어 받을 수 없으므로, SSE로 해도 연결 안에서 똑같이 D1을 주기적으로 읽어야 합니다. 그러면 SSE는 연결을 더 오래 잡고(Worker 동시 연결, 모바일 배터리), 중간 프록시의 버퍼링 문제가 생기며, 다시 붙을 때의 상태 맞추기를 따로 정해야 합니다. 롱 폴링+ETag는 보통 HTTP 클라이언트로 되고, 끊겨도 마지막 ETag로 이어서 묻기만 하면 되며, `wait` 없이 쓰면 값싼 조건부 폴링이 됩니다. 계약은 그대로 두고 나중에 Durable Object로 대기자를 즉시 깨우게 바꿀 수 있습니다. 실제 부하와 Ember 사용으로 확정할 때까지 `[provisional]`입니다.
+- 수용 기준: 응답에 ETag가 있고, 같은 ETag의 `If-None-Match`는 304, 다른 ETag는 바로 200입니다. 기다리는 중에 기기를 지우거나 이름을 바꾸면 200과 새 ETag가 오고, 아무 일 없으면 `wait` 뒤 304입니다. 기다리던 기기가 지워지면 401 `device_removed`입니다. 주소 게시는 ETag를 바꾸지 않고, `online` 변화는 바꿉니다. `wait`가 범위 밖이면 400입니다.
+- 테스트(`hub/worker/test/notify.test.ts`): `test_fr_h9_device_list_has_an_etag_and_answers_304`, `test_fr_h9_long_poll_wakes_on_a_change`, `test_fr_h9_long_poll_times_out_with_304`, `test_fr_h9_waiting_device_that_is_removed_gets_device_removed`, `test_fr_h9_only_visible_changes_move_the_etag`, `test_fr_h9_wait_is_validated`
+
+### FR-H10 기기 앱 정보 — `Agreed` [provisional]
+기기 목록만으로 "어느 기기가 ember 노드이고 무슨 버전이며 무엇을 제공하는지" 알 수 있게, 기기가 자기 앱 정보를 허브에 적습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
+- 기기는 `PATCH /v1/devices/{자기 endpoint_id} {"app": {...}}`로 적고 `{"app": null}`로 지웁니다. **그 기기 자신만** 적을 수 있습니다(세션이나 메인 서버가 남의 `app`을 적으면 403). 기기 목록과 조회의 `Device.app`에 그대로 나옵니다(없으면 `null`).
+- 형식(엄격, 알 수 없는 필드는 400): `kind`(필수, `^[a-z][a-z0-9-]{0,31}$`, 예: `ember`), `version`(필수, `^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$`), `services`(선택, 기본 `[]`, 같은 형식의 이름 최대 16개, 중복 없음, 예: `["kernel-manager", "ash-host"]`).
+- 허브는 이 값을 표시와 힌트로만 씁니다. 기기가 스스로 말한 것이라 권한 판단에 쓰지 않고, 클라이언트도 연결 상대를 고르는 힌트로만 씁니다(상대 인증은 iroh 키가 함). 형식을 좁게 둔 이유: 계정의 모든 기기에 그대로 보이는 값이므로 크기와 문자 집합을 묶어 두고, 자유 형식 필드가 필요해지면 그때 넓힙니다. Ember의 실제 사용으로 확정할 때까지 `[provisional]`입니다.
+- 수용 기준: 기기가 적은 앱 정보가 같은 계정의 목록과 조회에 나오고, `null`로 지워집니다. 남이 적으면 403, 형식이 틀리거나 알 수 없는 필드면 400입니다.
+- 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h10_device_reports_its_app`, `test_fr_h10_only_the_device_writes_its_app`, `test_fr_h10_app_is_validated`
+
+### FR-H11 지운 키 다시 들이기 — `Agreed` [provisional]
+지운 키는 다시 등록할 수 없으므로(FR-H1), 실수로 지운 메인 서버는 새 키(새 엔드포인트 ID)를 만들어야 하고 그 키를 아는 모든 곳을 고쳐야 합니다. 그래서 **계정 주인만** 지운 키를 다시 들일 수 있게 합니다(Ember FR-N2 연동 중 보고, 2026-10-03).
+- 흐름: (1) 로그인한 브라우저 세션이 `POST /v1/devices/{endpoint_id}/readmit`로 자기 계정에서 지운 키를 15분 동안 다시 받아들이겠다고 표시합니다. (2) 그 기기가 보통의 기기 링크(FR-H1)를 시작합니다. 표시가 살아 있는 동안만 그 키의 링크 요청이 409가 아닙니다. (3) 그 링크의 승인도 **같은 계정의 세션만** 할 수 있습니다(메인 서버 토큰, 다른 계정은 403). (4) 기기가 받으면 같은 기기 행이 되살아나고 기기 토큰과 조회 토큰은 새로 발급됩니다. 역할과 이름은 새 링크의 것이고 앱 정보는 비웁니다. `main_server`로 돌아오는 링크에는 메인 서버 하나 규칙(FR-H1)이 그대로 걸립니다. 계정에 다른 메인 서버가 있으면 `replace`로만 승인되고, 받으면 그 메인 서버가 지워지며 이름이 되살아난 기기로 옮겨 갑니다.
+- 지운 기기 목록: 다시 들일 키를 고르려면 그 엔드포인트 ID를 알아야 하므로, 로그인한 세션은 `GET /v1/removed-devices`로 자기 계정에서 지운 기기를 봅니다. 항목마다 `endpoint_id`, 지울 때의 `name`과 `role`, `created_at`, `removed_at`, 그리고 다시 들이기 표시가 살아 있으면 그 만료(`readmit_until`, 아니면 `null`)가 나옵니다. 최근에 지운 것부터 100개까지입니다. 다시 들여 받은 기기는 이 목록에서 빠지고 기기 목록(`GET /v1/devices`)에 나옵니다. 기기 토큰(메인 서버 것도)은 403입니다. 다시 들이기 자체가 세션만의 일이므로 목록도 세션에만 보입니다. 지운 기기의 이름과 역할은 계정 바깥에 드러나지 않습니다.
+- 지울 때 이미 없어진 것(이름, 공유, 주소 레코드, 옛 토큰)은 돌아오지 않습니다. 옛 기기 토큰은 그 뒤 `invalid_credentials`입니다.
+- 설계 이유: 키가 새서 지운 경우를 생각하면 키 소유 증명만으로 돌아오게 할 수 없습니다. 그래서 두 번의 사람 확인(표시와 승인)을 세션에만 맡기고, 표시는 짧게(링크 수명과 같은 15분) 둡니다. 메인 서버 토큰을 빼는 이유는 FR-H1의 `main_server` 승인 제한과 같습니다(새어 나간 메인 서버 토큰으로 지운 기기를 되살리지 못하게). Ember의 실제 사용으로 확정할 때까지 `[provisional]`입니다.
+- 수용 기준: 지운 키의 링크 요청은 409, 세션이 다시 들이기를 표시한 뒤에는 201입니다. 메인 서버 토큰의 표시와 승인은 403입니다. 받은 뒤 기기가 목록에 다시 나오고 새 토큰이 통하며 옛 토큰은 401 `invalid_credentials`입니다. 15분이 지나면 다시 409입니다. 지우지 않은 기기의 표시는 409, 다른 계정의 기기는 404입니다. 다른 메인 서버가 있을 때 `main_server`로 돌아오는 링크의 승인은 `replace` 없이 409 `main_server_exists`이고, `replace`로 승인해 받으면 되살아난 기기가 유일한 메인 서버가 되고 바뀐 메인 서버의 토큰은 401 `device_removed`이며 이름이 옮겨 갑니다. 지운 기기 목록은 세션에 지운 기기를 최근 것부터 지울 때의 이름·역할·`removed_at`과 함께 보여 주고, 다시 들이기를 표시하면 `readmit_until`이 나오며, 되살아난 기기와 다른 계정의 기기는 나오지 않습니다. 기기 토큰은 403입니다.
+- 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h11_owner_readmits_a_removed_key`, `test_fr_h11_readmission_expires`, `test_fr_h11_readmit_needs_a_removed_device_of_the_account`, `test_fr_h11_owner_lists_removed_devices`, `test_fr_h11_only_a_session_lists_removed_devices`
 
 ## 11. 비기능 요구사항
 
@@ -369,8 +481,18 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
 - 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`manager/crates/dpx-server/tests/openapi.rs`), 파이썬 시제품 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
 
-### NFR-H1 종단 간 암호화 — `Draft`
-허브는 중계하는 내용을 볼 수 없습니다. 기기 사이의 세션 키는 허브를 거치지 않고 합의합니다.
+### NFR-H1 종단 간 암호화 — `Agreed`
+허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
+- 수용 기준: 릴레이 전용 연결로 알려진 평문 표식을 보낼 때, 클라이언트와 허브 사이의 바이트(허브까지 TLS 없이 평문 HTTP 릴레이로 둔 경우에도)에 그 표식이 나타나지 않고, 상대 끝단에서는 그대로 받습니다.
+- 테스트: `test_nfr_h1_relay_sees_only_ciphertext`
+
+### NFR-H2 토큰 노출 최소화 — `Agreed`
+iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{key}`의 자격 증명이 URL 쿼리(`?token=`)로 갑니다. URL은 로그·프록시·크래시 보고에 남기 쉬우므로 그 자리에 계정 권한이 있는 토큰을 두지 않습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
+- **조회 토큰(`dpr_…`).** 기기 링크를 받을 때(`POST /v1/device-links/{link_id}/token`의 201) 기기 토큰과 함께 `resolve_token`을 하나 받습니다. 조회 토큰은 같은 계정 기기의 `GET /pkarr/{key}`에만 쓰이고(쿼리 또는 `Authorization: Bearer`), 다른 연산에서는 자격 증명이 아닙니다(401). 해시로만 저장합니다. 기기는 `POST /v1/me/resolve-token`(자기 기기 토큰, 헤더)으로 새 조회 토큰을 받을 수 있고, 그러면 이전 조회 토큰은 즉시 무효입니다(교체). 지운 기기의 조회 토큰은 401 `device_removed`입니다.
+- **쿼리의 기기 토큰은 받지 않습니다.** `?token=`에 기기 토큰(`dpd_…`)을 넣으면 401 `invalid_credentials`입니다. 기기 토큰과 세션은 헤더·쿠키로만 받습니다.
+- **로그.** Worker 코드는 요청 URL, 쿼리, `Authorization` 헤더를 로그로 남기지 않습니다(예외 처리기는 예외만 남김). `wrangler.toml`은 Workers Logs의 호출 로그(요청 URL을 기록함)를 끄고(`[observability.logs] invocation_logs = false`), `console` 로그만 남깁니다. 운영자는 이 Worker에 요청 URL 필드를 담는 Logpush를 켜지 않습니다.
+- 수용 기준: 링크로 받은 조회 토큰으로 `?token=` 조회가 200이고, 같은 조회 토큰으로 `GET /v1/devices`·`GET /v1/me`는 401입니다. 쿼리의 기기 토큰은 401 `invalid_credentials`입니다. 조회 토큰을 교체하면 이전 것은 401이고 새 것은 200입니다. 지운 기기의 조회 토큰은 401 `device_removed`입니다. 조회 요청(성공, 401, 404, 처리되지 않은 예외)을 처리하는 동안 Worker가 쓰는 `console` 출력에 토큰이 나타나지 않습니다. `wrangler.toml`의 호출 로그 설정이 꺼져 있습니다.
+- 테스트(`hub/worker/test/tokens.test.ts`): `test_nfr_h2_resolve_token_reads_records_and_nothing_else`, `test_nfr_h2_query_refuses_device_tokens`, `test_nfr_h2_resolve_token_rotates`, `test_nfr_h2_removed_device_resolve_token_is_device_removed`, `test_nfr_h2_worker_never_logs_the_query`, `test_nfr_h2_invocation_logs_are_off`
 
 ## 12. 프로토콜 요구사항
 
