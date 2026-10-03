@@ -17,7 +17,7 @@ MPLBACKEND = os.path.join(PKG, "kernel", "mplbackend.py")
 # sys.stdlib_module_names exists from 3.10; this fallback covers what kernel code may use on 3.8/3.9.
 _FALLBACK = set("""
 __future__ _thread abc argparse array ast asyncio atexit base64 binascii bisect builtins
-codecs collections contextlib copy csv ctypes dataclasses datetime decimal difflib dis enum errno
+codecs collections concurrent contextlib copy csv ctypes dataclasses datetime decimal difflib dis enum errno
 faulthandler fcntl fnmatch functools gc getpass glob gzip hashlib heapq hmac html http importlib
 inspect io ipaddress itertools json keyword linecache locale logging marshal math mimetypes msvcrt
 multiprocessing numbers operator os pathlib pickle platform posixpath pprint queue random re
