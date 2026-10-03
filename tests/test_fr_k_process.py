@@ -14,7 +14,10 @@ from darkpyonix import _home
 from darkpyonix.kernel import launcher, registry
 from darkpyonix.kernel.protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
 
-from kernel_procs import kill, notebook, reap, start, wait_pid_gone
+from kernel_procs import (
+    connect, kill, notebook, reap, run_and_wait, start, stream_text, wait_pid_gone,
+    write_notebook,
+)
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX signals in these tests")
 
@@ -55,6 +58,50 @@ def test_fr_k1_kernel_runs_from_uninstalled_interpreter(python, dp_home, scratch
         assert info["python"]["version"] == version
     finally:
         reap(proc)
+
+
+def test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell(python, dp_home, scratch, monkeypatch):
+    """A venv interpreter without DarkPyonix starts a kernel whose cells import darkpyonix."""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    venv = os.path.join(scratch, "venv")
+    made = subprocess.run([python, "-m", "venv", "--without-pip", venv],
+                          env=_clean_env(), capture_output=True, text=True, timeout=120)
+    if made.returncode != 0 and "ensurepip" in made.stderr + made.stdout:
+        pytest.skip("venv module unusable for %s" % python)
+    assert made.returncode == 0, made.stderr
+    vpy = os.path.join(venv, "bin", "python")
+    bare = subprocess.run([vpy, "-c", "import darkpyonix"], cwd=scratch, env=_clean_env(),
+                          capture_output=True, text=True, timeout=30)
+    assert bare.returncode != 0 and "darkpyonix" in bare.stderr
+
+    path = write_notebook(scratch, "venv_nb.py", """
+        # %% [code]
+        import sys
+        import darkpyonix
+        print(darkpyonix.__file__)
+        print(sys.prefix)
+        print(sys.prefix != sys.base_prefix)
+        """)
+    pid = launcher.launch(path, python=vpy)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=20)
+        assert info is not None, "venv kernel did not announce"
+        c = connect(info)
+        try:
+            status, _ = run_and_wait(c)
+            nb = c.request("runs.get", {"run_id": "latest"})
+        finally:
+            c.close()
+        assert status == "ok", nb
+        module, prefix, in_venv = stream_text(nb).splitlines()
+        assert module.startswith(launcher.KERNEL_ROOT)
+        assert os.path.realpath(prefix) == os.path.realpath(venv)
+        assert in_venv == "True"
+    finally:
+        kill(pid, signal.SIGTERM)
+        if not wait_pid_gone(pid):
+            kill(pid, signal.SIGKILL)
+            wait_pid_gone(pid)
 
 
 def test_fr_k3_second_kernel_for_same_file_is_refused(python, dp_home, scratch):

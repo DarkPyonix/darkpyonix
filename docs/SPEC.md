@@ -21,11 +21,10 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 
 ## 2. 커널 (K)
 
-### FR-K1 설치 없이 어떤 인터프리터로도 실행 — `Agreed`
+### FR-K1 설치 없이 어떤 인터프리터로도 실행 — `Done`
 매니저는 사용자가 고른 인터프리터에, 커널 소스 루트를 `sys.path` 앞에 넣는 부트스트랩(`-c`)으로 커널을 띄웁니다. 그 인터프리터에 DarkPyonix가 설치되어 있지 않아도 됩니다.
 - 수용 기준: DarkPyonix가 설치되지 않은 가상환경의 인터프리터로 커널을 띄우고 셀을 실행할 수 있습니다. 사용자 코드의 `import darkpyonix`가 성공합니다.
-- 테스트: `test_fr_k1_kernel_runs_from_uninstalled_interpreter`
-- 상태 메모 (2026-10-03 감사): DarkPyonix가 설치되지 않은 인터프리터에서 부트스트랩 명령으로 `import darkpyonix`가 되고 커널이 announce하는 것까지 검증했습니다. 가상환경 인터프리터로 띄운 커널에서 셀을 실행하고, 그 셀의 `import darkpyonix`가 성공하는지 보는 시험은 아직 없습니다.
+- 테스트: `test_fr_k1_kernel_runs_from_uninstalled_interpreter`, `test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell`(인터프리터마다 `.scratch/` 아래에 `--without-pip` 가상환경을 만들고, 그 인터프리터로 띄운 커널의 셀에서 `import darkpyonix`가 커널 소스 루트에서 불러와지고 `sys.prefix`가 그 가상환경임을 확인)
 
 ### FR-K2 파일에 묶인 커널 ID — `Done`
 커널 ID는 PROTOCOL §2.6의 규칙으로 만듭니다.
