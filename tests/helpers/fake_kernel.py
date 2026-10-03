@@ -24,7 +24,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 if __name__ == "__main__":
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "kernel"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "darkpyonix", "kernel"))
 
 from darkpyonix.kernel import protocol  # noqa: E402
 
@@ -285,7 +285,7 @@ class FakeKernel:
 
 def _standalone(path: str, out: str) -> None:
     import signal
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "kernel"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "darkpyonix", "kernel"))
     from darkpyonix import _home
     kernel = FakeKernel(path, _home.user_key()).start()
     stop = threading.Event()

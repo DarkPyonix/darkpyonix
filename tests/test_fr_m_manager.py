@@ -86,9 +86,9 @@ def _operations(schema):
 @prototype_only
 def test_fr_m1_prototype_operations_match_spec(dp_home):
     # The Rust manager (INTENT D10) must serve the whole spec; that equality is asserted in
-    # manager/crates/dpx-server/tests/api.rs. The Python prototype stopped at the pre-collaboration
-    # API, so here every operation it does serve must keep the spec's operationId and may only
-    # answer with status codes the spec lists.
+    # darkpyonix/manager/crates/dpx-server/tests/api.rs. The Python prototype stopped at the
+    # pre-collaboration API, so here every operation it does serve must keep the spec's
+    # operationId and may only answer with status codes the spec lists.
     with open(SPEC) as f:
         spec = yaml.safe_load(f)
     app = create_app(KernelDirectory(FakeBackend(b"k" * 32)), Auth(), ManagerState())

@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KERNEL_ROOT = os.path.join(REPO, "kernel")
+KERNEL_ROOT = os.path.join(REPO, "darkpyonix", "kernel")
 SCRATCH = os.path.join(REPO, ".scratch", "tests")
 
 if KERNEL_ROOT not in sys.path:

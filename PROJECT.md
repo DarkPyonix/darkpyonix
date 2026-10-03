@@ -11,9 +11,9 @@
 ## 범위
 
 **포함**
-- `kernel/darkpyonix/kernel`: 파일에 묶인 커널(표준 라이브러리 전용, 3.8+)
-- `kernel/darkpyonix/manager`: 임시/전용 매니저, HTTP API, `darkpyonix` CLI
-- `kernel/darkpyonix`: 노트북 파일이 쓰는 런타임 API와 셀 파서
+- `darkpyonix/kernel/darkpyonix/kernel`: 파일에 묶인 커널(표준 라이브러리 전용, 3.8+)
+- `darkpyonix/manager`: 임시/전용 매니저, HTTP API, `darkpyonix` CLI(Rust 워크스페이스)
+- `darkpyonix/kernel/darkpyonix`: 노트북 파일이 쓰는 런타임 API와 셀 파서
 - `hub/`: darkpyonix.dev(시그널링, 중계, HTTPS, ash 호스팅)
 - 문서: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT, OpenAPI, 클래스 다이어그램(`darkpyonix.mermaid`)
 

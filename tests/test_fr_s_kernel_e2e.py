@@ -1,6 +1,6 @@
 """The shared document and run attribution through a real kernel process (SPEC §10a FR-S1..S8).
 
-These launch the kernel main (kernel/darkpyonix/kernel/__main__.py) and drive it with several
+These launch the kernel main (darkpyonix/kernel/darkpyonix/kernel/__main__.py) and drive it with several
 ``KernelClient`` connections, the way managers do: ``doc.*``/``presence.*`` methods, the
 event stream, ``run`` with ``cell_ids`` and ``client``, ``interrupt``, ``runs.get``/``runs.wait``.
 """
