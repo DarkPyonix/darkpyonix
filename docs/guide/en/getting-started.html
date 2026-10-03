@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install and first run &middot; darkpyonix guide</title>
+<meta name="description" content="Install the darkpyonix CLI and the runtime API, choose the interpreter a kernel runs on, and run a notebook file.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/getting-started.html">
+<link rel="alternate" hreflang="en" href="getting-started.html">
+<link rel="alternate" hreflang="ko" href="../ko/getting-started.html">
+<link rel="alternate" hreflang="x-default" href="../en/getting-started.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="getting-started.html" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/getting-started.html" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="Guide">
+      <h2>Guide</h2>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="getting-started.html" aria-current="page">Install and first run</a></li>
+        <li><a href="notebook-format.html">Notebook files</a></li>
+        <li><a href="cli.html">The darkpyonix CLI</a></li>
+        <li><a href="run-logs.html">Run logs</a></li>
+        <li><a href="manager-api.html">Manager HTTP API</a></li>
+        <li><a href="clients.html">Editors, ash and agents</a></li>
+        <li><a href="hub.html">darkpyonix.dev hub</a></li>
+      </ul>
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#cli">Get the CLI</a></li>
+        <li><a href="#runtime">The runtime API</a></li>
+        <li><a href="#interpreter">Choose the interpreter</a></li>
+        <li><a href="#first">A first run</a></li>
+        <li><a href="#home">Where things are kept</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">Getting started</p>
+    <h1>Install and first run</h1>
+    <p class="lede">You need two things: the <code>darkpyonix</code> binary, which is the CLI and the manager, and a Python 3.8 or newer interpreter for the kernel. The interpreter does not need DarkPyonix installed.</p>
+
+    <h2 id="cli">Get the CLI</h2>
+    <p>The CLI and the manager are one Rust binary, <code>darkpyonix</code>. It carries the kernel's
+      Python sources inside it and unpacks them into <code>~/.darkpyonix/runtime/</code> on first use, so
+      the binary alone is enough to run kernels.</p>
+    <p>Prebuilt binaries are not published yet <span class="pill planned">planned</span>. The plan is a wheel that carries the
+      binary (INTENT D10). Until then, build it from a checkout. This needs a stable Rust toolchain.</p>
+    <figure class="codeblock" data-copy="Copy" data-copied="Copied">
+      <figcaption>shell</figcaption>
+<pre><code>git clone https://github.com/DarkPyonix/darkpyonix
+cd darkpyonix
+cargo build --release --manifest-path darkpyonix/manager/Cargo.toml
+<span class="c"># the binary: darkpyonix/manager/target/release/darkpyonix</span></code></pre>
+    </figure>
+
+    <p>Put <code>darkpyonix/manager/target/release/darkpyonix</code> on your <code>PATH</code>.</p>
+
+    <h2 id="runtime">The runtime API</h2>
+    <p>Inside a kernel, <code>import darkpyonix</code> always works, because the kernel puts its own sources
+      on <code>sys.path</code>. You install the package only to run a notebook outside a kernel, for example
+      with <code>python train.py</code> in CI.</p>
+    <figure class="codeblock" data-copy="Copy" data-copied="Copied">
+      <figcaption>shell</figcaption>
+<pre><code>uv add darkpyonix                         <span class="c"># into a uv project</span>
+ppp core add "darkpyonix==0.2.0"          <span class="c"># with pypackpack</span>
+tcl install darkpyonix                    <span class="c"># with toolchain-lite</span></code></pre>
+    </figure>
+
+        <div class="note">
+      <span class="label">Release status</span>
+      <p>Version 0.2.0 on PyPI is pending: issue <a href="https://github.com/DarkPyonix/darkpyonix/issues/45">#45</a>, pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a>. The package is standard library only and has no dependencies.</p>
+    </div>
+
+    <h2 id="interpreter">Choose the interpreter</h2>
+    <p>A kernel runs on the interpreter chosen when it starts, in this order: <code>--python PATH</code>,
+      then the <code>DARKPYONIX_PYTHON</code> environment variable, then <code>python3</code> or
+      <code>python</code> on <code>PATH</code>. The kernel keeps that interpreter until it is shut down,
+      so <code>--python</code> matters only when the kernel is not running yet.</p>
+    <p>Point it at your project's environment so your code finds its packages:</p>
+    <figure class="codeblock" data-copy="Copy" data-copied="Copied">
+      <figcaption>shell</figcaption>
+<pre><code>uv sync                                   <span class="c"># .venv with your project's own dependencies</span>
+darkpyonix run train.py --python .venv/bin/python
+darkpyonix run train.py --param lr=0.02   <span class="c"># second run: same kernel, new parameter</span></code></pre>
+    </figure>
+
+    <h2 id="first">A first run</h2>
+    <p>Any <code>.py</code> file works. A file with <code># %%</code> cell markers gets per-cell outputs and
+      per-cell run logs (see <a href="notebook-format.html">Notebook files</a>).</p>
+    <p>The first <code>run</code> finds no manager, starts an ephemeral one, and the manager starts the kernel.
+      The second run reuses both. If the first run is still going, the second is refused with exit code
+      <code>75</code> and a hint to use <code>--queue</code> or <code>stop</code>. That is deliberate: two
+      runs of one file in one process would share and corrupt state.</p>
+    <p>Afterwards the file has a sibling folder <code>__runs__/train.py/</code> with one <code>.ipynb</code>
+      per run. <a href="run-logs.html">Run logs</a> explains it.</p>
+
+    <h2 id="home">Where things are kept</h2>
+    <p>Per-user state lives in <code>~/.darkpyonix/</code>. Set <code>DARKPYONIX_HOME</code> to move it,
+      for example in tests.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Path</th><th scope="col">What</th></tr></thead>
+        <tbody>
+          <tr><td><code>user.key</code></td><td>The key kernels and managers of the same OS user authenticate with. Mode 0600, created on first use.</td></tr>
+          <tr><td><code>locks/&lt;kernel_id&gt;.lock</code></td><td>The OS lock that keeps one kernel per file. The OS releases it when a kernel dies, so a stale file never blocks.</td></tr>
+          <tr><td><code>runtime/</code></td><td>The kernel sources unpacked from the binary.</td></tr>
+          <tr><td><code>kernels/&lt;kernel_id&gt;.json</code>, <code>managers/&lt;pid&gt;.json</code></td><td>Registry files for discovery and for the CLI to find a manager. Being removed <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>.</td></tr>
+          <tr><td><code>manager.db</code></td><td>Hashed share tokens of a dedicated manager.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <nav class="pagenav" aria-label="Pagination">
+      <a class="prev" href="index.html"><span>Previous</span>&larr; Overview</a>
+      <a class="next" href="notebook-format.html"><span>Next</span>Notebook files &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT License (Apache-2.0 proposed, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>
