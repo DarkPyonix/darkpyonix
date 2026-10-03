@@ -5,6 +5,8 @@
 //   1. the device asks: POST /v1/device-links {endpoint_id, name, role} -> link_id, user_code, challenge
 //   2. a person signed in with GitHub (or the account's main server) approves the user code:
 //      POST /v1/link-codes/{user_code} {"approve": true}
+//      (an account has one main server, Ember INTENT D3: a second main_server link is approved
+//      only as an explicit replacement, {"approve": true, "replace": "<current endpoint_id>"})
 //   3. the device claims its token, signing the challenge with its iroh secret key:
 //      POST /v1/device-links/{link_id}/token {"signature": hex(sign("darkpyonix-hub/v2/link\n<link_id>\n<challenge>"))}
 
@@ -218,6 +220,17 @@ interface LinkRow {
   status: string;
   account_id: string | null;
   expires_at: number;
+  /** The main server this main_server link was approved to replace (FR-H1). */
+  replace_endpoint_id: string | null;
+}
+
+/** The account's one active main server (FR-H1), if any. */
+async function currentMainServer(env: Env, accountId: string): Promise<{ endpoint_id: string; name: string } | null> {
+  return env.DB.prepare(
+    "SELECT endpoint_id, name FROM devices WHERE account_id = ? AND role = 'main_server' AND revoked_at IS NULL",
+  )
+    .bind(accountId)
+    .first<{ endpoint_id: string; name: string }>();
 }
 
 async function pendingLinkByCode(env: Env, rawCode: string, now: number): Promise<LinkRow> {
@@ -243,18 +256,27 @@ export async function getLinkCode(request: Request, env: Env, deps: Deps, code: 
     name: link.name,
     role: link.role,
     expires_at: link.expires_at,
+    // What approving a main_server link would replace (FR-H1).
+    current_main_server: link.role === "main_server" ? await currentMainServer(env, accountId) : null,
   });
 }
 
-/** `POST /v1/link-codes/{user_code}` `{"approve": bool}` */
+/** `POST /v1/link-codes/{user_code}` `{"approve": bool, "replace"?: "<endpoint_id>"}` */
 export async function decideLinkCode(request: Request, env: Env, deps: Deps, code: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const p = await principal(request, env, now);
   const accountId = requireAccountAdmin(p);
   await limited(env, `link-code:${accountId}`);
-  const body = await readJson<{ approve?: unknown }>(request);
+  const body = await readJson<{ approve?: unknown; replace?: unknown }>(request);
   if (typeof body.approve !== "boolean") throw ApiError.badRequest("approve must be a boolean");
+  const replace = body.replace;
+  if (replace !== undefined && (typeof replace !== "string" || !ENDPOINT_ID_RE.test(replace))) {
+    throw ApiError.badRequest("replace must be 64 lowercase hex characters");
+  }
   const link = await pendingLinkByCode(env, code, now);
+  if (replace !== undefined && !(body.approve && link.role === "main_server")) {
+    throw ApiError.badRequest("replace only goes with approving a main_server link");
+  }
   // A leaked main server token must not mint more devices with account rights.
   if (body.approve && link.role === "main_server" && p.kind !== "session") {
     throw ApiError.forbidden("only a signed-in session may approve a main_server link");
@@ -268,10 +290,21 @@ export async function decideLinkCode(request: Request, env: Env, deps: Deps, cod
       throw ApiError.forbidden("only a signed-in session of its account may re-admit a removed key");
     }
   }
+  // One main server per account (FR-H1, Ember INTENT D3): a second one only replaces the first.
+  if (body.approve && link.role === "main_server") {
+    const current = await currentMainServer(env, accountId);
+    if (current && replace === undefined) {
+      throw ApiError.conflict("the account has a main server; approve with \"replace\" to replace it", "main_server_exists");
+    }
+    if (replace !== undefined && current?.endpoint_id !== replace) {
+      throw ApiError.conflict("replace does not name the account's current main server", "replace_mismatch");
+    }
+  }
   const result = await env.DB.prepare(
-    "UPDATE device_links SET status = ?, account_id = ? WHERE link_id = ? AND status = 'pending'",
+    `UPDATE device_links SET status = ?, account_id = ?, replace_endpoint_id = ?
+     WHERE link_id = ? AND status = 'pending'`,
   )
-    .bind(body.approve ? "approved" : "denied", body.approve ? accountId : null, link.link_id)
+    .bind(body.approve ? "approved" : "denied", body.approve ? accountId : null, replace ?? null, link.link_id)
     .run();
   if (result.meta.changes !== 1) throw ApiError.notFound("unknown or expired code");
   return noContent();
@@ -328,33 +361,71 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
     .run();
   if (claimed.meta.changes !== 1 || !link.account_id) throw ApiError.notFound("already claimed");
 
+  const accountId = link.account_id;
   const token = newToken("dpd_");
   const resolveToken = newToken(RESOLVE_TOKEN_PREFIX);
   const tokenHash = await hashToken(token);
   const resolveHash = await hashToken(resolveToken);
-  // A re-admitted removed key (FR-H11) gets its row back with new tokens; anything else is new.
-  const restored = await env.DB.prepare(
-    `UPDATE devices SET revoked_at = NULL, readmit_until = NULL, name = ?, role = ?, token_hash = ?,
-       resolve_token_hash = ?, last_seen = NULL, online = 0, app = NULL
-     WHERE endpoint_id = ? AND account_id = ? AND revoked_at IS NOT NULL AND readmit_until IS NOT NULL`,
-  )
-    .bind(link.name, link.role, tokenHash, resolveHash, link.endpoint_id, link.account_id)
-    .run();
-  if (restored.meta.changes !== 1) {
-    try {
-      await env.DB.prepare(
-        `INSERT INTO devices (endpoint_id, account_id, name, role, token_hash, resolve_token_hash, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(link.endpoint_id, link.account_id, link.name, link.role, tokenHash, resolveHash, now)
-        .run();
-    } catch {
-      throw ApiError.conflict("endpoint id already registered");
+  const old = link.role === "main_server" ? link.replace_endpoint_id : null;
+  const oldNames = old
+    ? (await env.DB.prepare("SELECT name FROM names WHERE endpoint_id = ? AND account_id = ?").bind(old, accountId).all<{ name: string }>())
+        .results
+    : [];
+  // One transaction: the replaced main server goes, its names move, the device joins (FR-H1).
+  // The partial unique index refuses a second active main server however the links raced.
+  const replacing = old
+    ? [
+        env.DB.prepare(
+          `UPDATE devices SET revoked_at = ?, online = 0
+           WHERE endpoint_id = ? AND account_id = ? AND role = 'main_server' AND revoked_at IS NULL`,
+        ).bind(now, old, accountId),
+      ]
+    : [];
+  const joining = [
+    // A re-admitted removed key (FR-H11) gets its row back with new tokens; anything else is new.
+    env.DB.prepare(
+      `UPDATE devices SET revoked_at = NULL, readmit_until = NULL, name = ?, role = ?, token_hash = ?,
+         resolve_token_hash = ?, last_seen = NULL, online = 0, app = NULL
+       WHERE endpoint_id = ? AND account_id = ? AND revoked_at IS NOT NULL AND readmit_until IS NOT NULL`,
+    ).bind(link.name, link.role, tokenHash, resolveHash, link.endpoint_id, accountId),
+    env.DB.prepare(
+      `INSERT INTO devices (endpoint_id, account_id, name, role, token_hash, resolve_token_hash, created_at)
+       SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM devices WHERE token_hash = ?)`,
+    ).bind(link.endpoint_id, accountId, link.name, link.role, tokenHash, resolveHash, now, tokenHash),
+  ];
+  const moving = old
+    ? [
+        env.DB.prepare(
+          `UPDATE names SET endpoint_id = ? WHERE endpoint_id = ? AND account_id = ?
+             AND EXISTS (SELECT 1 FROM devices WHERE endpoint_id = ? AND revoked_at IS NOT NULL)`,
+        ).bind(link.endpoint_id, old, accountId, old),
+        env.DB.prepare(
+          "DELETE FROM shares WHERE endpoint_id = ? AND EXISTS (SELECT 1 FROM devices WHERE endpoint_id = ? AND revoked_at IS NOT NULL)",
+        ).bind(old, old),
+        env.DB.prepare(
+          "DELETE FROM records WHERE endpoint_id = ? AND EXISTS (SELECT 1 FROM devices WHERE endpoint_id = ? AND revoked_at IS NOT NULL)",
+        ).bind(old, old),
+      ]
+    : [];
+  let replaced = false;
+  try {
+    const results = await env.DB.batch([...replacing, ...joining, ...moving, bumpDevicesVersion(env, accountId)]);
+    replaced = old !== null && results[0]!.meta.changes === 1;
+  } catch (err) {
+    if (String(err).includes("devices.account_id")) {
+      // Another main server joined after this link was approved; the link is spent.
+      await env.DB.prepare("UPDATE device_links SET status = 'denied' WHERE link_id = ?").bind(link.link_id).run();
+      throw ApiError.conflict("the account has another main server now", "main_server_exists");
     }
+    throw ApiError.conflict("endpoint id already registered");
   }
-  await bumpDevicesVersion(env, link.account_id).run();
-  const device = await env.DB.prepare("SELECT * FROM devices WHERE endpoint_id = ?")
-    .bind(link.endpoint_id)
+  if (replaced && old) {
+    // The new main server proves the names again with its own key.
+    await Promise.all(oldNames.map(({ name }) => clearNameRecords(env, deps, name)));
+    deps.waitUntil(disconnectFromRelay(env, deps, old));
+  }
+  const device = await env.DB.prepare("SELECT * FROM devices WHERE endpoint_id = ? AND token_hash = ?")
+    .bind(link.endpoint_id, tokenHash)
     .first<DeviceRow>();
   if (!device) throw ApiError.conflict("endpoint id already registered");
   return json(201, { device: deviceJson(device), device_token: token, resolve_token: resolveToken });
@@ -525,21 +596,11 @@ async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Pr
 
 export async function removeDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
-  // A device may always leave by itself; removing another device needs account rights, and
-  // removing another main server needs a session (FR-H1): a leaked main server token must
-  // not evict the account's other main servers and lose their names.
+  // A device may always leave by itself; removing another device needs account rights. There
+  // is no other main server to remove: an account has one (FR-H1), replaced only through a
+  // session-approved main_server link.
   const p = await principal(request, env, now);
   const accountId = requireSelfOrAccountAdmin(p, endpointId);
-  if (p.kind !== "session" && p.endpointId !== endpointId) {
-    const target = await env.DB.prepare(
-      "SELECT role FROM devices WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL",
-    )
-      .bind(accountId, endpointId)
-      .first<{ role: string }>();
-    if (target?.role === "main_server") {
-      throw ApiError.forbidden("only a signed-in session may remove another main_server");
-    }
-  }
   const { results: names } = await env.DB.prepare("SELECT name FROM names WHERE endpoint_id = ?")
     .bind(endpointId)
     .all<{ name: string }>();

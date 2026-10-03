@@ -129,12 +129,14 @@ describe("device links", () => {
   it("test_fr_h1_only_a_session_approves_a_main_server_link", async () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 9, login: "owner" });
-    const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
+    const mainDevice = await newDevice();
+    const main = await linkDevice(deps, { cookie }, mainDevice, "main_server");
     const link = await startLink(deps, (await newDevice()).endpointId, "main_server");
-    const byToken = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token: main, json: { approve: true } });
+    const replace = mainDevice.endpointId;
+    const byToken = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token: main, json: { approve: true, replace } });
     expect(byToken.status).toBe(403);
     // Still pending: the session can approve it.
-    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true } })).status).toBe(204);
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true, replace } })).status).toBe(204);
     // A main server token may still deny a main_server link.
     const other = await startLink(deps, (await newDevice()).endpointId, "main_server");
     expect((await call(deps, "POST", `/v1/link-codes/${other.user_code}`, { token: main, json: { approve: false } })).status).toBe(204);
@@ -203,20 +205,14 @@ describe("device links", () => {
     expect(list.devices.map((d) => d.endpoint_id)).toEqual([b.endpointId]);
   });
 
-  it("test_fr_h1_only_a_session_removes_another_main_server", async () => {
+  it("test_fr_h1_main_server_token_removes_computers_and_itself", async () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 25, login: "owner" });
     const a = await newDevice();
-    const b = await newDevice();
     const c = await newDevice();
     const mainA = await linkDevice(deps, { cookie }, a, "main_server");
-    await linkDevice(deps, { cookie }, b, "main_server");
     await linkDevice(deps, { cookie }, c, "computer");
-    const byToken = await call(deps, "DELETE", `/v1/devices/${b.endpointId}`, { token: mainA });
-    expect(byToken.status).toBe(403);
-    expect((await call(deps, "GET", `/v1/devices/${b.endpointId}`, { cookie })).status).toBe(200);
     expect((await call(deps, "DELETE", `/v1/devices/${c.endpointId}`, { token: mainA })).status).toBe(204);
-    expect((await call(deps, "DELETE", `/v1/devices/${b.endpointId}`, { cookie })).status).toBe(204);
     expect((await call(deps, "DELETE", `/v1/devices/${a.endpointId}`, { token: mainA })).status).toBe(204);
     const list = (await (await call(deps, "GET", "/v1/devices", { cookie })).json()) as { devices: unknown[] };
     expect(list.devices).toHaveLength(0);
@@ -264,6 +260,101 @@ describe("device links", () => {
       { endpoint_id: "a".repeat(64), name: "x", role: "admin" },
     ];
     for (const json of bad) expect((await call(deps, "POST", "/v1/device-links", { json })).status).toBe(400);
+  });
+});
+
+describe("one main server per account (FR-H1, Ember INTENT D3)", () => {
+  const DIGEST = "b".repeat(43);
+
+  async function approve(deps: ReturnType<typeof makeDeps>, c: { cookie?: string; token?: string }, code: string, body: Record<string, unknown>) {
+    const response = await call(deps, "POST", `/v1/link-codes/${code}`, { ...c, json: body });
+    const text = await response.text();
+    return { status: response.status, code: text ? ((JSON.parse(text) as { code?: string }).code ?? null) : null };
+  }
+
+  it("test_fr_h1_a_second_main_server_needs_an_explicit_replace", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 60, login: "owner" });
+    const first = await newDevice();
+    await linkDevice(deps, { cookie }, first, "main_server", "mac mini");
+    const link = await startLink(deps, (await newDevice()).endpointId, "main_server");
+
+    const shown = (await (await call(deps, "GET", `/v1/link-codes/${link.user_code}`, { cookie })).json()) as Record<string, unknown>;
+    expect(shown.current_main_server).toEqual({ endpoint_id: first.endpointId, name: "mac mini" });
+
+    expect(await approve(deps, { cookie }, link.user_code, { approve: true })).toEqual({ status: 409, code: "main_server_exists" });
+    const stranger = await newDevice();
+    expect(await approve(deps, { cookie }, link.user_code, { approve: true, replace: stranger.endpointId })).toEqual({
+      status: 409,
+      code: "replace_mismatch",
+    });
+    expect((await approve(deps, { cookie }, link.user_code, { approve: true, replace: "nope" })).status).toBe(400);
+    expect((await approve(deps, { cookie }, link.user_code, { approve: false, replace: first.endpointId })).status).toBe(400);
+    // Other roles do not replace anything.
+    const computer = await startLink(deps, (await newDevice()).endpointId, "computer");
+    const computerShown = (await (await call(deps, "GET", `/v1/link-codes/${computer.user_code}`, { cookie })).json()) as Record<string, unknown>;
+    expect(computerShown.current_main_server).toBeNull();
+    expect((await approve(deps, { cookie }, computer.user_code, { approve: true, replace: first.endpointId })).status).toBe(400);
+    expect((await approve(deps, { cookie }, computer.user_code, { approve: true })).status).toBe(204);
+    // Still pending after the refusals: the explicit replacement goes through.
+    expect(await approve(deps, { cookie }, link.user_code, { approve: true, replace: first.endpointId })).toEqual({ status: 204, code: null });
+  });
+
+  it("test_fr_h1_replacement_removes_the_old_main_server_and_moves_its_names", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 61, login: "owner" });
+    const oldDevice = await newDevice();
+    const oldToken = await linkDevice(deps, { cookie }, oldDevice, "main_server", "raspberry pi");
+    expect((await call(deps, "PUT", "/v1/names/myhome", { token: oldToken })).status).toBe(201);
+    await call(deps, "PUT", "/v1/names/myhome/acme-challenge", { token: oldToken, json: { values: [DIGEST] } });
+    expect((await call(deps, "POST", "/v1/shares", { token: oldToken, json: { share_id: "s_00000000000000d3" } })).status).toBe(201);
+
+    const newMain = await newDevice();
+    const token = await linkDevice(deps, { cookie }, newMain, "main_server", "mac mini", { replace: oldDevice.endpointId });
+
+    const old = await call(deps, "GET", "/v1/me", { token: oldToken });
+    expect(old.status).toBe(401);
+    expect(((await old.json()) as { code: string }).code).toBe("device_removed");
+    const list = (await (await call(deps, "GET", "/v1/devices", { cookie })).json()) as { devices: { endpoint_id: string; role: string }[] };
+    expect(list.devices.map((d) => [d.endpoint_id, d.role])).toEqual([[newMain.endpointId, "main_server"]]);
+    const removedList = (await (await call(deps, "GET", "/v1/removed-devices", { cookie })).json()) as {
+      devices: { endpoint_id: string; role: string }[];
+    };
+    expect(removedList.devices).toEqual([expect.objectContaining({ endpoint_id: oldDevice.endpointId, role: "main_server" })]);
+    // The name follows the main server; the old challenge and share are gone.
+    const names = (await (await call(deps, "GET", "/v1/names", { cookie })).json()) as { names: { name: string; endpoint_id: string }[] };
+    expect(names.names).toEqual([expect.objectContaining({ name: "myhome", endpoint_id: newMain.endpointId })]);
+    await Promise.all(deps.pending);
+    expect(deps.memoryDns.records.size).toBe(0);
+    expect((await call(deps, "GET", "/v1/shares/s_00000000000000d3")).status).toBe(404);
+    expect(deps.github.relayCalls).toContainEqual({
+      url: "https://relay.darkpyonix.dev/admin/v1/disconnect",
+      body: { endpoint_id: oldDevice.endpointId },
+    });
+    expect((await call(deps, "PUT", "/v1/names/myhome/acme-challenge", { token, json: { values: [DIGEST] } })).status).toBe(204);
+  });
+
+  it("test_fr_h1_only_the_first_of_two_approved_main_server_links_claims", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 62, login: "owner" });
+    const a = await newDevice();
+    const b = await newDevice();
+    const linkA = await startLink(deps, a.endpointId, "main_server");
+    const linkB = await startLink(deps, b.endpointId, "main_server");
+    expect((await approve(deps, { cookie }, linkA.user_code, { approve: true })).status).toBe(204);
+    expect((await approve(deps, { cookie }, linkB.user_code, { approve: true })).status).toBe(204);
+    const claim = async (d: typeof a, l: typeof linkA) =>
+      call(deps, "POST", `/v1/device-links/${l.link_id}/token`, {
+        json: { signature: toHex(await d.sign(utf8(`darkpyonix-hub/v2/link\n${l.link_id}\n${l.challenge}`))) },
+      });
+    expect((await claim(a, linkA)).status).toBe(201);
+    const second = await claim(b, linkB);
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { code: string }).code).toBe("main_server_exists");
+    const status = (await (await call(deps, "GET", `/v1/device-links/${linkB.link_id}`)).json()) as { status: string };
+    expect(status.status).toBe("denied");
+    const list = (await (await call(deps, "GET", "/v1/devices", { cookie })).json()) as { devices: { endpoint_id: string }[] };
+    expect(list.devices.map((d) => d.endpoint_id)).toEqual([a.endpointId]);
   });
 });
 
@@ -322,11 +413,12 @@ describe("device app (FR-H10)", () => {
 describe("re-admitting removed keys (FR-H11)", () => {
   async function removed(deps: ReturnType<typeof makeDeps>, id: number) {
     const cookie = await signIn(deps, { id, login: "owner" });
-    const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
     const device = await newDevice();
     const oldToken = await linkDevice(deps, { cookie }, device, "main_server", "mac mini");
     expect((await call(deps, "DELETE", `/v1/devices/${device.endpointId}`, { cookie })).status).toBe(204);
-    return { cookie, main, device, oldToken };
+    const mainDevice = await newDevice();
+    const main = await linkDevice(deps, { cookie }, mainDevice, "main_server");
+    return { cookie, main, mainDevice, device, oldToken };
   }
 
   it("test_fr_h11_owner_readmits_a_removed_key", async () => {
@@ -431,5 +523,29 @@ describe("re-admitting removed keys (FR-H11)", () => {
     const stranger = await signIn(deps, { id: 24, login: "stranger" });
     expect((await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { cookie: stranger })).status).toBe(404);
     expect((await call(deps, "POST", `/v1/devices/${"ab".repeat(32)}/readmit`, { cookie })).status).toBe(404);
+  });
+
+  it("test_fr_h11_a_readmitted_main_server_must_replace_the_current_one", async () => {
+    const deps = makeDeps();
+    const { cookie, main, mainDevice, device } = await removed(deps, 66);
+    expect((await call(deps, "PUT", "/v1/names/homebase", { token: main })).status).toBe(201);
+    expect((await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { cookie })).status).toBe(200);
+    const link = await startLink(deps, device.endpointId, "main_server");
+    const plain = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true } });
+    expect(plain.status).toBe(409);
+    expect(((await plain.json()) as { code: string }).code).toBe("main_server_exists");
+    const replace = mainDevice.endpointId;
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true, replace } })).status).toBe(204);
+    const signature = toHex(await device.sign(utf8(`darkpyonix-hub/v2/link\n${link.link_id}\n${link.challenge}`)));
+    const claimed = await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } });
+    expect(claimed.status).toBe(201);
+    const { device_token: token } = (await claimed.json()) as { device_token: string };
+    const old = await call(deps, "GET", "/v1/devices", { token: main });
+    expect(old.status).toBe(401);
+    expect(((await old.json()) as { code: string }).code).toBe("device_removed");
+    const list = (await (await call(deps, "GET", "/v1/devices", { token })).json()) as { devices: { endpoint_id: string; role: string }[] };
+    expect(list.devices.filter((d) => d.role === "main_server").map((d) => d.endpoint_id)).toEqual([device.endpointId]);
+    const names = (await (await call(deps, "GET", "/v1/names", { cookie })).json()) as { names: { name: string; endpoint_id: string }[] };
+    expect(names.names).toEqual([expect.objectContaining({ name: "homebase", endpoint_id: device.endpointId })]);
   });
 });

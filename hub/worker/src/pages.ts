@@ -52,12 +52,14 @@ export function linkPage(login: string, code: string): string {
 <section id="device" hidden>
 <p>Device <strong id="name"></strong> (<span id="role"></span>) wants to join your account.</p>
 <p>Endpoint id: <code id="endpoint"></code></p>
+<p id="replaces" hidden><strong>This replaces your main server <span id="current"></span></strong>: an account has one main server. The old one is removed and its names move to the new one.</p>
 <p>Approve only if this is the code your own device shows.</p>
 <button id="approve">Approve</button><button id="deny">Deny</button>
 </section>
 <p id="status" role="status"></p>
 <script>
 var current = "";
+var replace = null;
 function show(text) { document.getElementById("status").textContent = text; }
 function lookup(code) {
   current = code;
@@ -67,6 +69,9 @@ function lookup(code) {
       document.getElementById("name").textContent = j.name;
       document.getElementById("role").textContent = j.role;
       document.getElementById("endpoint").textContent = j.endpoint_id;
+      replace = j.current_main_server ? j.current_main_server.endpoint_id : null;
+      document.getElementById("current").textContent = j.current_main_server ? j.current_main_server.name + " (" + j.current_main_server.endpoint_id.slice(0, 12) + "…)" : "";
+      document.getElementById("replaces").hidden = !replace;
       document.getElementById("device").hidden = false;
       show("");
     });
@@ -74,7 +79,7 @@ function lookup(code) {
 }
 function decide(approve) {
   fetch("/v1/link-codes/" + encodeURIComponent(current), {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approve: approve })
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(approve && replace ? { approve: true, replace: replace } : { approve: approve })
   }).then(function (r) {
     document.getElementById("device").hidden = true;
     show(r.ok ? (approve ? "Approved. The device finishes joining by itself." : "Denied.") : "That did not work; the code may have expired.");

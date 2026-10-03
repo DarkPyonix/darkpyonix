@@ -69,6 +69,24 @@ describe("names", () => {
     expect(deps.memoryDns.records.size).toBe(0);
     expect((await call(deps, "GET", "/v1/names", { cookie })).status).toBe(200);
   });
+
+  it("test_fr_h5_names_follow_the_main_server_on_replacement", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 46, login: "owner" });
+    const oldDevice = await newDevice();
+    const oldMain = await linkDevice(deps, { cookie }, oldDevice, "main_server");
+    expect((await call(deps, "PUT", "/v1/names/atelier", { token: oldMain })).status).toBe(201);
+    await call(deps, "PUT", "/v1/names/atelier/acme-challenge", { token: oldMain, json: { values: [DIGEST] } });
+    const newDev = await newDevice();
+    const newMain = await linkDevice(deps, { cookie }, newDev, "main_server", "new", { replace: oldDevice.endpointId });
+    await Promise.all(deps.pending);
+    expect(deps.memoryDns.records.has("_acme-challenge.atelier.darkpyonix.dev")).toBe(false);
+    const listed = (await (await call(deps, "GET", "/v1/names", { cookie })).json()) as { names: { name: string; endpoint_id: string }[] };
+    expect(listed.names).toEqual([{ name: "atelier", fqdn: "atelier.darkpyonix.dev", endpoint_id: newDev.endpointId }]);
+    expect((await call(deps, "PUT", "/v1/names/atelier", { token: newMain })).status).toBe(200);
+    expect((await call(deps, "PUT", "/v1/names/atelier/acme-challenge", { token: newMain, json: { values: [DIGEST] } })).status).toBe(204);
+    expect((await call(deps, "PUT", "/v1/names/atelier/acme-challenge", { token: oldMain, json: { values: [DIGEST] } })).status).toBe(401);
+  });
 });
 
 describe("Cloudflare DNS client", () => {

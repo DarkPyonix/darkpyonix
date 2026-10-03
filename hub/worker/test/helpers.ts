@@ -160,15 +160,19 @@ export async function newDevice(): Promise<Device> {
   };
 }
 
-/** Runs the whole device-link flow; `approver` is a session cookie or a main server's device token. */
+/**
+ * Runs the whole device-link flow; `approver` is a session cookie or a main server's device
+ * token, and `approval` adds fields to the approval body (e.g. `replace`, FR-H1).
+ */
 export async function linkDevice(
   deps: Deps,
   approver: { cookie?: string; token?: string },
   device: Device,
   role: Role = "computer",
   name = "test device",
+  approval: Record<string, unknown> = {},
 ): Promise<string> {
-  return (await linkDeviceTokens(deps, approver, device, role, name)).device_token;
+  return (await linkDeviceTokens(deps, approver, device, role, name, approval)).device_token;
 }
 
 export type Role = "main_server" | "computer" | "client";
@@ -180,13 +184,14 @@ export async function linkDeviceTokens(
   device: Device,
   role: Role = "computer",
   name = "test device",
+  approval: Record<string, unknown> = {},
 ): Promise<{ device_token: string; resolve_token: string }> {
   const created = await call(deps, "POST", "/v1/device-links", {
     json: { endpoint_id: device.endpointId, name, role },
   });
   if (created.status !== 201) throw new Error(`link: ${created.status} ${await created.text()}`);
   const link = (await created.json()) as { link_id: string; user_code: string; challenge: string };
-  const decided = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { ...approver, json: { approve: true } });
+  const decided = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { ...approver, json: { approve: true, ...approval } });
   if (decided.status !== 204) throw new Error(`approve: ${decided.status} ${await decided.text()}`);
   const signature = toHex(await device.sign(utf8(`darkpyonix-hub/v2/link\n${link.link_id}\n${link.challenge}`)));
   const claimed = await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } });
