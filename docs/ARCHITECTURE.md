@@ -124,7 +124,7 @@ sequenceDiagram
   alt 실패
     M-->>C: 401 / 403 / 404
   else 통과
-    M->>K: adopt {kind, request 바이트, label{permission, client_id, user, nickname, share_id}}
+    M->>K: adopt {kind, request 바이트, label{capabilities, client_id, user, nickname, share_id}}
     M->>K: FD (POSIX SCM_RIGHTS) 또는 share 바이트 (Windows)
     K-->>M: response {stream_id}
     Note over M: 매니저는 자기 FD를 닫고 연결에서 빠짐
@@ -200,12 +200,12 @@ experiments/
 flowchart LR
   ASH2["ash (브라우저)"] -->|https://darkpyonix.dev/s/&lt;share&gt;| HUB2["hub"]
   HUB2 -->|중계 또는 홀펀칭| DM2["dedicated manager<br/>(메인 서버 또는 지부)"]
-  DM2 -->|권한: viewer1·2·3| K3["kernel"]
+  DM2 -->|능력: read·history·execute·edit·manage| K3["kernel"]
 ```
 
-- 외부 접근은 항상 **전용 매니저**를 거칩니다. 커널은 루프백에만 열립니다.
-- 공유 토큰은 커널(=파일)마다 발급하며 권한은 2025년 설계를 따릅니다. `viewer1` 코드만, `viewer2` 코드와 실행 기록, `viewer3` 코드·실행 기록·실행, `admin` 전부입니다. 셀 편집·잠금·실행 같은 쓰기는 2025 `user_permission: "write"`이고 `viewer3`와 `admin`이 가집니다(INTENT D18, SPEC FR-A3).
-- 권한 검사는 매니저만 합니다. 커널은 매니저가 붙인 권한 라벨로 보낼 내용만 거릅니다(INTENT D5).
+- 외부 접근은 항상 **전용 매니저**를 거칩니다. 커널은 같은 계정만 붙는 유닉스 소켓·이름 있는 파이프에만 열립니다(INTENT D5).
+- 공유 토큰은 커널(=파일)마다 발급하며 권한은 등급이 아니라 능력의 집합입니다. `read` 코드 보기, `history` 실행 기록과 출력, `execute` 실행과 인터럽트, `edit` 코드 수정과 셀 잠금, `manage` 공유 설정입니다. 실행과 코드 수정은 다른 능력입니다(INTENT D18, SPEC FR-A3, 사용자 결정 2026-10-04).
+- 권한 검사는 매니저만 합니다. 커널은 매니저가 넘긴 능력 집합으로 보낼 내용만 거릅니다(INTENT D5).
 - 협업 동기화는 2025 WebSocket(`/api/ws/kernels/{kernel_id}`)이고, 매니저가 검사한 뒤 커널에 넘깁니다(INTENT D19, SPEC FR-S9). 구현 대기(#49).
 - 전용 매니저는 2025 비밀번호 인증을 그대로 씁니다. 비밀번호와 마스터 토큰은 매니저마다 하나입니다(`/api/auth…`, SPEC FR-A4). 커널 접근 토큰(초기, 로그인, 공유)은 커널마다 있고, 커널이 종료돼도 남으며 파일이 지워지면 지워집니다(INTENT D17, SPEC FR-A5·FR-A6, 구현 대기 #48).
 - 허브는 연결을 이어 줄 뿐이고, 내용은 끝단 사이에서 암호화합니다(SPEC NFR-H1, Draft).

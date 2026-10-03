@@ -249,7 +249,7 @@ classDiagram
             +translate(event Event, label StreamLabel) dict|None
         }
         class StreamLabel {
-            +permission Permission
+            +capabilities set~Capability~
             +client_id str|None
             +user str|None
             +nickname str|None
@@ -355,19 +355,19 @@ classDiagram
             +close() None
         }
         class EventBroker {
-            +stream(kernel_id str, since int, permission Permission) AsyncIterator~Event~
+            +stream(kernel_id str, since int, capabilities set~Capability~) AsyncIterator~Event~
         }
         class AuthService {
             +master_token str
             +check(token str) Principal
-            +create_share(kernel_id str, permission Permission) ShareToken
+            +create_share(kernel_id str, capabilities set~Capability~) ShareToken
             +revoke(share_id str) None
             +initial_token(kernel_id str) str
             +set_password(token str, password str) None
             +login(password str) str
             +kernel_login(kernel_id str, password str) str
             +reset_master(password str) str
-            +reset_shared(token_type Permission) ShareToken
+            +reset_shared(capabilities set~Capability~) ShareToken
             +verify(kernel_id str, token str) dict
             +forget_deleted_files() None
         }
@@ -388,26 +388,28 @@ classDiagram
         class KernelToken {
             +token_sha256 str
             +kind str
-            +permission Permission
+            +capabilities set~Capability~
             +share_id str|None
             +revoked_at datetime|None
         }
         class Principal {
-            +permission Permission
+            +capabilities set~Capability~
             +kernel_id str|None
-            +can(action str) bool
+            +is_master bool
+            +has(capability Capability) bool
         }
-        class Permission {
-            <<enumeration>>
-            ADMIN
-            VIEWER3
-            VIEWER2
-            VIEWER1
+        class Capability {
+            <<enumeration, no order>>
+            READ
+            HISTORY
+            EXECUTE
+            EDIT
+            MANAGE
         }
         class ShareToken {
             +share_id str
-            +kernel_id str
-            +permission Permission
+            +kernel_id str|None
+            +capabilities set~Capability~
             +token_hash str
             +expires_at datetime|None
         }
@@ -446,9 +448,9 @@ classDiagram
     AuthService *-- ManagerCredentials
     AuthService ..> KernelTokenStore : any manager reads and writes
     KernelTokenStore *-- KernelToken
-    KernelToken --> Permission
-    Principal --> Permission
-    ShareToken --> Permission
+    KernelToken --> Capability
+    Principal --> Capability
+    ShareToken --> Capability
     Cli ..> ManagerApp : spawns its own, reads url and token from stdout
     Cli ..> ManagerApp : HTTP
 

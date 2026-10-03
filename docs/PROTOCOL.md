@@ -207,7 +207,7 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
   "kind": "events",
   "transport": "fd",
   "request": "<base64: 매니저가 이미 읽은 요청 바이트 전체(요청 줄, 헤더, 읽은 본문)>",
-  "label": {"permission": "viewer2", "client_id": "dev_8f2c1a", "user": "alice",
+  "label": {"capabilities": ["read", "history"], "client_id": "dev_8f2c1a", "user": "alice",
             "nickname": "alice-mbp", "share_id": "s_0123456789abcdef"},
   "share": null
 }}
@@ -215,7 +215,7 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
 
 - `transport`: `fd`(POSIX, 날 소켓), `share`(Windows, 날 소켓), `pump`(소켓 쌍의 한쪽, §3.7.3).
 - `request`: 커널은 이 바이트를 소켓에서 읽은 것처럼 다룹니다. 매니저는 요청을 다시 쓰지 않습니다. 요청에 든 토큰(`Authorization`, `?token=`)은 커널이 보지 않습니다.
-- `label`: 매니저가 인증 결과로 채웁니다. `share_id`는 공유 토큰으로 들어온 연결에만 있고, 마스터·관리자 토큰이면 `null`입니다. 커널은 `permission`을 무엇을 보낼지 거르는 데만 씁니다(SPEC FR-K9). 인증이나 토큰 검사는 하지 않습니다.
+- `label`: 매니저가 인증 결과로 채웁니다. `capabilities`는 그 토큰의 능력 집합(`read`, `history`, `execute`, `edit`, `manage`, SPEC FR-A3)입니다. 매니저는 FD나 `share` 바이트와 함께 이 집합을 넘깁니다. `share_id`는 공유 토큰으로 들어온 연결에만 있고, 마스터 토큰이나 커널 로그인·초기 토큰이면 `null`입니다. 커널은 `capabilities`를 무엇을 보낼지 거르는 데만 씁니다(SPEC FR-K9). 인증이나 토큰 검사는 하지 않습니다.
 - `share`: Windows에서만 씁니다. 매니저가 `WSADuplicateSocketW(socket, kernel_pid, &info)`로 만든 `WSAPROTOCOL_INFOW`의 base64입니다. 커널은 `socket.fromshare(base64 디코드 값)`으로 엽니다. 파이썬 `socket.share`와 같은 형식입니다. `kernel_pid`는 매니저가 제어 파이프에서 `GetNamedPipeServerProcessId`로 얻고, announce의 `pid`와 같아야 합니다.
 
 #### 3.7.2 POSIX: `SCM_RIGHTS`
@@ -253,7 +253,7 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 
 ## 4. 협업 문서 (SPEC §10a)
 
-커널은 파일의 공유 문서 상태(셀, 셀별 버전, 잠금, 접속자)를 들고 있습니다. 아래 메서드와 이벤트는 §3과 같은 채널을 씁니다. 모든 편집 메서드는 `client`를 받습니다. `client`는 `{client_id, nickname, user, avatar?, permission}`이고, 매니저가 토큰에서 채워 넘깁니다. 커널은 `permission`을 검사하지 않습니다. 권한은 매니저가 이미 검사했습니다(INTENT D5, D18). 커널은 `permission`을 접속자 표시에 싣기만 합니다.
+커널은 파일의 공유 문서 상태(셀, 셀별 버전, 잠금, 접속자)를 들고 있습니다. 아래 메서드와 이벤트는 §3과 같은 채널을 씁니다. 모든 편집 메서드는 `client`를 받습니다. `client`는 `{client_id, nickname, user, avatar?, capabilities}`이고, 매니저가 토큰에서 채워 넘깁니다. 커널은 `capabilities`를 검사하지 않습니다. 권한은 매니저가 이미 검사했습니다(INTENT D5, D18). 커널은 `capabilities`를 접속자 표시에 싣기만 합니다.
 
 | method | params | result |
 |---|---|---|
@@ -276,9 +276,9 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 | `doc.lock` / `doc.unlock` | `{doc_version, cell_id, lock?, by, reason?: "released"\|"idle"\|"disconnected", request_id?}` |
 | `doc.reloaded` | `{doc_version, cells, cause: "external"}`. 바깥 편집으로 다시 파싱한 뒤 보내는 전체 셀 목록 |
 | `doc.conflict` | `{doc_version, cell_id, local: {source, version, by}, disk: {source}}` |
-| `presence.update` / `presence.leave` | `{doc_version, client_id, nickname, user, avatar?, permission, focused_cell_id?, focused_at?, cursor?, last_seen, request_id?}` |
+| `presence.update` / `presence.leave` | `{doc_version, client_id, nickname, user, avatar?, capabilities, focused_cell_id?, focused_at?, cursor?, last_seen, request_id?}` |
 
-`Presence = {client_id, nickname, user, avatar?, permission, focused_cell_id?, focused_at?, cursor?, last_seen}`.
+`Presence = {client_id, nickname, user, avatar?, capabilities, focused_cell_id?, focused_at?, cursor?, last_seen}`.
 
 `DocumentCell = {cell_id, index, type, raw_type, title, metadata, source, source_sha256, version, lock?, conflict?}`.
 
@@ -307,14 +307,14 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 
 ### 5.2 클라이언트 → 커널
 
-| `type` | 2025 필드 | 커널 동작 | 라벨 |
+| `type` | 2025 필드 | 커널 동작 | 필요한 능력 |
 |---|---|---|---|
-| `request_code` | `kernel_id` | `code_data`로 답함 | 모두 |
-| `request_history` | `kernel_id` | `history_data`로 답함(최신 실행 기록의 셀별 출력) | `viewer1`은 빈 `history` |
-| `request_locks` | `kernel_id` | `locks_data`로 답함 | 모두 |
-| `start_typing` | `cell_id`, `user_id` | `doc.lock`과 같음. 성공하면 모두에게 `cell_locked`. 이미 잠겼으면 `{"type":"error","error":"CELL_ALREADY_LOCKED","cell_id","locked_by"}` | `viewer3`·`admin`. 그 밖은 `{"type":"error","error":"INSUFFICIENT_PERMISSION"}` |
-| `cell_focus` | `cell_id`, `user_id` | `presence.update`와 같음. 모두에게 `other_user_focus` | 모두 |
-| `cell_blur` | `cell_id` | 포커스를 지움. 모두에게 `other_user_blur`. 2025에 송신 메시지가 없어 더함 | 모두 |
+| `request_code` | `kernel_id` | `code_data`로 답함 | `read`. 없으면 `source`가 빈 `code_data` |
+| `request_history` | `kernel_id` | `history_data`로 답함(최신 실행 기록의 셀별 출력) | `history`. 없으면 빈 `history` |
+| `request_locks` | `kernel_id` | `locks_data`로 답함 | `read` |
+| `start_typing` | `cell_id`, `user_id` | `doc.lock`과 같음. 성공하면 모두에게 `cell_locked`. 이미 잠겼으면 `{"type":"error","error":"CELL_ALREADY_LOCKED","cell_id","locked_by"}` | `edit`. 없으면 `{"type":"error","error":"INSUFFICIENT_PERMISSION"}` |
+| `cell_focus` | `cell_id`, `user_id` | `presence.update`와 같음. 모두에게 `other_user_focus` | `read` |
+| `cell_blur` | `cell_id` | 포커스를 지움. 모두에게 `other_user_blur`. 2025에 송신 메시지가 없어 더함 | `read` |
 
 2025 메시지의 `user_id`는 쓰지 않습니다. 보낸 사람은 넘김 라벨(`client_id`, `user`, `nickname`)입니다. 모르는 `type`은 `{"type":"error","error":"UNKNOWN_TYPE"}`입니다.
 
@@ -338,7 +338,7 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 | `event` | `event: <§3.4·§4 이벤트>` | 2025 이름이 없는 이벤트(`doc.cell.created` 등) |
 
 - `execution_id`는 `run_id`입니다. `user_id`는 `client_id`, `user_name`은 `user`(없으면 `nickname`)입니다.
-- `viewer1` 라벨에는 `execution_output`을 보내지 않고, `final_outputs`, `partial_outputs`, `error.traceback`, `outputs`를 빈 값으로 보냅니다(2025: "viewer1: 코드만 적혀있고 History 없음").
+- `history`가 없는 라벨에는 `execution_output`을 보내지 않고, `final_outputs`, `partial_outputs`, `error.traceback`, `outputs`를 빈 값으로 보냅니다(2025: "viewer1: 코드만 적혀있고 History 없음"). `read`가 없는 라벨에는 `code`, `updated_code`, 셀 `source`를 빈 값으로 보냅니다.
 - 편집, 잠금 해제, 실행, 인터럽트는 REST(매니저)로 보내고, 그 결과가 위 메시지로 퍼집니다. 2025 명세도 같았습니다.
 
 ## 6. 커널 접근 토큰 저장소
@@ -350,10 +350,10 @@ SPEC FR-A5, FR-A6, INTENT D17. 커널 접근 토큰(초기, 로그인, 공유)�
   "kernel_id": "k_3f9a0c1b2d4e5f607182",
   "path": "/home/u/exp/train.py",
   "tokens": [
-    {"token_sha256": "<hex>", "kind": "initial", "permission": "admin",
+    {"token_sha256": "<hex>", "kind": "initial", "capabilities": ["read", "history", "execute", "edit", "manage"],
      "share_id": null, "label": null, "created_at": "2026-10-04T01:02:03Z",
      "expires_at": null, "revoked_at": null},
-    {"token_sha256": "<hex>", "kind": "share", "permission": "viewer2",
+    {"token_sha256": "<hex>", "kind": "share", "capabilities": ["read", "history"],
      "share_id": "s_0123456789abcdef", "label": "lab", "created_at": "…",
      "expires_at": null, "revoked_at": "2026-10-05T09:00:00Z"}
   ]

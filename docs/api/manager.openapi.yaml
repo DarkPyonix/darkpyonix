@@ -138,7 +138,7 @@ paths:
       summary: Manager information
       responses:
         '200':
-          description: Mode, version, uptime and the caller's permission.
+          description: Mode, version, uptime and the caller's capabilities.
           content:
             application/json:
               schema:
@@ -273,7 +273,7 @@ paths:
       in: path
       required: true
       schema:
-        $ref: '#/components/schemas/SharePermission'
+        $ref: '#/components/schemas/TokenType'
     put:
       tags:
       - Auth
@@ -591,7 +591,7 @@ paths:
       summary: The kernel's file with the latest outputs mapped onto its cells
       description: 'Parses the file on disk and maps the latest run log onto it by cell `id`, then
 
-        `source_sha256`, then `index` (SPEC FR-R4). `viewer1` receives cells without outputs.
+        `source_sha256`, then `index` (SPEC FR-R4). Needs `read`; without `history` the cells come without outputs.
 
         '
       responses:
@@ -822,7 +822,7 @@ paths:
       summary: Live kernel events (Server-Sent Events)
       description: "Each SSE message has `id: <seq>`, `event: <type>` and `data: <JSON>` where type and data\nare\
         \ those of `docs/PROTOCOL.md` §3.4. Because `EventSource` cannot set headers, this\nendpoint also accepts\
-        \ `?token=`. Output events are omitted for `viewer1`.\n A `replay_truncated` message carries no SSE `id`,\
+        \ `?token=`. Needs `read`; output events are omitted without `history`.\n A `replay_truncated` message carries no SSE `id`,\
         \ so it does not move the client's `Last-Event-ID`. With `client_id` the stream also makes the client present;\
         \ it leaves 30 s after the stream closes. Document events `doc.*` and `presence.*` (PROTOCOL §4) are delivered\
         \ here too. Handed off: after authentication the manager passes this connection to the kernel, which writes\
@@ -913,7 +913,7 @@ paths:
       - Sharing
       operationId: createShare
       summary: Create a share token
-      description: Master token on a dedicated manager only (SPEC FR-A3). An ephemeral manager answers `403 forbidden`.
+      description: Needs `manage` on this kernel; dedicated manager only (SPEC FR-A3). An ephemeral manager answers `403 forbidden`.
       requestBody:
         required: true
         content:
@@ -921,10 +921,10 @@ paths:
             schema:
               type: object
               required:
-              - permission
+              - capabilities
               properties:
-                permission:
-                  $ref: '#/components/schemas/SharePermission'
+                capabilities:
+                  $ref: '#/components/schemas/Capabilities'
                 label:
                   type: string
                   maxLength: 120
@@ -994,7 +994,7 @@ paths:
       summary: Create a cell
       description: Inserted after `after` or before `before`; with neither it is appended at the end of the
         document (giving both is `400`). Saved to the file within 300 ms and broadcast as
-        `doc.cell.created` (SPEC FR-S2, FR-S5). Write access (`viewer3` or `admin`, SPEC FR-S8).
+        `doc.cell.created` (SPEC FR-S2, FR-S5). Needs `edit` (SPEC FR-A3, FR-S8).
       requestBody:
         required: true
         content:
@@ -1154,7 +1154,7 @@ paths:
       operationId: lockCell
       summary: Lock a cell for editing (or renew the lock)
       description: One lock per cell; released by unlock, after 3 minutes without activity, or when the client disconnects
-        (SPEC FR-S3). Write access (`viewer3`, `admin`).
+        (SPEC FR-S3). Needs `edit` (SPEC FR-A3).
       requestBody:
         required: false
         content:
@@ -1231,7 +1231,7 @@ paths:
       operationId: updatePresence
       summary: Report focus and cursor
       description: Broadcast as `presence.update`; cursor updates are coalesced to 20 per second per client (SPEC
-        FR-S4). `viewer1` and up.
+        FR-S4). Needs `read`.
       requestBody:
         required: true
         content:
@@ -1460,7 +1460,9 @@ paths:
       summary: Issue a share token for one kernel (2025 shape)
       description: 'The 2025 `POST /kernels/{kernel_id}/tokens/share` (`get_sharing_settings`). The same operation as
 
-        `POST /api/kernels/{kernel_id}/shares` with the 2025 request and response fields. The token is bound
+        `POST /api/kernels/{kernel_id}/shares` with the 2025 fields (`share_token`, `share_url`); the 2025
+
+        `permission` is now `capabilities` (INTENT D18). Needs `manage`. The token is bound
 
         to this kernel and works through any manager (SPEC FR-A6). Dedicated manager only; an ephemeral
 
@@ -1476,14 +1478,16 @@ paths:
             schema:
               type: object
               required:
-              - permission
+              - capabilities
               properties:
-                permission:
-                  $ref: '#/components/schemas/SharePermission'
+                capabilities:
+                  $ref: '#/components/schemas/Capabilities'
                 kernel_id:
                   type: string
                   pattern: ^k_[0-9a-f]{20}$
                   description: The 2025 body field; must equal the path parameter when present.
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
       responses:
         '201':
           description: The share token (shown once).
@@ -1494,7 +1498,7 @@ paths:
                 required:
                 - share_id
                 - share_token
-                - permission
+                - capabilities
                 - share_url
                 properties:
                   share_id:
@@ -1502,8 +1506,8 @@ paths:
                     pattern: ^s_[0-9a-f]{16}$
                   share_token:
                     type: string
-                  permission:
-                    $ref: '#/components/schemas/SharePermission'
+                  capabilities:
+                    $ref: '#/components/schemas/Capabilities'
                   share_url:
                     type: string
                     description: Same as `ShareWithToken.url`.
@@ -1567,7 +1571,7 @@ paths:
       summary: 2025 WebSocket synchronization (cells, history, locks, focus, execution)
       description: 'The 2025 `/ws/kernels/{kernel_id}?token={token}`, restored by user decision 2026-10-03
 
-        (INTENT D19, SPEC FR-S9, PROTOCOL §5). The manager checks the token and the permission, then
+        (INTENT D19, SPEC FR-S9, PROTOCOL §5). The manager checks the token and its capabilities, then
 
         hands the connection to the kernel (SPEC FR-M6). The kernel answers the upgrade with `101` and
 
@@ -1698,7 +1702,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Forbidden:
-      description: The token's permission does not allow this operation.
+      description: The token's capability set lacks the capability this operation needs (SPEC FR-A3).
       content:
         application/json:
           schema:
@@ -1735,14 +1739,15 @@ components:
       description: 2025 `/kernels/{kernel_id}/tokens/initial` response.
       required:
       - token
-      - permission
+      - capabilities
       - password_required
       properties:
         token:
           type: string
-        permission:
-          type: string
-          const: admin
+        capabilities:
+          allOf:
+          - $ref: '#/components/schemas/Capabilities'
+          description: 'All five capabilities. The 2025 response had `permission: "admin"` here (INTENT D18).'
         password_required:
           type: boolean
           const: true
@@ -1760,21 +1765,21 @@ components:
       required:
       - token
       - kernel_id
-      - permission
+      - capabilities
       properties:
         token:
           type: string
         kernel_id:
           type: string
-        permission:
-          $ref: '#/components/schemas/Permission'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
     TokenVerification:
       type: object
       description: 2025 `/kernels/{kernel_id}/tokens/{token}/verify` response.
       required:
       - valid
       - kernel_id
-      - permission
+      - capabilities
       - blacklisted
       - password_set
       properties:
@@ -1782,8 +1787,8 @@ components:
           type: boolean
         kernel_id:
           type: string
-        permission:
-          $ref: '#/components/schemas/Permission'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
         blacklisted:
           type: boolean
         password_set:
@@ -1807,7 +1812,7 @@ components:
       - mode
       - pid
       - started_at
-      - permission
+      - capabilities
       properties:
         version:
           type: string
@@ -1826,48 +1831,68 @@ components:
           - integer
           - 'null'
           description: Seconds; null for dedicated managers.
-        permission:
-          $ref: '#/components/schemas/Permission'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
         host:
           type: string
-    Permission:
+    Capability:
       type: string
       enum:
-      - admin
-      - viewer3
-      - viewer2
-      - viewer1
-      description: '`admin` is the master token (SPEC FR-A4) or a kernel login or initial token (SPEC FR-A6). Share permissions follow the
+      - read
+      - history
+      - execute
+      - edit
+      - manage
+      description: 'One capability (user decision 2026-10-04, INTENT D18, SPEC FR-A3). `read` view code; `history`
 
-        2025 design (SPEC FR-A3): `viewer1` code only; `viewer2` code and run logs; `viewer3` code, run logs
+        run logs and outputs; `execute` run and interrupt; `edit` edit code and lock cells; `manage` share
 
-        and execution. Write access (2025 `user_permission: "write"`: cell edits, locks, runs) is `viewer3`
+        settings. Capabilities are not tiers: there is no order and none implies another. Tier names
 
-        and `admin`. The `editor` tier is removed by user decision 2026-10-03 (INTENT D18).
+        (`viewer1`, `viewer2`, `viewer3`, `admin`, `editor`) and the 2025 `write` are refused with `400`.
 
+        '
+    Capabilities:
+      type: array
+      items:
+        $ref: '#/components/schemas/Capability'
+      minItems: 1
+      uniqueItems: true
+      description: 'A token''s capability set. The master token (SPEC FR-A4) and a kernel''s initial and login tokens
 
-        A share token is scoped to one kernel: addressing any other kernel answers `404 not_found`, never `403`.
-        Per-operation minimum permission is listed in SPEC FR-A3.'
-    SharePermission:
+        (SPEC FR-A6) carry all five. A share token carries the set chosen when it was issued. Each operation
+
+        needs one capability, listed in SPEC FR-A3. A token bound to one kernel answers `404 not_found` on
+
+        any other kernel, never `403`.
+
+        '
+      example:
+      - read
+      - history
+    TokenType:
       type: string
-      enum:
-      - viewer1
-      - viewer2
-      - viewer3
+      pattern: ^(read|history|execute|edit|manage)(\+(read|history|execute|edit|manage))*$
+      description: 'The 2025 `{token_type}` of `PUT /auth/tokens/shared/{token_type}`, written as a capability set
+
+        joined by `+` in the order read, history, execute, edit, manage (e.g. `read+history`). Leader
+
+        decision awaiting the user (PROJECT Q15).
+
+        '
+      example: read+history
     UserPermission:
-      type: string
-      enum:
-      - write
-      default: write
-      description: 'The 2025 request argument `user_permission: "write"` (lock, unlock, execution requests).
+      allOf:
+      - $ref: '#/components/schemas/Capability'
+      description: 'The 2025 request argument `user_permission`, now naming the capability the operation needs:
 
-        The client states that it asks for write access. The manager checks that the token grants it
+        `execute` on runs, `edit` on cell edits, moves, locks and unlocks (2025 `"write"` on both), `manage`
 
-        (`viewer3`, `admin`) and answers `403 forbidden` otherwise (2025 `INSUFFICIENT_PERMISSION`,
+        on sharing (2025 `"admin"`). Another value is `400`. The token''s capability set decides, not this
 
-        "Read-only access, cannot edit cells"). The token decides, not this field: a viewer token is
+        field: a token without that capability answers `403 forbidden` (2025 `INSUFFICIENT_PERMISSION`).
 
-        refused even when the field is present. SPEC FR-A3, FR-S8. Status: planned, issue #49.
+        SPEC FR-A3, FR-S8. Status: planned, issue #49.
 
         '
     KernelStatus:
@@ -2384,7 +2409,7 @@ components:
       required:
       - share_id
       - kernel_id
-      - permission
+      - capabilities
       - created_at
       properties:
         share_id:
@@ -2392,8 +2417,8 @@ components:
           pattern: ^s_[0-9a-f]{16}$
         kernel_id:
           type: string
-        permission:
-          $ref: '#/components/schemas/SharePermission'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
         label:
           type:
           - string
@@ -2455,7 +2480,7 @@ components:
       - client_id
       - nickname
       - user
-      - permission
+      - capabilities
       - last_seen
       properties:
         client_id:
@@ -2468,8 +2493,8 @@ components:
           type:
           - string
           - 'null'
-        permission:
-          $ref: '#/components/schemas/Permission'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
         focused_cell_id:
           type:
           - string
