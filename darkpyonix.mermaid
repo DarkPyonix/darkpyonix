@@ -366,6 +366,21 @@ classDiagram
             +check(token str) Principal
             +create_share(kernel_id str, permission Permission) ShareToken
             +revoke(share_id str) None
+            +initial_token(kernel_id str) str
+            +set_password(kernel_id str, password str) None
+            +login(kernel_id str, password str) str
+            +reset_master(kernel_id str, password str) str
+            +reset_shared(kernel_id str, token_type Permission) ShareToken
+            +verify(kernel_id str, token str) dict
+            +forget_deleted_files() None
+        }
+        class FileCredentials {
+            <<2025 File.tokens>>
+            +kernel_id str
+            +path str
+            +password_hash str|None
+            +initial_token_hash str|None
+            +admin_token_hash str|None
         }
         class Principal {
             +permission Permission
@@ -423,6 +438,8 @@ classDiagram
     EventBroker ..> KernelClient
     AuthService --> Principal
     AuthService *-- ShareToken
+    AuthService *-- FileCredentials
+    FileCredentials o-- ShareToken : per type
     Principal --> Permission
     ShareToken --> Permission
     Cli ..> ManagerRegistry : finds or spawns

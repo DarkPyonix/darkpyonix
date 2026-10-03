@@ -97,6 +97,16 @@ tags:
   description: Live kernel events over Server-Sent Events.
 - name: Sharing
   description: Per-kernel share tokens with viewer permissions (dedicated manager).
+- name: Auth
+  description: 'The 2025 password authentication, restored by user decision 2026-10-03 (INTENT D17,
+
+    SPEC FR-A4, FR-A5). Each file (kernel id) has one password, an admin (master) token and one
+
+    share token per viewer type. Dedicated manager only; an ephemeral manager answers `403 forbidden`.
+
+    Status: planned, issue #48.
+
+    '
 paths:
   /health:
     get:
@@ -1154,6 +1164,258 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WaitResult'
+  /api/kernels/{kernel_id}/tokens/initial:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Auth
+      operationId: createInitialToken
+      summary: Issue the initial admin token of a file
+      description: 'The 2025 "initial token" (`POST /kernels/{kernel_id}/tokens/initial`). Issued without
+
+        credentials while the file has no password; it is good only for setting the password
+
+        (`PUT /api/kernels/{kernel_id}/password`). A second call answers `409 already_initialized`
+
+        (leader proposal, awaiting user confirmation: PROJECT Q11). SPEC FR-A4.
+
+        '
+      security: []
+      responses:
+        '201':
+          description: The initial token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitialToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: '`already_initialized`: the file already has an initial token or a password.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/password:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    put:
+      tags:
+      - Auth
+      operationId: setPassword
+      summary: Set or reset the file's password
+      description: 'The 2025 "password reset" (`PUT /auth/password`, detail `PUT /kernels/{kernel_id}/password`):
+
+        authenticate with a token, then register a new password. The initial token sets the first
+
+        password; afterwards the file''s admin token resets it. Stored as a salted slow hash. SPEC FR-A4.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Password set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - message
+                - kernel_id
+                properties:
+                  message:
+                    type: string
+                    example: Password set successfully
+                  kernel_id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/tokens/auth:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Auth
+      operationId: login
+      summary: Log in with the file's password
+      description: 'The 2025 "login" (`GET /auth`, detail `POST /kernels/{kernel_id}/tokens/auth`): the password
+
+        in, the file''s admin token out. `400 password_not_set` before a password exists. SPEC FR-A4.
+
+        '
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: The file's admin token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '400':
+          description: '`bad_request`, or `password_not_set` (2025 `PASSWORD_NOT_SET`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/tokens/master:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    put:
+      tags:
+      - Auth
+      operationId: resetMasterToken
+      summary: Issue a new admin (master) token for the file
+      description: 'The 2025 "master token reset" (`PUT /auth/tokens/master`): authenticate with the password,
+
+        issue a new admin token. Earlier admin tokens of this file stop working (`401`). SPEC FR-A4.
+
+        '
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: The new admin token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '400':
+          description: '`bad_request`, or `password_not_set`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/tokens/shared/{token_type}:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    - name: token_type
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SharePermission'
+    put:
+      tags:
+      - Auth
+      operationId: resetSharedToken
+      summary: Issue a new share token of one type
+      description: 'The 2025 "shared token reset" (`PUT /auth/tokens/shared/{token_type}`): authenticate with the
+
+        file''s admin token, revoke every share of that type and issue one new share token. Streams
+
+        opened with the revoked shares are closed (`streams.close`, SPEC FR-M6). SPEC FR-A4, FR-A5.
+
+        '
+      responses:
+        '200':
+          description: The new share, including its token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareWithToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/tokens/{token}/verify:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    - name: token
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Auth
+      operationId: verifyToken
+      summary: Check a token against a file
+      description: 'The 2025 `GET /kernels/{kernel_id}/tokens/{token}/verify`, sent with the same token as
+
+        `Authorization: Bearer`. A revoked token answers `401 token_revoked` (2025 `TOKEN_BLACKLISTED`).
+
+        SPEC FR-A4.
+
+        '
+      responses:
+        '200':
+          description: The token is valid for this file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenVerification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -1264,6 +1526,56 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    InitialToken:
+      type: object
+      description: 2025 `/kernels/{kernel_id}/tokens/initial` response.
+      required:
+      - token
+      - permission
+      - password_required
+      properties:
+        token:
+          type: string
+        permission:
+          type: string
+          const: admin
+        password_required:
+          type: boolean
+          const: true
+    AuthToken:
+      type: object
+      description: 2025 `/kernels/{kernel_id}/tokens/auth` response.
+      required:
+      - token
+      - kernel_id
+      - permission
+      properties:
+        token:
+          type: string
+        kernel_id:
+          type: string
+        permission:
+          $ref: '#/components/schemas/Permission'
+    TokenVerification:
+      type: object
+      description: 2025 `/kernels/{kernel_id}/tokens/{token}/verify` response.
+      required:
+      - valid
+      - kernel_id
+      - permission
+      - blacklisted
+      - password_set
+      properties:
+        valid:
+          type: boolean
+        kernel_id:
+          type: string
+        permission:
+          $ref: '#/components/schemas/Permission'
+        blacklisted:
+          type: boolean
+        password_set:
+          type: boolean
     Health:
       type: object
       required:
@@ -1610,6 +1922,9 @@ components:
               - internal
               - conflict
               - locked
+              - password_not_set
+              - already_initialized
+              - token_revoked
             message:
               type: string
             data:

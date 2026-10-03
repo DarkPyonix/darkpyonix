@@ -58,3 +58,5 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | Q7 | grid 레이아웃을 여닫는 태그가 필요한지, horizontal/vertical 전환으로 충분한지 | 이슈 #7 |
 | Q8 | `parallel`/`concurrent`와 언어 interop 셀의 실행 의미 | 이슈 #5, #7 |
 | Q9 | iroh 릴레이를 어디서 돌릴지: 작은 VPS(릴레이 + QAD) 또는 Cloudflare Container(WebSocket만, QAD 없음) | 권장(2026-10-03): VPS로 시작. Ember NFR-N1 측정을 VPS 위에서 QAD 켬/끔 두 번 하고, QAD를 끈 직접 경로 성공률도 85% 이상이면 Container로 옮김(SPEC FR-H3). 사용자 확인 대기 |
+| Q10 | 2025 인증 계열의 범위와 경로. 2025 문서의 요약표(`/auth`…, 파일 구분 없음)와 상세 페이지(`/kernels/{kernel_id}/…`, 파일마다)가 다릅니다. 지금 SPEC은 상세를 따라 파일마다 비밀번호를 두고 `/api/kernels/{kernel_id}/…`에 놓았고, 전용 매니저 전체 마스터 토큰(FR-M4)도 남겼습니다(INTENT D17, SPEC FR-A4) | 리더 결정, 사용자 확인 대기 |
+| Q11 | 초기 토큰(2025, 인증 없음)을 바깥에 열린 전용 매니저에서 누가 먼저 받을 수 있는지. 지금 SPEC은 비밀번호가 없을 때 한 번만 발급합니다 | 리더 제안, 사용자 확인 대기 |
