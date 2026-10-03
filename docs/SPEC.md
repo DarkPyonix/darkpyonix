@@ -695,7 +695,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 10 ms 간격 200줄에서 p50 31 ms, p99 61 ms, 최대 63 ms입니다(50 ms 병합 창 포함).
 
 ### NFR-M3 문서와 코드의 일치 — `Done`
-매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
+매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다. 설계했지만 아직 구현하지 않은 연산은 OpenAPI에 `x-darkpyonix-status: planned`와 `x-darkpyonix-issue: <번호>`를 달아 둡니다. 테스트는 이 연산을 서빙 검사에서 빼고, 대신 404로 답하는지 확인합니다. 그래서 연산을 구현한 변경에서 `planned` 표시를 지우지 않으면 테스트가 실패합니다(#56).
 - 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), 파이썬 시제품 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
 
 ### NFR-H1 종단 간 암호화 — `Agreed`
