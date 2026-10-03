@@ -47,6 +47,15 @@ export interface DeviceRow {
   created_at: number;
   last_seen: number | null;
   online: number;
+  /** JSON of a validated DeviceApp, or null (FR-H10). */
+  app: string | null;
+}
+
+/** What a device says it runs (FR-H10); self-reported, a hint only. */
+export interface DeviceApp {
+  kind: string;
+  version: string;
+  services: string[];
 }
 
 export function deviceJson(d: DeviceRow) {
@@ -57,7 +66,26 @@ export function deviceJson(d: DeviceRow) {
     created_at: d.created_at,
     last_seen: d.last_seen,
     online: d.online === 1,
+    app: d.app ? (JSON.parse(d.app) as DeviceApp) : null,
   };
+}
+
+const APP_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const APP_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/;
+const MAX_APP_SERVICES = 16;
+
+/** A DeviceApp from untrusted JSON, or null if it is not one exactly. */
+export function parseDeviceApp(value: unknown): DeviceApp | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (Object.keys(v).some((k) => k !== "kind" && k !== "version" && k !== "services")) return null;
+  if (typeof v.kind !== "string" || !APP_NAME_RE.test(v.kind)) return null;
+  if (typeof v.version !== "string" || !APP_VERSION_RE.test(v.version)) return null;
+  const services = v.services === undefined ? [] : v.services;
+  if (!Array.isArray(services) || services.length > MAX_APP_SERVICES) return null;
+  if (!services.every((x) => typeof x === "string" && APP_NAME_RE.test(x))) return null;
+  if (new Set(services).size !== services.length) return null;
+  return { kind: v.kind, version: v.version, services: services as string[] };
 }
 
 export function linkMessage(linkId: string, challenge: string): Uint8Array {
@@ -241,6 +269,7 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
     created_at: now,
     last_seen: null,
     online: 0,
+    app: null,
   };
   try {
     await env.DB.prepare(
@@ -297,20 +326,39 @@ function requireSelfOrAccountAdmin(p: Principal, endpointId: string): string {
   return p.kind === "device" && p.endpointId === endpointId ? p.accountId : requireAccountAdmin(p);
 }
 
-/** `PATCH /v1/devices/{endpoint_id}` `{"name"?: string}`: the device itself or account rights. */
+/**
+ * `PATCH /v1/devices/{endpoint_id}` `{"name"?: string, "app"?: DeviceApp | null}`.
+ * `name`: the device itself or account rights. `app`: the device itself only (FR-H10).
+ */
 export async function updateDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const p = await principal(request, env, nowSecs(deps.nowMs()));
   const body = await readJson<Record<string, unknown>>(request);
   const fields = Object.keys(body);
   if (fields.length === 0) throw ApiError.badRequest("nothing to change");
-  const unknown = fields.filter((f) => f !== "name");
+  const unknown = fields.filter((f) => f !== "name" && f !== "app");
   if (unknown.length > 0) throw ApiError.badRequest(`unknown or read-only field: ${unknown.join(", ")}`);
-  if (!validDeviceName(body.name)) throw ApiError.badRequest("name must be 1 to 64 characters");
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if ("name" in body) {
+    if (!validDeviceName(body.name)) throw ApiError.badRequest("name must be 1 to 64 characters");
+    sets.push("name = ?");
+    values.push(body.name);
+  }
+  if ("app" in body) {
+    const app = body.app === null ? null : parseDeviceApp(body.app);
+    if (body.app !== null && !app) throw ApiError.badRequest("app must be {kind, version, services?} as documented");
+    sets.push("app = ?");
+    values.push(app ? JSON.stringify(app) : null);
+  }
   // 404 before 403: other accounts' devices are not acknowledged.
   await accountDevice(env, p, endpointId);
+  const isSelf = p.kind === "device" && p.endpointId === endpointId;
+  if ("app" in body && !isSelf) throw ApiError.forbidden("only the device itself reports its app");
   const accountId = requireSelfOrAccountAdmin(p, endpointId);
-  await env.DB.prepare("UPDATE devices SET name = ? WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL")
-    .bind(body.name, accountId, endpointId)
+  await env.DB.prepare(
+    `UPDATE devices SET ${sets.join(", ")} WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL`,
+  )
+    .bind(...values, accountId, endpointId)
     .run();
   return json(200, deviceJson(await accountDevice(env, p, endpointId)));
 }

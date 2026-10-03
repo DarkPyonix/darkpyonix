@@ -208,3 +208,55 @@ describe("device links", () => {
     for (const json of bad) expect((await call(deps, "POST", "/v1/device-links", { json })).status).toBe(400);
   });
 });
+
+describe("device app (FR-H10)", () => {
+  const ember = { kind: "ember", version: "0.4.0+mac", services: ["kernel-manager", "ash-host"] };
+
+  it("test_fr_h10_device_reports_its_app", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 14, login: "owner" });
+    const a = await newDevice();
+    const token = await linkDevice(deps, { cookie }, a);
+    const before = (await (await call(deps, "GET", `/v1/devices/${a.endpointId}`, { cookie })).json()) as { app: unknown };
+    expect(before.app).toBeNull();
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token, json: { app: ember } })).status).toBe(200);
+    const list = (await (await call(deps, "GET", "/v1/devices", { cookie })).json()) as { devices: { app: unknown }[] };
+    expect(list.devices[0].app).toEqual(ember);
+    // services may be left out.
+    const bare = await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token, json: { app: { kind: "ember", version: "1" } } });
+    expect(((await bare.json()) as { app: unknown }).app).toEqual({ kind: "ember", version: "1", services: [] });
+    const cleared = await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token, json: { app: null } });
+    expect(((await cleared.json()) as { app: unknown }).app).toBeNull();
+  });
+
+  it("test_fr_h10_only_the_device_writes_its_app", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 15, login: "owner" });
+    const a = await newDevice();
+    await linkDevice(deps, { cookie }, a);
+    const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { cookie, json: { app: ember } })).status).toBe(403);
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token: main, json: { app: ember } })).status).toBe(403);
+  });
+
+  it("test_fr_h10_app_is_validated", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 16, login: "owner" });
+    const a = await newDevice();
+    const token = await linkDevice(deps, { cookie }, a);
+    const bad: unknown[] = [
+      "ember",
+      { kind: "Ember", version: "1" },
+      { kind: "ember" },
+      { kind: "ember", version: "1 2" },
+      { kind: "ember", version: "1", services: ["a", "a"] },
+      { kind: "ember", version: "1", services: Array.from({ length: 17 }, (_, i) => `s${i}`) },
+      { kind: "ember", version: "1", services: "kernel" },
+      { kind: "ember", version: "1", extra: true },
+      { kind: "e".repeat(33), version: "1" },
+    ];
+    for (const app of bad) {
+      expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token, json: { app } })).status, JSON.stringify(app)).toBe(400);
+    }
+  });
+});
