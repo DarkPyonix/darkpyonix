@@ -126,7 +126,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 | `__runs__.list(limit=20)` | 최신순 요약 목록 |
 | `__runs__.dir` | 기록 폴더 경로(str) |
 
-목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다. 실행 하나(`RunRecord`)와 셀 하나(`CellRecord`)는 `dict`의 하위 클래스이고, 그 안의 dict와 list도 같은 방식으로 속성 접근이 됩니다.
+목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다. 실행 하나(`RunLog`)와 셀 하나(`CellLog`)는 `dict`의 하위 클래스이고, 그 안의 dict와 list도 같은 방식으로 속성 접근이 됩니다.
 - 속성 이름은 먼저 dict의 키에서, 없으면 `metadata.darkpyonix`의 필드에서 찾습니다. 둘 다 없으면 `AttributeError`입니다. 그래서 `run.run_id`, `run.status`, `run.params`, `run.mode`, `run.started_at`, `run.cells`, `cell.index`, `cell.title`, `cell.status`, `cell.source`, `cell.outputs`가 됩니다.
 - `run.cells`: 기록에 남은 셀의 목록입니다(실행된 셀만, 실행 순서). `run.cells[i]`는 이 목록의 위치이고, 파일 안의 셀 번호는 `cell.index`입니다.
 - `cell.text`: 그 셀의 `stdout` 스트림 출력을 순서대로 이어 붙인 문자열(없으면 `""`). `cell.stderr`: 같은 방식의 `stderr`.
