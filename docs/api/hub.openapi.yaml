@@ -39,6 +39,10 @@ info:
     the device token may be the `token` query parameter. Cookie-authenticated writes must come
     from `https://darkpyonix.dev` (`Origin`), else 403. Tokens and session ids are stored
     hashed. "Account rights" means a signed-in session or the account's `main_server` device.
+
+    **Errors.** Error bodies are `Error` objects. Every 401 carries a `code`:
+    `device_removed` when the device token belongs to a removed device (stop retrying, drop
+    the token), `invalid_credentials` for anything else (missing, unknown or expired).
   license:
     name: MIT
     url: https://github.com/DarkPyonix/darkpyonix/blob/main/LICENSE
@@ -184,7 +188,10 @@ paths:
                   via: {type: string, enum: [session, device]}
                   endpoint_id: {type: [string, "null"], description: The calling device, when `via` is `device`.}
         "401":
-          description: No valid session or device token.
+          description: No valid session or device token; `code` is `device_removed` for a removed device's token.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   # ------------------------------------------------------------------ devices (FR-H1)
 
@@ -387,7 +394,10 @@ paths:
                     type: array
                     items: {$ref: "#/components/schemas/Device"}
         "401":
-          description: No valid session or device token.
+          description: No valid session or device token; `code` is `device_removed` for a removed device's token.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /v1/devices/{endpoint_id}:
     parameters:
@@ -890,6 +900,15 @@ components:
       required: true
       schema: {type: string, pattern: "^[a-z0-9]([a-z0-9-]{1,30}[a-z0-9])$"}
   schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string, description: Human-readable.}
+        code:
+          type: string
+          description: Machine-readable, where documented. Every 401 has one.
+          enum: [invalid_credentials, device_removed]
     Device:
       type: object
       required: [endpoint_id, name, role, created_at, last_seen, online]
