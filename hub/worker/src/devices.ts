@@ -232,11 +232,35 @@ export async function decideLinkCode(request: Request, env: Env, deps: Deps, cod
   return noContent();
 }
 
+const LINK_ID_RE = /^l_[0-9a-f]{32}$/;
+
+/** `GET /v1/device-links/{link_id}`: the link's status, for a device that restarted while waiting. */
+export async function getLink(_request: Request, env: Env, deps: Deps, linkId: string): Promise<Response> {
+  const link = LINK_ID_RE.test(linkId)
+    ? await env.DB.prepare("SELECT * FROM device_links WHERE link_id = ?").bind(linkId).first<LinkRow>()
+    : null;
+  if (!link) throw ApiError.notFound("unknown link");
+  // A claimed link stays claimed; anything else past its expiry is expired.
+  const expired = link.status !== "claimed" && link.expires_at < nowSecs(deps.nowMs());
+  return json(200, {
+    link_id: link.link_id,
+    status: expired ? "expired" : link.status,
+    endpoint_id: link.endpoint_id,
+    name: link.name,
+    role: link.role,
+    user_code: link.user_code,
+    verification_uri_complete: `${env.PUBLIC_URL}/link?code=${link.user_code}`,
+    challenge: link.challenge,
+    interval: LINK_POLL_INTERVAL_SECS,
+    expires_at: link.expires_at,
+  });
+}
+
 /** `POST /v1/device-links/{link_id}/token` `{"signature": "<128 hex>"}` */
 export async function claimLink(request: Request, env: Env, deps: Deps, linkId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const body = await readJson<{ signature?: unknown }>(request);
-  const link = /^l_[0-9a-f]{32}$/.test(linkId)
+  const link = LINK_ID_RE.test(linkId)
     ? await env.DB.prepare("SELECT * FROM device_links WHERE link_id = ?").bind(linkId).first<LinkRow>()
     : null;
   if (!link || link.expires_at < now || link.status === "claimed") {

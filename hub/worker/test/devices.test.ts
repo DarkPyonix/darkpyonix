@@ -52,6 +52,45 @@ describe("device links", () => {
     expect((await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } })).status).toBe(404);
   });
 
+  it("test_fr_h1_restarted_device_reads_its_link_status", async () => {
+    let now = Date.now();
+    const deps = makeDeps({ nowMs: () => now });
+    const cookie = await signIn(deps, { id: 17, login: "owner" });
+    const device = await newDevice();
+    const link = await startLink(deps, device.endpointId);
+    const status = async (id = link.link_id) => {
+      const r = await call(deps, "GET", `/v1/device-links/${id}`);
+      return { code: r.status, body: r.status === 200 ? ((await r.json()) as Record<string, unknown>) : null };
+    };
+    const pending = await status();
+    expect(pending.code).toBe(200);
+    expect(pending.body).toMatchObject({
+      link_id: link.link_id,
+      status: "pending",
+      endpoint_id: device.endpointId,
+      user_code: link.user_code,
+      challenge: link.challenge,
+      verification_uri_complete: link.verification_uri_complete,
+    });
+    expect(pending.body).not.toHaveProperty("device_token");
+    await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true } });
+    expect((await status()).body?.status).toBe("approved");
+    // With the challenge from the status, the restarted device claims.
+    const signature = toHex(await device.sign(utf8(`darkpyonix-hub/v2/link\n${link.link_id}\n${pending.body!.challenge}`)));
+    expect((await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } })).status).toBe(201);
+    expect((await status()).body?.status).toBe("claimed");
+
+    const denied = await startLink(deps, (await newDevice()).endpointId);
+    await call(deps, "POST", `/v1/link-codes/${denied.user_code}`, { cookie, json: { approve: false } });
+    expect((await status(denied.link_id)).body?.status).toBe("denied");
+
+    const late = await startLink(deps, (await newDevice()).endpointId);
+    now += 901_000;
+    expect((await status(late.link_id)).body?.status).toBe("expired");
+    expect((await status(`l_${"0".repeat(32)}`)).code).toBe(404);
+    expect((await status("nope")).code).toBe(404);
+  });
+
   it("test_fr_h1_registration_requires_key_possession", async () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 3, login: "owner" });

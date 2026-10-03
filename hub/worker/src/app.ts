@@ -6,6 +6,7 @@ import {
   createLink,
   decideLinkCode,
   getDevice,
+  getLink,
   getLinkCode,
   listDevices,
   me,
@@ -112,6 +113,7 @@ export const ROUTES: Route[] = [
   // FR-H1 devices
   route("/link", { GET: linkLanding }),
   route("/v1/device-links", { POST: createLink }),
+  route("/v1/device-links/{link_id}", { GET: getLink }),
   route("/v1/device-links/{link_id}/token", { POST: claimLink }),
   route("/v1/link-codes/{user_code}", { GET: getLinkCode, POST: decideLinkCode }),
   route("/v1/devices", { GET: listDevices }),
