@@ -2,7 +2,8 @@
 
 - 상태: **제안(Draft)**. 합의되면 FORMAT·SPEC·INTENT에 옮기고 이 문서는 근거로 남깁니다.
 - 대상: PROJECT Q7(grid 여닫는 태그), Q8(`parallel`/`concurrent`와 interop 셀의 실행 의미)
-- 목표일: 2026-10-18 구현
+- 목표일: 2026-10-18 구현. 사용자 지시(2026-10-02 22:58): "…최대한 연구 해서 빨리 다시 복귀시키도록 해"
+- SPEC 반영: §6의 항목을 SPEC FR-X7~X12, FR-F7~F13, NFR-K2 개정안으로 옮겼습니다(모두 `Draft`). Q7·Q8은 이슈 #7의 답을 기다리는 동안 PROJECT에 열린 질문으로 남깁니다.
 - 관련: 이슈 [#5](https://github.com/DarkPyonix/darkpyonix/issues/5), [#6](https://github.com/DarkPyonix/darkpyonix/issues/6), [#7](https://github.com/DarkPyonix/darkpyonix/issues/7), [#8](https://github.com/DarkPyonix/darkpyonix/issues/8), [#11](https://github.com/DarkPyonix/darkpyonix/issues/11), [#17](https://github.com/DarkPyonix/darkpyonix/issues/17), FORMAT §2.3·§3·§3.1, SPEC FR-X1~X6·FR-F1~F6·FR-K5·NFR-K2
 
 ## 0. 요약
@@ -69,7 +70,7 @@ if __name__  == '__main__':
 
 언어 목록은 C(cython), C++(cppyy), Rust(maturin/PyO3), SQL입니다. JS·Java·Kotlin·Swift·ObjC는 "Python Multi-platform"으로 import해서 쓰는 것이라 이 문서의 범위가 아닙니다(thisisthepy/PythonMultiplatform 담당).
 
-### 1.4 2025년 설계(노션 내보내기, `legacy/poc-2025`)
+### 1.4 2025년 설계(노션 내보내기, `legacy/poc-2025`. 이 폴더는 `cfda2d4`의 루트 재구성에서 지워졌고 Git 이력에 남아 있습니다)
 
 - 노션 "API 명세서 / 셀 생성"의 셀 필드는 `auto_run`, `collapsed`, `title`, `layout - horizontal`입니다([설계초안 HTML](../설계초안/DarkPyonix/API%20명세서/셀%20생성%202f80fa5b84fe81d0b68ce64d7556d7ef.html)).
 - `legacy/poc-2025/common/protocol.py`의 `Cell.layout: str | None = None  # horizontal etc`.
@@ -300,7 +301,7 @@ summary()
   - `darkpyonix/interop.py`의 함수 안에서만, 사용자가 그 API를 불렀을 때만 `importlib.import_module("cppyy")`(또는 YAML용 `yaml`, §5)을 허용합니다.
   - 모듈 수준 import와 커널 코드 경로에서는 금지를 유지합니다.
   - NFR-K2 테스트에는 이 허용 목록을 명시합니다. 정적 `import` 문은 여전히 금지이고, 테스트는 `importlib.import_module` 문자열 인자를 허용 목록과 비교합니다.
-  - 이 예외는 INTENT §2 조건 1의 해석을 바꾸는 것이므로 **사용자 확인이 필요합니다.**
+  - 이 예외는 INTENT §2 조건 1의 해석을 바꾸는 것이라 사용자 확인이 필요했고, **승인되었습니다**(2026-10-03, "예외 승인할게", INTENT D14).
 
 ### 4.5 `python file.py`에서의 동작 (FR-F5)
 
@@ -452,13 +453,13 @@ SQL 규칙
 - 테스트: `test_fr_f13_sql_default_sqlite_and_params`, `test_fr_f13_sql_result_renders_html`
 
 ### NFR-K2 개정안
-`importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `kernel/darkpyonix/interop.py`, `kernel/darkpyonix/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다.
+`importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `darkpyonix/kernel/darkpyonix/interop.py`, `darkpyonix/kernel/darkpyonix/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다.
 
 ## 7. 10-18까지의 순서
 
 | 순서 | 내용 | 비고 |
 |---|---|---|
-| 1 | FORMAT·SPEC 반영(FR-F7, FR-X7~X11, FR-F8~F13), INTENT 조건 1의 허용 목록 | 이슈 #7 답 확인 후. 답이 없으면 이 문서대로 진행하고 답이 오면 고칩니다 |
+| 1 | FORMAT·SPEC 반영(FR-F7, FR-X7~X11, FR-F8~F13), INTENT 조건 1의 허용 목록 | SPEC에 `Draft`로 반영함. 허용 목록은 INTENT D14. 이슈 #7 답이 오면 고치고 `Agreed`로 올립니다 |
 | 2 | 파서의 `group`·`row` 계산(FR-F7, FR-X7) | #8 파서 위에 더합니다 |
 | 3 | `run_parallel`, 출력 라우터의 `contextvars` 라우팅, 묶음 단위 실행(FR-X8~X11) | #11 실행기 위에 더합니다 |
 | 4 | `json`/`toml`(tomli 내장)/`yaml`/`sql`(FR-F12~F13) | 표준 라이브러리만으로 거의 다 됩니다 |

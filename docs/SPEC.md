@@ -99,6 +99,52 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
   - pyplot import 전에 `matplotlib.use("agg")`로 백엔드를 정한 셀은 PNG를 내지 않습니다.
 - 테스트: `test_fr_x6_matplotlib_show_emits_png`, `test_fr_x6_figure_left_at_cell_end_is_shown_once`, `test_fr_x6_kernel_does_not_import_matplotlib`, `test_fr_x6_user_chosen_backend_is_kept` (matplotlib이 없는 인터프리터에서는 skip, 셋째 테스트는 모든 인터프리터에서 실행)
 
+### FR-X7 병렬 묶음 경계와 실행 단위 — `Draft`
+근거: [proposals/cells-parallel-interop.md](proposals/cells-parallel-interop.md) §3.1~§3.2, 이슈 #6 참조 파일, 이슈 #7. 묶음은 `[parallel]` 셀에서 시작해 그 뒤 처음 나오는 `[concurrent]` 셀(별칭 `concorrunt`)에서 끝나고, 두 셀 사이가 묶인 셀입니다. 묶음은 겹치지 않습니다. 파서는 셀마다 `group: {head, end}`를 계산해 돌려주고 파일에는 쓰지 않습니다. 실행 요청에 묶음 안의 셀이 하나라도 있으면 커널은 실행 범위를 묶음 전체 `head..end`로 넓힙니다. `[concurrent]` 전에 `[parallel]`이 다시 나오거나 파일이 끝나면 닫히지 않은 묶음이고, 그 셀들은 일반 셀처럼 차례로 실행되며 표준 오류에 경고가 한 줄 나옵니다. 앞에 `[parallel]`이 없는 `[concurrent]`는 일반 셀입니다.
+- 수용 기준:
+  - `docs/examples/darkpyonix_format.py`의 `[parallel]`..`[concurrent]`가 묶음 하나(묶인 셀 2개)로 파싱됩니다.
+  - `mode: cells`에 묶인 셀 하나만 주어도 묶음 전체가 실행되고, `run.started.cells`에 넓힌 목록이 들어갑니다.
+  - 닫히지 않은 묶음은 오류 없이 보존되고, 일반 셀로 차례로 실행되며 경고가 한 줄 나옵니다.
+- 테스트: `test_fr_x7_parallel_group_bounds`, `test_fr_x7_running_one_member_runs_the_group`, `test_fr_x7_unterminated_group_runs_sequentially`
+
+### FR-X8 `darkpyonix.run_parallel` — `Draft`
+근거: 제안 §3.3~§3.4. `run_parallel(*items, fail_fast=False, max_threads=None)`은 표준 라이브러리(`asyncio`, `concurrent.futures`, `contextvars`)만 씁니다. awaitable은 새 이벤트 루프 하나에서 `asyncio.gather`로 함께 기다리고, 루프는 메인 스레드에서 돕니다(FR-K5). 인자 없는 callable은 같은 루프의 `run_in_executor`로 `ThreadPoolExecutor`(최대 `max_threads`, 기본은 항목 수)에서 돌립니다. 그 밖의 값은 아무것도 실행하기 전에 `TypeError`입니다. 반환값은 항목 순서대로의 결과 목록입니다. 이벤트 루프가 이미 도는 스레드에서 부르면 `RuntimeError`입니다. 묶인 셀은 awaitable이나 callable을 `__co_routines__`에 모으기만 하고 실제 동시 실행은 `[concurrent]` 셀의 `run_parallel`에서만 일어나므로, `python file.py`에서도 순서와 의미가 같습니다(FR-F5).
+- 수용 기준:
+  - `asyncio.sleep(1)`을 하는 코루틴 3개가 1.5초 안에 끝나고, 결과가 항목 순서대로 나옵니다.
+  - 코루틴 안에서 `threading.current_thread() is threading.main_thread()`가 `True`입니다.
+  - `time.sleep(1)`을 하는 callable 3개도 1.5초 안에 끝납니다.
+  - 정수를 넘기면 아무것도 실행되기 전에 `TypeError`가 납니다.
+  - 같은 파일을 `python file.py`로 돌려도 결과가 같습니다.
+- 테스트: `test_fr_x8_run_parallel_awaits_concurrently_on_main_thread`, `test_fr_x8_callables_run_in_threads`, `test_fr_x8_same_under_plain_python`
+
+### FR-X9 병렬 출력 라우팅과 셀 상태 — `Draft`
+근거: 제안 §3.5~§3.6. 커널은 묶인 셀이 실행되는 동안 `__co_routines__`에 새로 들어간 항목을 그 셀에 연결하고, `run_parallel`은 항목마다 `contextvars` 값(현재 셀)을 둔 컨텍스트에서 실행합니다. 출력 라우터(FR-X5)는 `sys.stdout`/`sys.stderr` 쓰기와 `display()`를 그 값의 셀로 보냅니다. 어느 셀에도 연결되지 않은 항목의 출력과 파일 디스크립터 1·2에 직접 쓴 출력은 `[concurrent]` 셀로 갑니다. 묶인 셀의 `cell.started`는 그 셀의 수집 단계가 시작될 때, `cell.finished`는 그 셀에 연결된 항목이 모두 끝날 때 나갑니다. 그래서 `running` 셀이 여러 개일 수 있습니다. `cell.started`에는 선택 필드 `group: {head, end}`가 더해집니다(PR-4의 필드 추가 규칙).
+- 수용 기준:
+  - 묶인 셀 A와 B의 코루틴이 각각 `print`한 줄은 A와 B의 `stream` 출력에만 들어갑니다.
+  - A와 B가 동시에 `running`입니다.
+  - A의 `cell.finished`는 A의 코루틴이 끝날 때 나가고, `cell.started`에 `group`이 들어갑니다.
+  - 연결되지 않은 항목의 출력은 `[concurrent]` 셀에 들어갑니다.
+- 테스트: `test_fr_x9_member_output_goes_to_its_cell`, `test_fr_x9_members_finish_independently`
+
+### FR-X10 병렬 실패 — `Draft`
+근거: 제안 §3.7. 기본(`fail_fast=False`)에서는 한 항목이 예외를 내도 나머지는 끝까지 돕니다. 실패한 항목의 traceback은 그 항목이 연결된 셀의 `error` 출력이 되고 그 셀은 `error`입니다. 모든 항목이 끝나면 `run_parallel`은 `.errors`에 `[(항목 위치, 예외)]`를 담은 `darkpyonix.ParallelError`를 냅니다(`ExceptionGroup`은 3.8에 없어서 쓰지 않음). 그래서 `[concurrent]` 셀도 `error`이고, FR-X2대로 그 실행의 남은 셀은 건너뜁니다. `fail_fast=True`이면 처음 실패할 때 남은 awaitable을 취소하고 스레드 항목에는 중단을 요청합니다.
+- 수용 기준:
+  - 기본값에서 A가 예외를 내도 B는 끝까지 돕니다.
+  - A에는 `error` 출력이 나오고, `[concurrent]` 셀에는 `.errors`에 A의 예외를 담은 `ParallelError`가 나옵니다.
+  - 그 실행의 다음 셀은 건너뜁니다.
+  - `fail_fast=True`이면 B가 취소됩니다.
+- 테스트: `test_fr_x10_failure_waits_for_siblings_then_raises`, `test_fr_x10_fail_fast_cancels_siblings`
+
+### FR-X11 병렬 인터럽트 — `Draft`
+근거: 제안 §3.7. FR-X4를 병렬 묶음으로 넓힙니다. `run_parallel`은 메인 스레드에서 받은 `KeyboardInterrupt`를 잡아 남은 태스크를 모두 취소하고, 아직 도는 스레드 항목에는 `PyThreadState_SetAsyncExc`로 `KeyboardInterrupt`를 보냅니다(최선의 시도. C 코드 안에서 막힌 스레드는 그 호출이 돌아올 때까지 멈추지 않음). 스레드를 최대 1초 기다린 뒤 `KeyboardInterrupt`를 다시 일으킵니다. 실행과 아직 끝나지 않은 묶인 셀은 `interrupted`로 끝나고, 네임스페이스는 남습니다. 커널을 죽이지 않습니다.
+- 수용 기준: `while True: await asyncio.sleep(0.01)` 코루틴 2개와 `while True: n += 1` 스레드 callable 1개로 된 묶음을 인터럽트하면 1초 안에 실행이 `interrupted`로 끝나고, 세 항목이 모두 멈추며, 네임스페이스가 남습니다.
+- 테스트: `test_fr_x11_interrupt_cancels_tasks_and_threads`
+
+### FR-X12 프로세스 실행 — `Draft` (2026-10-18 범위 밖)
+근거: 제안 §3.8. `run_parallel(*callables, executor="process")`는 `ProcessPoolExecutor`로 돌립니다. 항목은 pickle할 수 있는 callable이어야 하고(사용자 프로세스 안의 일이며 와이어로 받은 것이 아님), 커널은 spawn 자식이 `python file.py`처럼 파일을 다시 import하도록 `__main__`과 `__file__`을 둡니다. 인터럽트는 자식에게 SIGINT로 전달하고 죽이지 않습니다.
+- 수용 기준: pickle 가능한 CPU 작업 callable 2개가 프로세스 두 개에서 돌고 결과가 항목 순서대로 나옵니다. 인터럽트하면 자식이 SIGINT로 멈추고 실행은 `interrupted`입니다.
+- 테스트: `test_fr_x12_process_executor_runs_picklable_callables`
+
 ## 4. 실행 기록 (R)
 
 ### FR-R1 자동 기록 — `Done`
@@ -194,6 +240,56 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 ### FR-F6 `darkpyonix.run_command` — `Done`
 셸 명령을 하위 프로세스로 실행하고 출력을 줄 단위로 스트림 출력으로 보냅니다. `check=True`이면 실패 시 `CalledProcessError`입니다. 인터럽트가 오면 하위 프로세스 그룹에 SIGINT를 전달합니다.
 - 테스트: `test_fr_f6_run_command_streams_and_forwards_interrupt`
+
+### FR-F7 레이아웃 메타데이터 — `Draft`
+근거: 제안 §2, 이슈 #7. `layout`은 `horizontal`(새 가로 줄 시작, 이미 가로 줄 안이면 그 줄을 닫고 새 줄)과 `vertical`(가로 줄을 닫음) 전환이고, grid를 여닫는 태그는 두지 않습니다. `@layout`이 없는 셀은 앞 셀의 배치를 이어받고, 파일 맨 앞은 `vertical`입니다. `width`는 가로 줄 안의 CSS grid 트랙이고 기본 `1fr`입니다. `layout: grid`와 모르는 값은 보존하며, `grid`는 `horizontal`로, 모르는 값은 `vertical`로 계산합니다. 파서는 셀마다 `row`(가로 줄 번호, 세로면 `null`)와 `width`를 계산해 돌려줍니다. 커널은 이 값을 읽지 않고, 레이아웃은 실행 순서와 실행 단위를 바꾸지 않습니다. 병렬 묶음의 묶인 셀은 `@layout`이 없으면 한 가로 줄로 놓입니다(제안 §2.4).
+- 수용 기준:
+  - 제안 §2.2의 예시(2×2 grid 뒤 일반 셀)를 파싱하면 `row`가 `[0,0,1,1,null]`이고, 줄별 트랙이 `["1fr","1fr"]`, `["1fr","2fr"]`입니다.
+  - `layout: grid`는 원문 그대로 직렬화되면서 `horizontal`로 계산됩니다.
+  - 가로 줄의 셀 4개는 파일 순서대로 하나씩 실행됩니다.
+- 테스트: `test_fr_f7_layout_rows_from_switches`, `test_fr_f7_layout_does_not_change_execution`
+
+### FR-F8 interop 공통: 툴체인 감지, 캐시, 네임스페이스 — `Draft`
+근거: 제안 §4.1·§4.5, 이슈 #5, INTENT D14. 셀 본문은 파이썬이고, 다른 언어 소스는 `darkpyonix.run_cinterop`/`run_cppinterop`/`run_rustinterop`의 문자열 인자입니다. 셀 타입은 편집기의 하이라이트에만 쓰고 커널은 따로 하는 일이 없습니다. 툴체인(Cython, cppyy, maturin, 컴파일러, cargo)은 사용자 인터프리터에 있을 때만 쓰고, 없으면 무엇이 없는지와 설치 방법을 담은 `darkpyonix.InteropUnavailable`(`ImportError`의 하위 클래스)을 냅니다. C와 Rust 컴파일은 `sys.executable -m …` 하위 프로세스에서 하고, 결과 확장 모듈은 `importlib.util.spec_from_file_location`으로 읽습니다. 캐시 키는 `sha256(언어, 소스, 옵션, 툴체인 버전, EXT_SUFFIX, 플랫폼)`이고 위치는 `$DARKPYONIX_HOME/interop/<lang>/<key>/`입니다. 빌드는 임시 폴더에서 하고 `os.replace`로 옮기며, 같은 키는 OS 잠금으로 한 번만 빌드합니다. 내보낸 이름은 호출한 쪽 전역에 묶고 모듈 객체를 반환합니다(`name=`, `exports=` 선택). 컴파일 중 인터럽트는 하위 프로세스 그룹에 SIGINT로 전달하고 임시 폴더를 지웁니다.
+- 수용 기준:
+  - 툴체인이 없는 인터프리터에서 `run_cinterop`이 설치 안내를 담은 `InteropUnavailable`을 냅니다. 커널과 `python file.py`에서 같습니다.
+  - 같은 소스를 두 번 실행하면 두 번째는 컴파일하지 않습니다.
+  - 두 커널이 같은 소스를 동시에 실행해도 빌드는 한 번입니다.
+  - 내보낸 이름이 호출한 쪽 전역에 생깁니다.
+  - 커널 모듈은 여전히 표준 라이브러리만 import합니다(NFR-K2와 D14의 허용 목록).
+- 테스트: `test_fr_f8_missing_toolchain_raises_interop_unavailable`, `test_fr_f8_build_is_cached_by_source_hash`, `test_fr_f8_concurrent_builds_share_one_artifact`
+
+### FR-F9 `darkpyonix.run_cinterop` (Cython) — `Draft`
+근거: 제안 §4.2. `run_cinterop(src, *, name=None, exports=None, cflags=(), libraries=())`의 `src`는 Cython 소스(`.pyx`)이고, 날 C는 Cython의 verbatim C 블록으로 넣습니다. 기본으로 내보내는 이름은 `_`로 시작하지 않는 `def`/`cpdef`/`cdef class`입니다. 감지는 `importlib.util.find_spec("Cython")`과 `find_spec("setuptools")`로 하고, 커널 프로세스는 Cython을 import하지 않습니다.
+- 수용 기준: 제안 §4.2의 예시를 실행한 뒤 `c_add(1, 2) == 3`입니다. 소스를 고쳐 다시 실행하면 새 정의가 쓰입니다.
+- 테스트: `test_fr_f9_cinterop_exports_cpdef_functions` (Cython이나 C 컴파일러가 없으면 skip)
+
+### FR-F10 `darkpyonix.run_cppinterop` (cppyy) — `Draft`
+근거: 제안 §4.4. cppyy는 JIT이라 프로세스 안에서, 그 함수 안에서만 import합니다(INTENT D14). 셀 소스는 `namespace __dp_<key[:16]> { … }`로 감싸 정의하므로 고쳐 다시 실행해도 재정의 오류가 나지 않고, 같은 소스를 다시 실행하면 아무것도 하지 않습니다. 기본으로 내보내는 이름은 중괄호 깊이 0의 `class`/`struct`/`enum`/`namespace`/함수 이름이고, 찾지 못하면 `exports=`를 요구하는 오류를 냅니다. 전체 네임스페이스는 `darkpyonix.cpp`(= `cppyy.gbl`)입니다.
+- 수용 기준: `struct P { int x; }; int twice(int a) { return 2*a; }`를 실행한 뒤 `twice(2) == 4`이고 `P().x`에 접근됩니다. 같은 이름을 고쳐 다시 실행해도 재정의 오류가 나지 않습니다.
+- 테스트: `test_fr_f10_cppinterop_exports_and_redefines` (cppyy가 없으면 skip)
+
+### FR-F11 `darkpyonix.run_rustinterop` (maturin·PyO3) — `Draft`
+근거: 제안 §4.3. `run_rustinterop(src, *, name=None, exports=None, dependencies=None, release=True)`의 `src`는 `#[pyfunction]`/`#[pyclass]`/`#[pymethods]` 항목입니다. 커널이 `cdylib` 크레이트(`pyo3`의 `abi3-py38`)와 `#[pymodule]`을 만들고(소스에 이미 있으면 그것을 씀), `sys.executable -m maturin build`로 휠을 만든 뒤 `zipfile`로 확장 모듈을 꺼냅니다. cargo 대상 폴더는 `$DARKPYONIX_HOME/interop/rust/target-<abi>`를 함께 쓰고 잠금으로 동시 빌드를 막습니다. 감지는 `find_spec("maturin")`과 `shutil.which("cargo")`로 합니다.
+- 수용 기준: 제안 §4.3의 예시를 실행한 뒤 `fib(10) == 55`입니다. 두 번째 실행은 캐시를 씁니다. 빌드 중 인터럽트하면 cargo가 멈추고 임시 폴더가 남지 않습니다.
+- 테스트: `test_fr_f11_rustinterop_builds_pyo3_module` (maturin이나 cargo가 없으면 skip. CI에서 확인하며, 하위 에이전트는 이 테스트를 돌리지 않습니다)
+
+### FR-F12 데이터 형식 함수 `json`/`toml`/`yaml` — `Draft`
+근거: 제안 §5.1~§5.3, 이슈 #5. `darkpyonix.json/toml/yaml(text, target="_")`는 파싱한 값을 반환하면서 호출한 쪽 전역의 `target` 이름(기본 `_`, `None`이면 묶지 않음)에도 묶습니다. 그래서 `_`를 설정하지 않는 `python file.py`에서도 같습니다. `json`은 표준 `json`, `toml`은 3.11 이상에서 `tomllib`, 그 아래에서는 소스 트리에 넣은 순수 파이썬 TOML 1.0 파서(tomli, MIT, 3.8 호환 버전 고정), `yaml`은 설치된 PyYAML의 `safe_load`(함수 안에서만 import, INTENT D14)입니다. PyYAML이 없으면 `InteropUnavailable`입니다. 대상 변수를 주석 메타데이터로 두지 않습니다.
+- 수용 기준:
+  - 3.8과 3.12에서 `darkpyonix.toml(...)`이 같은 `dict`를 냅니다.
+  - `target="cfg"`이면 `cfg`가, 기본값이면 `_`가 생기고, `python file.py`에서도 같습니다.
+  - PyYAML이 없으면 `yaml()`이 `InteropUnavailable`을 냅니다.
+- 테스트: `test_fr_f12_toml_on_all_interpreters`, `test_fr_f12_target_binds_in_plain_python`, `test_fr_f12_yaml_requires_pyyaml`
+
+### FR-F13 `darkpyonix.sql` — `Draft`
+근거: 제안 §5.3. `darkpyonix.sql(query, target="_", params=None, con=None)`은 DB-API 2.0 연결 `con`을 쓰고, 없으면 `darkpyonix.sql.connection`, 그것도 없으면 프로세스마다 하나인 `sqlite3` 메모리 DB를 씁니다. 결과는 `.columns`가 있는 튜플 리스트 `darkpyonix.SQLResult`이고 `_repr_html_`로 표를 그립니다. 행이 없는 문장은 `rowcount`만 담습니다. 값은 `params`로만 넘기고, 문자열 치환은 두지 않습니다(SQL 주입). `.to_pandas()`는 사용자 코드가 이미 pandas를 import했을 때만 됩니다.
+- 수용 기준:
+  - 기본 연결은 sqlite 메모리 DB이고 셀 사이에 유지됩니다.
+  - `params`로 값을 바인딩합니다.
+  - 결과의 `columns`와 행이 맞고, 마지막 식이면 `text/html` `execute_result`가 나옵니다.
+  - `con=`으로 다른 DB-API 연결을 씁니다.
+- 테스트: `test_fr_f13_sql_default_sqlite_and_params`, `test_fr_f13_sql_result_renders_html`
 
 ## 7. 매니저 (M)
 
@@ -456,6 +552,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 ### NFR-K2 표준 라이브러리 전용 — `Done`
 `darkpyonix/kernel/darkpyonix/kernel/`, `darkpyonix/kernel/darkpyonix/*.py`, `darkpyonix/kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `darkpyonix/kernel/darkpyonix/kernel/mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
 - 테스트: `test_nfr_k2_kernel_imports_stdlib_only`, `test_nfr_k2_no_kernel_code_imports_the_matplotlib_backend`
+- 개정안 — `Draft` (FR-F8~F13, INTENT D14): `importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `darkpyonix/kernel/darkpyonix/interop.py`와 `darkpyonix/kernel/darkpyonix/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다. 테스트: `test_nfr_k2_dynamic_imports_are_allowlisted`
 
 ### NFR-K3 출력 오버헤드 — `Done`
 `print`를 100,000번 하는 셀의 실행 시간이 같은 인터프리터의 일반 실행 대비 1.5배를 넘지 않습니다. 구독자가 느려도 메인 스레드가 막히지 않습니다(출력 큐 상한을 넘으면 기록은 계속하되 실시간 이벤트를 합칩니다).
