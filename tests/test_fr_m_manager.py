@@ -376,7 +376,8 @@ def test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission(backend, ker
 
 def _probe_url(path):
     return (path.replace("{kernel_id}", "k_00000000000000000000")
-            .replace("{run_ref}", "20260101-000000-0000").replace("{share_id}", "s_0000000000000000"))
+            .replace("{run_ref}", "20260101-000000-0000").replace("{share_id}", "s_0000000000000000")
+            .replace("{token_type}", "viewer1").replace("{token}", "t_probe"))
 
 
 PROBE_BODIES = {"startKernel": {"path": "/nonexistent/darkpyonix/x.py"}, "startRun": {"mode": "all"},
@@ -385,7 +386,9 @@ PROBE_BODIES = {"startKernel": {"path": "/nonexistent/darkpyonix/x.py"}, "startR
 
 def test_nfr_m3_every_operation_answers_with_a_documented_status(manager):
     """Black-box form of the schema comparison: every operation of the YAML exists and, for a
-    kernel that does not exist, answers with one of the status codes the YAML lists for it."""
+    kernel that does not exist, answers with one of the status codes the YAML lists for it.
+    Operations marked `x-darkpyonix-status: planned` are not served yet and must answer 404, so
+    the mark has to go once one is served (SPEC NFR-M3)."""
     with open(SPEC) as f:
         spec = yaml.safe_load(f)
     with manager.client() as admin, manager.client(token=None) as anon:
@@ -399,6 +402,10 @@ def test_nfr_m3_every_operation_answers_with_a_documented_status(manager):
                 params = {"path": "/nonexistent/darkpyonix/x.py"} if op["operationId"] == "getDocument" else None
                 body = PROBE_BODIES.get(op["operationId"])
                 resp = admin.request(method.upper(), url, params=params, json=body)
+                if op.get("x-darkpyonix-status") == "planned":
+                    assert resp.status_code == 404, ("planned but served; remove the mark",
+                                                     op["operationId"], resp.status_code)
+                    continue
                 assert resp.status_code in documented, (op["operationId"], resp.status_code, resp.text)
                 if resp.status_code >= 400:
                     assert set(resp.json()) == {"error"}
