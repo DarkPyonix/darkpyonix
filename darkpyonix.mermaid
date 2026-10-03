@@ -192,11 +192,25 @@ classDiagram
         }
         class RunsMagic {
             <<magic variable>>
-            +current dict|None
-            +latest dict|None
+            +current RunLog|None
+            +latest RunLog|None
             +dir str
-            +list(limit int) list~dict~
-            +__getitem__(key) dict
+            +list(limit int) list~LogDict~
+            +__getitem__(key) RunLog
+        }
+        class LogDict {
+            <<dict with attribute access>>
+            +__getattr__(name) Any
+        }
+        class RunLog {
+            +path str
+            +notebook dict
+            +cell(key) CellLog
+        }
+        class CellLog {
+            +text str
+            +stderr str
+            +result str|None
         }
         class ControlServer {
             <<control thread>>
@@ -253,6 +267,10 @@ classDiagram
     OutputRouter ..> EventLog : events
     OutputRouter ..> RunStore : throttled saves
     RunsMagic ..> RunStore
+    RunsMagic ..> RunLog : returns
+    LogDict <|-- RunLog
+    LogDict <|-- CellLog
+    RunLog *-- CellLog : cells
     Executor ..> RunsMagic : injects as __runs__
     ControlServer *-- ClientSession
     ControlServer ..> EventLog : replay

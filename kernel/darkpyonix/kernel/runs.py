@@ -529,10 +529,146 @@ def to_notebook_meta(run: Run) -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- __runs__ (FR-R3)
 
+def _view(value: Any) -> Any:
+    """``value`` with every nested dict made a ``LogDict`` and every list a ``LogList``."""
+    if isinstance(value, dict):
+        return LogDict(value)
+    if isinstance(value, list):
+        return LogList(value)
+    return value
+
+
+def _plain(value: Any) -> Any:
+    """A deep copy of ``value`` made of plain ``dict`` and ``list`` only."""
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    return value
+
+
+class LogList(list):
+    """A JSON list whose dict items allow attribute access (SPEC FR-R3)."""
+
+    __slots__ = ()
+
+    def __init__(self, items: Any = (), item: Any = None) -> None:
+        wrap = item or _view
+        list.__init__(self, (wrap(v) if isinstance(v, dict) else _view(v) for v in items))
+
+
+class LogDict(dict):
+    """A JSON dict that also answers attribute access (SPEC FR-R3).
+
+    An attribute is looked up as a key first, then as a field of ``metadata.darkpyonix``.
+    Values stay plain JSON, so ``json.dumps`` gives the same document back.
+    """
+
+    __slots__ = ()
+
+    def __init__(self, data: Any = ()) -> None:
+        dict.__init__(self, ((k, _view(v)) for k, v in dict(data).items()))
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        if name in self:
+            return self[name]
+        meta = self.get("metadata")
+        dp = meta.get("darkpyonix") if isinstance(meta, dict) else None
+        if isinstance(dp, dict) and name in dp:
+            return dp[name]
+        raise AttributeError("%s has no field %r" % (type(self).__name__, name))
+
+    def __dir__(self) -> List[str]:
+        names = set(dir(type(self)))
+        names.update(k for k in self if isinstance(k, str) and k.isidentifier())
+        meta = self.get("metadata")
+        dp = meta.get("darkpyonix") if isinstance(meta, dict) else None
+        if isinstance(dp, dict):
+            names.update(k for k in dp if isinstance(k, str) and k.isidentifier())
+        return sorted(names)
+
+
+class CellLog(LogDict):
+    """One cell of a run log: ``.text``, ``.stderr``, ``.result`` (SPEC FR-R3)."""
+
+    __slots__ = ()
+
+    def _stream(self, name: str) -> str:
+        return "".join(_text(o) for o in self.get("outputs") or ()
+                       if o.get("output_type") == "stream" and o.get("name") == name)
+
+    @property
+    def text(self) -> str:
+        """The cell's ``stdout`` stream output, joined in order."""
+        return self._stream("stdout")
+
+    @property
+    def stderr(self) -> str:
+        """The cell's ``stderr`` stream output, joined in order."""
+        return self._stream("stderr")
+
+    @property
+    def result(self) -> Optional[str]:
+        """``text/plain`` of the cell's last ``execute_result``, or ``None``."""
+        for o in reversed(self.get("outputs") or ()):
+            if o.get("output_type") == "execute_result":
+                plain = (o.get("data") or {}).get("text/plain")
+                if plain is None:
+                    return None
+                return "".join(plain) if isinstance(plain, list) else str(plain)
+        return None
+
+
+class RunLog(LogDict):
+    """One run log notebook with attribute access (SPEC FR-R3).
+
+    ``.path`` and ``.notebook`` are not keys, so ``json.dumps(run)`` is the notebook itself.
+    """
+
+    __slots__ = ("_path",)
+
+    def __init__(self, notebook: Dict[str, Any], path: str) -> None:
+        dict.__init__(self, ((k, LogList(v, CellLog) if k == "cells" and isinstance(v, list)
+                              else _view(v)) for k, v in notebook.items()))
+        self._path = path
+
+    @property
+    def path(self) -> str:
+        """Absolute path of this run's ``.ipynb`` log."""
+        return self._path
+
+    @property
+    def notebook(self) -> Dict[str, Any]:
+        """The nbformat dict as plain ``dict``/``list`` (a copy)."""
+        return _plain(self)
+
+    def cell(self, key: Union[str, int]) -> CellLog:
+        """The first cell whose id, then title (str), or file cell index (int) is ``key``."""
+        cells = [c for c in self.get("cells") or () if isinstance(c, CellLog)]
+        if isinstance(key, int) and not isinstance(key, bool):
+            fields = ("index",)
+        elif isinstance(key, str):
+            fields = ("id", "title")
+        else:
+            raise TypeError("run.cell() takes a cell id, a title or a cell index")
+        for field in fields:
+            for c in cells:
+                dp = (c.get("metadata") or {}).get("darkpyonix") or {}
+                if dp.get(field) == key:
+                    return c
+        raise KeyError(key)
+
+    def __reduce__(self) -> Any:
+        return (RunLog, (_plain(self), self._path))
+
+
 class RunsMagic(object):
     """The ``__runs__`` object in the kernel namespace.
 
-    Every value is a fresh JSON-serialisable dict/list; changing it never changes a log.
+    Every value is a fresh JSON-serialisable dict/list that also allows attribute access
+    (``RunLog``, ``LogDict``); changing it never changes a log.
     ``__runs__[-1]`` is the newest *finished* run (the same as ``.latest``), ``[-2]`` the one
     before it; non-negative integers count from the oldest finished run.
     """
@@ -546,24 +682,28 @@ class RunsMagic(object):
     def dir(self) -> str:
         return self._store.dir
 
+    def _log(self, notebook: Dict[str, Any]) -> RunLog:
+        meta = (notebook.get("metadata") or {}).get("darkpyonix") or {}
+        return RunLog(notebook, self._store.path_of(str(meta.get("run_id"))))
+
     @property
-    def current(self) -> Optional[Dict[str, Any]]:
+    def current(self) -> Optional[RunLog]:
         try:
-            return self._store.get("current")
+            return self._log(self._store.get("current"))
         except DKPError:
             return None
 
     @property
-    def latest(self) -> Optional[Dict[str, Any]]:
+    def latest(self) -> Optional[RunLog]:
         try:
-            return self._store.get("latest")
+            return self._log(self._store.get("latest"))
         except DKPError:
             return None
 
     def list(self, limit: int = 20) -> List[Dict[str, Any]]:
-        return self._store.list(limit)
+        return LogList(self._store.list(limit))
 
-    def __getitem__(self, key: Union[str, int]) -> Dict[str, Any]:
+    def __getitem__(self, key: Union[str, int]) -> RunLog:
         if isinstance(key, bool):
             raise TypeError("__runs__ keys are run ids or integers")
         if isinstance(key, int):
@@ -573,10 +713,10 @@ class RunsMagic(object):
                 run_id = finished[key]["run_id"]
             except IndexError:
                 raise IndexError("__runs__[%d]: %d finished run(s)" % (key, len(finished)))
-            return self._store.get(run_id)
+            return self._log(self._store.get(run_id))
         if isinstance(key, str):
             try:
-                return self._store.get(key)
+                return self._log(self._store.get(key))
             except DKPError as e:
                 raise KeyError(key) if e.code == "not_found" else e
         raise TypeError("__runs__ keys are run ids or integers")
