@@ -60,3 +60,5 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | Q9 | iroh 릴레이를 어디서 돌릴지: 작은 VPS(릴레이 + QAD) 또는 Cloudflare Container(WebSocket만, QAD 없음) | 권장(2026-10-03): VPS로 시작. Ember NFR-N1 측정을 VPS 위에서 QAD 켬/끔 두 번 하고, QAD를 끈 직접 경로 성공률도 85% 이상이면 Container로 옮김(SPEC FR-H3). 사용자 확인 대기 |
 | Q10 | 2025 인증 계열의 범위와 경로. 2025 문서의 요약표(`/auth`…, 파일 구분 없음)와 상세 페이지(`/kernels/{kernel_id}/…`, 파일마다)가 다릅니다. 지금 SPEC은 상세를 따라 파일마다 비밀번호를 두고 `/api/kernels/{kernel_id}/…`에 놓았고, 전용 매니저 전체 마스터 토큰(FR-M4)도 남겼습니다(INTENT D17, SPEC FR-A4) | 리더 결정, 사용자 확인 대기 |
 | Q11 | 초기 토큰(2025, 인증 없음)을 바깥에 열린 전용 매니저에서 누가 먼저 받을 수 있는지. 지금 SPEC은 비밀번호가 없을 때 한 번만 발급합니다 | 리더 제안, 사용자 확인 대기 |
+| Q12 | 매니저와 커널 사이 인증. 지금은 `~/.darkpyonix/user.key` HMAC 도전-응답(리더 결정)입니다. 매니저가 이미 클라이언트를 검사하므로 이 채널에 무엇이 필요한지(같은 OS 사용자 확인만인지, 지금 방식 그대로인지) | 리더 결정, 사용자 확인 대기 (INTENT D5) |
+| Q13 | 2025 `user_permission: "write"`를 `viewer3`와 `admin`으로 읽은 것. 2025에서 실행에 `write`가 필요하고 `viewer3`가 실행할 수 있어서이고, 그 결과 셀 편집과 잠금도 `viewer3`부터입니다 | 2025 문서에서 끌어냄, 사용자 확인 대기 (INTENT D18) |

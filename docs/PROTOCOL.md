@@ -237,7 +237,7 @@ TLS, HTTP/2, P2P 터널 위의 연결, 그리고 `handoff`가 `null`인 POSIX �
 
 ## 4. 협업 문서 (SPEC §10a)
 
-커널은 파일의 공유 문서 상태(셀, 셀별 버전, 잠금, 접속자)를 들고 있습니다. 아래 메서드와 이벤트는 §3과 같은 채널을 씁니다. 모든 편집 메서드는 `client`를 받습니다. `client`는 `{client_id, nickname, user, avatar?, permission}`이고, 매니저가 토큰에서 채워 넘깁니다.
+커널은 파일의 공유 문서 상태(셀, 셀별 버전, 잠금, 접속자)를 들고 있습니다. 아래 메서드와 이벤트는 §3과 같은 채널을 씁니다. 모든 편집 메서드는 `client`를 받습니다. `client`는 `{client_id, nickname, user, avatar?, permission}`이고, 매니저가 토큰에서 채워 넘깁니다. 커널은 `permission`을 검사하지 않습니다. 권한은 매니저가 이미 검사했습니다(INTENT D5, D18). 커널은 `permission`을 접속자 표시에 싣기만 합니다.
 
 | method | params | result |
 |---|---|---|
@@ -252,7 +252,7 @@ TLS, HTTP/2, P2P 터널 위의 연결, 그리고 `handoff`가 `null`인 POSIX �
 | `presence.leave` | `client, request_id?` | `{}` |
 | `runs.wait` | `run_id \| "latest" \| "current", timeout` | 끝나면 실행 요약, 아니면 `{status: "running", progress?}` |
 
-오류 코드 추가: `conflict`, `locked`, `forbidden`.
+오류 코드 추가: `conflict`, `locked`. 2026-10-03까지 있던 `forbidden`(커널 쪽 권한 검사)은 지웁니다(구현 대기 #49).
 
 | event type | data |
 |---|---|
@@ -277,3 +277,51 @@ TLS, HTTP/2, P2P 터널 위의 연결, 그리고 `handoff`가 `null`인 POSIX �
 **`request_id`.** `doc.*`(snapshot 제외)와 `presence.*` 요청은 클라이언트가 고른 `request_id`(문자열, 1–64자)를 받을 수 있습니다. 그 요청으로 생긴 이벤트는 모두 같은 `request_id`를 그대로 담습니다(예: `doc.unlock`에 최종 소스를 보내면 `doc.cell.updated`와 `doc.unlock` 둘 다, `presence.leave`가 잠금을 풀면 `doc.unlock`과 `presence.leave` 둘 다). 합쳐서 나중에 보내는 커서 `presence.update`는 마지막으로 합쳐진 요청의 `request_id`를 담습니다. 유휴 해제처럼 요청 없이 생긴 이벤트에는 없습니다. 같은 `client_id`를 쓰는 두 창이 자기 편집의 메아리를 구별하는 용도이며, 커널은 값을 해석하지 않습니다. 형식이 틀리면 `bad_request`입니다.
 
 `run.queued`, `run.started`, `run.finished`, `cell.started`, `cell.finished` 이벤트의 `data`에는 `started_by`(client_id, user, nickname)가 들어갑니다. 인터럽트로 끝난 실행에는 `interrupted_by`가 더해집니다(SPEC FR-S6). `run` 메서드는 `cells` 대신 `cell_ids`를 받을 수 있습니다.
+
+## 5. 2025 WebSocket 동기화
+
+SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`을 `/api/ws/kernels/{kernel_id}`로 되살립니다. 매니저가 토큰과 권한을 확인하고 연결을 넘기면(§3.7, `kind: "ws"`), 커널이 업그레이드에 `101 Switching Protocols`로 답하고 이 절의 메시지를 주고받습니다. 구현 대기(#49).
+
+### 5.1 프레임
+
+- RFC 6455입니다. 커널은 `Sec-WebSocket-Accept = base64(SHA-1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))`를 표준 라이브러리로 만듭니다.
+- 메시지는 텍스트 프레임 하나에 JSON 객체 하나이고, `type` 필드로 구별합니다. 커널이 보내는 프레임은 마스크하지 않고, 클라이언트 프레임은 마스크되어 있어야 합니다(RFC 6455).
+- 커널은 30초마다 ping을 보내고, 60초 동안 아무 프레임도 받지 못하면 닫습니다. 두 값은 리더 제안입니다(2025 명세에 없음).
+- 이벤트에서 나온 메시지에는 커널 이벤트 번호 `seq`가 더해집니다(2025에 없는 필드, 더하기만 함).
+
+### 5.2 클라이언트 → 커널
+
+| `type` | 2025 필드 | 커널 동작 | 라벨 |
+|---|---|---|---|
+| `request_code` | `kernel_id` | `code_data`로 답함 | 모두 |
+| `request_history` | `kernel_id` | `history_data`로 답함(최신 실행 기록의 셀별 출력) | `viewer1`은 빈 `history` |
+| `request_locks` | `kernel_id` | `locks_data`로 답함 | 모두 |
+| `start_typing` | `cell_id`, `user_id` | `doc.lock`과 같음. 성공하면 모두에게 `cell_locked`. 이미 잠겼으면 `{"type":"error","error":"CELL_ALREADY_LOCKED","cell_id","locked_by"}` | `viewer3`·`admin`. 그 밖은 `{"type":"error","error":"INSUFFICIENT_PERMISSION"}` |
+| `cell_focus` | `cell_id`, `user_id` | `presence.update`와 같음. 모두에게 `other_user_focus` | 모두 |
+| `cell_blur` | `cell_id` | 포커스를 지움. 모두에게 `other_user_blur`. 2025에 송신 메시지가 없어 더함 | 모두 |
+
+2025 메시지의 `user_id`는 쓰지 않습니다. 보낸 사람은 넘김 라벨(`client_id`, `user`, `nickname`)입니다. 모르는 `type`은 `{"type":"error","error":"UNKNOWN_TYPE"}`입니다.
+
+### 5.3 커널 → 클라이언트
+
+| `type` | 2025 필드 | 커널 이벤트 |
+|---|---|---|
+| `code_data` | `cells: [{cell_id, cell_type, source, execution_count}]` | `doc.snapshot` |
+| `history_data` | `history: [{cell_id, execution_count, outputs, executed_at}]` | 최신 실행 기록 |
+| `locks_data` | `locks: [{cell_id, is_locked, locked_by?, user_name?, locked_at?}]` | 문서의 잠금 |
+| `users_focus_data` | `users_focus: [{user_id, user_name, user_avatar, focused_cell_id, focused_at}]` | 접속자. 연결 직후 한 번 |
+| `other_user_focus` | `cell_id, user_id, user_name, user_avatar, timestamp` | `presence.update`(포커스 있음) |
+| `other_user_blur` | `cell_id, user_id, user_name, timestamp` | `presence.update`(포커스 없음) |
+| `cell_locked` | `cell_id, locked_by, user_name, locked_at` | `doc.lock` |
+| `cell_unlocked_with_code` | `cell_id, previously_locked_by, user_name, updated_code` | `doc.unlock`(최종 소스 포함) |
+| `execution_started` | `cell_id, execution_id, started_by, user_name, code, timestamp` | `cell.started` |
+| `execution_output` | `cell_id, execution_id, outputs, is_complete, timestamp` | `output` |
+| `execution_complete` | `cell_id, execution_id, final_outputs, execution_time, completed_at` | `cell.finished`(`ok`) |
+| `execution_error` | `cell_id, execution_id, error {ename, evalue, traceback}, failed_at` | `cell.finished`(`error`) |
+| `execution_interrupted` | `cell_id, execution_id, interrupted_by, user_name, interrupted_at, partial_outputs` | `cell.finished`(`interrupted`) |
+| `event` | `event: <§3.4·§4 이벤트>` | 2025 이름이 없는 이벤트(`doc.cell.created` 등) |
+
+- `execution_id`는 `run_id`입니다. `user_id`는 `client_id`, `user_name`은 `user`(없으면 `nickname`)입니다.
+- `viewer1` 라벨에는 `execution_output`을 보내지 않고, `final_outputs`, `partial_outputs`, `error.traceback`, `outputs`를 빈 값으로 보냅니다(2025: "viewer1: 코드만 적혀있고 History 없음").
+- 편집, 잠금 해제, 실행, 인터럽트는 REST(매니저)로 보내고, 그 결과가 위 메시지로 퍼집니다. 2025 명세도 같았습니다.
+

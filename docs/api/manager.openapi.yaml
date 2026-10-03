@@ -830,7 +830,7 @@ paths:
       summary: Create a cell
       description: Inserted after `after` or before `before`; with neither it is appended at the end of the
         document (giving both is `400`). Saved to the file within 300 ms and broadcast as
-        `doc.cell.created` (SPEC FR-S2, FR-S5). `editor` or `admin`.
+        `doc.cell.created` (SPEC FR-S2, FR-S5). Write access (`viewer3` or `admin`, SPEC FR-S8).
       requestBody:
         required: true
         content:
@@ -959,6 +959,8 @@ paths:
                 to_index:
                   type: integer
                   minimum: 1
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -988,7 +990,16 @@ paths:
       operationId: lockCell
       summary: Lock a cell for editing (or renew the lock)
       description: One lock per cell; released by unlock, after 3 minutes without activity, or when the client disconnects
-        (SPEC FR-S3).
+        (SPEC FR-S3). Write access (`viewer3`, `admin`).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -1026,6 +1037,8 @@ paths:
                   type: string
                 base_version:
                   type: integer
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -1145,7 +1158,25 @@ paths:
           minimum: 1
           maximum: 300
           default: 60
+      - name: client_id
+        in: query
+        description: The 2025 alarm's client id (UUID).
+        schema:
+          type: string
+      - name: poll_sequence
+        in: query
+        description: The 2025 polling sequence number, starting at 1. Status planned, issue #49.
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
       responses:
+        '429':
+          description: '`poll_limit_exceeded` (2025 `POLL_LIMIT_EXCEEDED`): `poll_sequence` is above `max_polls`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1416,6 +1447,60 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/ws/kernels/{kernel_id}:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Events
+      operationId: syncWebSocket
+      x-darkpyonix-handoff: kernel
+      summary: 2025 WebSocket synchronization (cells, history, locks, focus, execution)
+      description: 'The 2025 `/ws/kernels/{kernel_id}?token={token}`, restored by user decision 2026-10-03
+
+        (INTENT D19, SPEC FR-S9, PROTOCOL §5). The manager checks the token and the permission, then
+
+        hands the connection to the kernel (SPEC FR-M6). The kernel answers the upgrade with `101` and
+
+        speaks the 2025 messages: `request_code`, `request_history`, `request_locks`, `start_typing`,
+
+        `cell_focus`, `cell_blur` in; `code_data`, `history_data`, `locks_data`, `users_focus_data`,
+
+        `other_user_focus`, `other_user_blur`, `cell_locked`, `cell_unlocked_with_code`,
+
+        `execution_started`, `execution_output`, `execution_complete`, `execution_error`,
+
+        `execution_interrupted` out. Status: planned, issue #49.
+
+        '
+      security:
+      - bearerAuth: []
+      - tokenQuery: []
+      parameters:
+      - name: nickname
+        in: query
+        description: Device name; the same token may be used by several devices (2025 `?nickname=`).
+        schema:
+          type: string
+          maxLength: 64
+      - name: client_id
+        in: query
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,64}$
+      responses:
+        '101':
+          description: Switching Protocols; the kernel speaks the 2025 sync messages (PROTOCOL §5).
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
 components:
   securitySchemes:
     bearerAuth:
@@ -1430,7 +1515,7 @@ components:
       type: apiKey
       in: query
       name: token
-      description: Accepted only on the events stream and on share links.
+      description: Accepted only on the events stream, the WebSocket sync (2025 `/ws/kernels/{kernel_id}?token=`) and share links.
   parameters:
     KernelId:
       name: kernel_id
@@ -1622,14 +1707,16 @@ components:
       type: string
       enum:
       - admin
-      - editor
       - viewer3
       - viewer2
       - viewer1
-      description: '`admin` is the master token. Share permissions follow SPEC FR-A3:
+      description: '`admin` is the master token or a file''s admin token (SPEC FR-A4). Share permissions follow the
 
-        `viewer1` code only; `viewer2` code and run logs; `viewer3` code, run logs and execution; `editor` adds
-        cell editing and locks (FR-S8).
+        2025 design (SPEC FR-A3): `viewer1` code only; `viewer2` code and run logs; `viewer3` code, run logs
+
+        and execution. Write access (2025 `user_permission: "write"`: cell edits, locks, runs) is `viewer3`
+
+        and `admin`. The `editor` tier is removed by user decision 2026-10-03 (INTENT D18).
 
 
         A share token is scoped to one kernel: addressing any other kernel answers `404 not_found`, never `403`.
@@ -1640,7 +1727,22 @@ components:
       - viewer1
       - viewer2
       - viewer3
-      - editor
+    UserPermission:
+      type: string
+      enum:
+      - write
+      default: write
+      description: 'The 2025 request argument `user_permission: "write"` (lock, unlock, execution requests).
+
+        The client states that it asks for write access. The manager checks that the token grants it
+
+        (`viewer3`, `admin`) and answers `403 forbidden` otherwise (2025 `INSUFFICIENT_PERMISSION`,
+
+        "Read-only access, cannot edit cells"). The token decides, not this field: a viewer token is
+
+        refused even when the field is present. SPEC FR-A3, FR-S8. Status: planned, issue #49.
+
+        '
     KernelStatus:
       type: string
       enum:
@@ -1735,6 +1837,8 @@ components:
       required:
       - mode
       properties:
+        user_permission:
+          $ref: '#/components/schemas/UserPermission'
         mode:
           type: string
           enum:
@@ -1923,6 +2027,7 @@ components:
               - conflict
               - locked
               - password_not_set
+              - poll_limit_exceeded
               - already_initialized
               - token_revoked
             message:
@@ -2286,6 +2391,8 @@ components:
     CellEdit:
       type: object
       properties:
+        user_permission:
+          $ref: '#/components/schemas/UserPermission'
         type:
           type: string
           description: Written into the marker as given; the cell's canonical `type` is derived from it.
@@ -2301,6 +2408,8 @@ components:
           type: object
           additionalProperties: true
     WaitResult:
+      description: Fields `poll_sequence`, `next_poll_sequence` and `auto_repoll` restore the 2025 alarm response
+        (SPEC FR-S7). Status planned, issue #49.
       type: object
       required:
       - status
@@ -2319,6 +2428,25 @@ components:
           - object
           - 'null'
           additionalProperties: true
+        poll_sequence:
+          type: integer
+        next_poll_sequence:
+          type:
+          - integer
+          - 'null'
+        auto_repoll:
+          type:
+          - object
+          - 'null'
+          properties:
+            enabled:
+              type: boolean
+            next_poll_url:
+              type: string
+            recommended_delay:
+              type: integer
+            max_polls:
+              type: integer
         next:
           type:
           - string

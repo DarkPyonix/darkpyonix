@@ -246,6 +246,12 @@ classDiagram
             +send(event Event) None
             +close() None
         }
+        class WebSocketSync {
+            <<2025 WS messages>>
+            +stream AdoptedStream
+            +on_message(msg dict) None
+            +translate(event Event, label StreamLabel) dict|None
+        }
         class StreamLabel {
             +permission Permission
             +client_id str|None
@@ -300,6 +306,8 @@ classDiagram
     HandoffServer ..> ControlServer : same DKP/1 frames + SCM_RIGHTS
     Kernel *-- HandoffServer
     AdoptedStream *-- StreamLabel
+    WebSocketSync --> AdoptedStream : kind ws
+    WebSocketSync ..> ClientSession : start_typing / cell_focus as doc.* requests
     AdoptedStream ..> EventLog : replay and live events
     ControlServer ..> EventLog : replay
     ClientSession ..> Executor : run / interrupt / restart

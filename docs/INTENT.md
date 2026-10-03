@@ -54,9 +54,13 @@ DarkPyonix 전체는 **에이전트 대화가 먼저이고, 필요할 때 코딩
 
 매니저는 커널을 찾을 때 루프백 멀티캐스트 그룹에 질의 데이터그램을 보내고, 살아 있는 커널이 저마다 응답합니다(PROTOCOL §2). 커널이 상태를 바꿀 때도 같은 그룹에 알립니다. 멀티캐스트를 막는 환경(일부 컨테이너, Windows 루프백 설정)을 위해 커널은 `~/.darkpyonix/kernels/` 아래에 비밀값이 없는 등록 파일도 남기고, 매니저는 둘을 합칩니다. 등록 파일은 발견의 보조 수단이지 신뢰의 근거가 아닙니다.
 
-### D5. 같은 OS 사용자를 믿습니다
+### D5. 매니저가 인증하고, 커널은 매니저를 믿습니다
 
-커널 제어 채널의 인증은 사용자 키(`~/.darkpyonix/user.key`, 권한 0600)로 하는 HMAC 도전-응답입니다(PROTOCOL §3). 같은 OS 사용자의 매니저라면 어느 것이든 커널에 붙을 수 있고, 다른 사용자는 붙을 수 없습니다. 발견 응답에는 비밀값이 없습니다. 커널은 제어 채널을 `127.0.0.1`에만 엽니다. 외부 접근은 항상 매니저를 거칩니다.
+사용자(2026-10-03): "커널 매니저가 이미 권한 검사를 하고 넘겨줬는데 커널이 왜 검증해야 할게 많나".
+
+- **클라이언트 인증과 권한 검사는 매니저가 합니다.** 토큰, 비밀번호(D17), 권한(D18)을 매니저가 모두 확인합니다. 커널은 다시 검사하지 않습니다. 커널이 받는 권한 라벨은 무엇을 보낼지 거르는 데만 씁니다(D6).
+- **커널은 바깥에 열리지 않습니다.** 제어 채널은 `127.0.0.1`(POSIX는 넘김용 유닉스 도메인 소켓도)에만 엽니다. 외부 접근은 항상 매니저를 거칩니다. 발견 응답에는 비밀값이 없습니다.
+- **매니저와 커널 사이 인증은 리더 결정, 사용자 확인 대기입니다.** 지금 구현은 사용자 키(`~/.darkpyonix/user.key`, 권한 0600)로 하는 HMAC 도전-응답입니다(PROTOCOL §3.2). 같은 OS 사용자의 매니저라면 어느 것이든 커널에 붙고, 다른 사용자는 붙지 못합니다. 사용자는 이 방식을 정한 적이 없습니다(PROJECT Q12).
 
 ### D6. 짧은 요청은 매니저가 DKP/1로 보내고, 오래 열린 스트림은 소켓째 커널에 넘깁니다
 
@@ -144,6 +148,32 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 - **매니저만 압니다.** 비밀번호와 토큰은 전용 매니저의 `manager.db`에 해시로만 둡니다. 커널은 인증하지 않습니다(D5).
 - **경로 표기.** 2025 문서는 같은 기능을 요약표(`/auth`, `/auth/password`, `/auth/tokens/master`, `/auth/tokens/shared/{token_type}`)와 상세 페이지(`/kernels/{kernel_id}/tokens/initial`, `/kernels/{kernel_id}/password`, `/kernels/{kernel_id}/tokens/auth`, `/kernels/{kernel_id}/tokens/{token}/verify`, `/kernels/{kernel_id}/tokens/share`) 두 가지로 적었습니다. 상세가 본문을 가지고 있고 파일 단위 비밀번호와 맞으므로 상세 모양을 `/api` 아래에 둡니다(D16). 이 대응과, 전용 매니저 전체 마스터 토큰(SPEC FR-M4)을 함께 두는 것은 리더 결정, 사용자 확인 대기입니다(PROJECT Q10).
 
+### D18. 권한은 2025 모델 `viewer1`·`viewer2`·`viewer3`·`admin`과 `user_permission: "write"`입니다
+
+사용자 결정(2026-10-03): "원 설계대로 복구". 2025 설계의 권한입니다(`설계초안/` Request/Response "tokens/auth" 페이지).
+
+| 권한 | 2025 정의 |
+|---|---|
+| `viewer1` | 코드만 적혀 있고 History 없음, 코드 실행 불가 |
+| `viewer2` | 코드 O, History O, 코드 실행 불가 |
+| `viewer3` | 코드 O, History O, 코드 실행 가능 |
+| `admin` | 전부(공유 관리 포함) |
+
+- **`user_permission: "write"`.** 2025 요청 시그니처는 잠금, 잠금 해제, 실행에 `user_permission: str = "write"`를, 공유 설정에 `user_permission: str = "admin"`을 둡니다. 2025 잠금 오류는 `403 INSUFFICIENT_PERMISSION`, "Read-only access, cannot edit cells"입니다. 그래서 요청은 `user_permission: "write"`를 실을 수 있고, 매니저는 토큰이 쓰기를 허락하는지 봅니다. 결정은 토큰이 합니다. 쓰기를 허락하지 않는 토큰은 이 인자가 있어도 거절됩니다.
+- **쓰기는 `viewer3`와 `admin`입니다.** 2025에서 실행에 `write`가 필요하고 `viewer3`가 실행할 수 있으므로, `write`를 가진 쪽은 `viewer3`와 `admin`입니다. 그래서 셀 편집과 잠금도 `viewer3`부터입니다. 이 대응은 2025 문서에서 끌어낸 것이라 사용자 확인 대기입니다(PROJECT Q13).
+- **`editor` 등급은 지웁니다.** 리더가 사용자 승인 없이 더한 등급입니다(§5). D16은 계약을 더하기만 하라고 하지만, 승인 없이 들어간 값을 되돌리는 일이고 아직 1.0 전이라 지웁니다.
+- **커널은 권한을 다시 검사하지 않습니다(D5).** 커널의 `doc.*` 요청 권한 검사와 `forbidden` 오류는 지웁니다.
+
+### D19. 협업 동기화는 2025 WebSocket 명세를 따릅니다
+
+사용자 결정(2026-10-03): "원 설계대로 복구". 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`을 `/api/ws/kernels/{kernel_id}`(D16)로 되살립니다. 메시지 이름과 필드는 2025 그대로입니다(PROTOCOL §5).
+
+- **받는 메시지:** `request_code`, `request_history`, `request_locks`, `start_typing`, `cell_focus`. 2025 명세에는 다른 사용자의 블러 알림(`other_user_blur`)이 있지만 그것을 일으키는 송신 메시지가 없어서 `cell_blur`를 더합니다.
+- **보내는 메시지:** `code_data`, `history_data`, `locks_data`, `users_focus_data`, `other_user_focus`, `other_user_blur`, `cell_locked`, `cell_unlocked_with_code`, `execution_started`, `execution_output`, `execution_complete`, `execution_error`, `execution_interrupted`.
+- **WebSocket은 커널이 받습니다.** 매니저가 토큰과 권한을 확인한 뒤 연결을 넘깁니다(D6). 커널은 표준 라이브러리(`hashlib`, `base64`, `struct`)로 RFC 6455를 구현합니다. 그래서 매니저가 죽어도 동기화가 이어집니다.
+- **편집, 잠금 해제, 실행, 인터럽트는 2025처럼 REST입니다.** 2025 명세도 "클라이언트 → HTTP POST /kernels/{kernel_id}/execute → 서버가 실행 과정을 WebSocket으로 모든 클라이언트에 브로드캐스트"였습니다. 이 요청들은 매니저가 받아 DKP/1로 커널에 보내고, 커널이 WebSocket으로 퍼뜨립니다.
+- **SSE 이벤트 스트림은 남깁니다.** `EventSource`만 쓸 수 있는 클라이언트와 CLI를 위해서이고, 계약을 지우지 않는다는 D16과도 맞습니다. 2025 이름이 없는 문서 이벤트(셀 생성·수정·삭제·이동, 바깥 편집 다시 읽기)는 WebSocket에서도 `{"type": "event", "event": …}`로 PROTOCOL §3.4·§4 이벤트를 그대로 싣습니다.
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
@@ -158,6 +188,8 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 | FastAPI 매니저 + nginx 앞단 | 사용자가 nginx 설정을 떠안고, 에이전트 CLI가 부를 때마다 파이썬 인터프리터를 띄워야 합니다. Rust 단일 바이너리로 대체했습니다(D10, 2026-10-03) |
 | 허브 전체를 Rust 바이너리 하나로 VPS에서 운영(D15 이전 SPEC §10) | 사용자는 DNS가 있는 Cloudflare의 Workers를 원했고, 허브의 대부분은 Workers로 충분히 가볍습니다. UDP가 필요한 릴레이만 따로 둡니다(D15) |
 | 허브가 발급하는 계정 토큰과 가입 비밀값으로 계정 만들기 | 사용자 지적(2026-10-03): 계정 생성은 외부 로그인이어야 했습니다. GitHub 로그인으로 바꿨습니다(D15, SPEC FR-H6) |
+| `editor` 공유 권한(2026-10-03까지의 SPEC FR-S8) | 리더가 사용자 승인 없이 더한 등급입니다. 2025 모델은 `viewer1`·`viewer2`·`viewer3`·`admin`과 `user_permission: "write"`입니다(D18) |
+| 커널이 요청마다 권한을 다시 검사(2026-10-03까지의 PROTOCOL §4 `forbidden`) | 매니저가 이미 검사했습니다. 사용자: "커널 매니저가 이미 권한 검사를 하고 넘겨줬는데 커널이 왜 검증해야 할게 많나"(D5) |
 | 허브에 OpenAI 로그인("Sign in with ChatGPT") | 원격 호스팅은 OpenAI 승인이 필요하고, 사용자 결정으로 OpenAI 로그인은 ember server에서만 합니다(D15) |
 | ember server가 받은 OpenAI ID 토큰을 허브가 받아 계정 확인 | 그 토큰의 audience는 설치마다 다른 ember의 `client_id`라 허브가 검사할 수 없고, 검사하지 않으면 다른 앱용 토큰으로 계정을 가로챌 수 있습니다(D15) |
 | workers-rs로 허브 API 작성 | wasm 빌드 도구와 큰 번들, 덜 성숙한 D1 바인딩. iroh에서 재사용할 부분이 작습니다(D15) |
@@ -176,3 +208,8 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 | 스트림 연결 | 매니저가 인증 뒤 클라이언트 소켓을 커널에 넘김(2025 SPEC, PoC) | 매니저가 모든 스트림을 중계하고 FD 전달을 "폐기한 대안"으로 둠 | 복구(D6). 코드는 구현 대기(#47) |
 | 인증 | 파일마다 비밀번호, 초기 토큰, 로그인, 마스터·공유 토큰 재설정(2025 API 명세) | 비밀번호 계열을 빼고 매니저 마스터 토큰만 둠 | 복구(D17). 코드는 구현 대기(#48) |
 | 토큰 수명 | 커널이 지워져도 토큰 보관, 파일이 지워지면 삭제 | 규칙 없음 | 복구(D17, SPEC FR-A5). 구현 대기(#48) |
+| 권한 | `viewer1`·`viewer2`·`viewer3`·`admin`, `user_permission: "write"` | `editor` 등급을 더함 | 복구(D18). 구현 대기(#49) |
+| 커널의 권한 재검사 | 매니저가 검사하고 넘김 | 커널이 `doc.*`마다 `client.permission`을 다시 검사 | 지움(D5, D18). 구현 대기(#49) |
+| 협업 동기화 | 2025 WebSocket 명세(`/ws/kernels/{kernel_id}`) | SSE와 새 이벤트 이름으로 대체 | 복구(D19). SSE는 남김. 구현 대기(#49) |
+| 매니저-커널 인증 | 정한 적 없음 | `user.key` HMAC 도전-응답 | 리더 결정, 사용자 확인 대기(D5, PROJECT Q12) |
+

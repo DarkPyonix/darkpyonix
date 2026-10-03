@@ -271,25 +271,28 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ### FR-A1 커널 인증 — `Done`
 PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음 쓰는 쪽이 0600으로 원자적으로 만듭니다.
+- 상태 메모 (2026-10-03): 이 방식은 리더 결정, 사용자 확인 대기입니다(INTENT D5, PROJECT Q12). 클라이언트의 인증과 권한 검사는 매니저가 하고, 커널은 매니저를 믿습니다.
 - 테스트: `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`
 
-### FR-A2 매니저 토큰 — `Done`
-모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 세 연산(초기 토큰 발급, 비밀번호 로그인, 마스터 토큰 재설정, FR-A4)만 `Authorization` 없이 열립니다. 뒤의 둘은 본문의 비밀번호로 인증합니다.
+### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
+모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 세 연산(초기 토큰 발급, 비밀번호 로그인, 마스터 토큰 재설정, FR-A4)만 `Authorization` 없이 열립니다. 뒤의 둘은 본문의 비밀번호로 인증합니다.
 - 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
 
-### FR-A3 공유 권한 — `Done`
-공유 토큰은 커널(파일)마다 발급하고 권한은 아래와 같습니다(2025 설계 유지).
+### FR-A3 공유 권한 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #49)
+INTENT D18. 사용자 결정: "원 설계대로 복구". 공유 토큰은 커널(파일)마다 발급하고 권한은 2025 설계의 넷입니다. 2025 요청 인자 `user_permission: "write"`가 쓰기를 뜻하고, 쓰기는 `viewer3`와 `admin`입니다.
 
-| 권한 | 셀 코드 | 실행 기록·출력 | 실행·인터럽트 | 종료·공유 관리 |
+| 권한 | 셀 코드 | 실행 기록·출력 | 쓰기(`user_permission: "write"`): 실행·인터럽트·셀 편집·잠금 | 종료·공유 관리 |
 |---|---|---|---|---|
 | `viewer1` | ✓ | | | |
 | `viewer2` | ✓ | ✓ | | |
 | `viewer3` | ✓ | ✓ | ✓ | |
-| `editor` | ✓ (편집·잠금 포함, FR-S8) | ✓ | ✓ | |
-| `admin`(마스터) | ✓ | ✓ | ✓ | ✓ |
+| `admin`(마스터, 파일 관리자 토큰) | ✓ | ✓ | ✓ | ✓ |
 
-작업별 최소 권한: 커널·실행 기록 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다.
-- 테스트: Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`)
+작업별 최소 권한: 커널·문서 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소·셀 생성·수정·삭제·이동·잠금·해제 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 접속자 표시와 포커스는 `viewer1`부터입니다. 쓰기 요청은 `user_permission: "write"`를 실을 수 있지만, 허락은 토큰이 정합니다. 쓰기가 없는 토큰은 `403 forbidden`(2025 `INSUFFICIENT_PERMISSION`, "Read-only access, cannot edit cells")입니다. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다. 권한 검사는 매니저만 합니다(INTENT D5).
+- `editor` 등급은 지웠습니다. 리더가 사용자 승인 없이 더한 등급입니다(INTENT §5). 셀 편집을 `viewer3`에 여는 대응은 2025 문서에서 끌어낸 것이라 사용자 확인 대기입니다(PROJECT Q13).
+- 수용 기준: 위 표대로 각 권한이 허락되거나 `403`을 받습니다. `viewer2` 토큰으로 `user_permission: "write"`를 실은 잠금 요청은 `403`입니다. `editor`로 공유를 만들면 `400`입니다.
+- 테스트: Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`). 계획: `test_fr_a3_write_needs_viewer3`, `test_fr_a3_user_permission_write_does_not_raise_a_viewer_token`, `test_fr_a3_editor_is_not_a_permission`
+- 상태 메모: 위 Rust 테스트는 `editor`가 있던 표를 검증합니다. 새 표로 고친 뒤 통과해야 `Done`입니다.
 
 ### FR-A4 비밀번호 인증 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
 INTENT D17. 사용자 결정: "원 설계대로 복구". 전용 매니저는 파일(커널 ID)마다 비밀번호 하나, 관리자(마스터) 토큰, 공유 토큰을 둡니다. 2025 설계는 토큰을 `File`에 두었습니다(`class File: kernel_id, tokens, cells`). 임시 매니저는 이 연산에 `403 forbidden`으로 답합니다.
@@ -322,7 +325,7 @@ INTENT D17. 사용자 결정: "원 설계대로 복구". 전용 매니저는 파
 
 ## 10a. 협업 문서 (S)
 
-한 커널(=파일)에 여러 클라이언트가 동시에 붙습니다. VS Code 확장, IntelliJ, ash, Ember 대화 화면, 에이전트가 함께 붙을 수 있습니다. 2025 설계의 셀 동기화, 셀 잠금, 포커스, 실행 알림, 알람을 이어받습니다(`설계초안/`의 WS 명세). 커널이 이 상태를 들고 있습니다. 매니저는 언제든 사라질 수 있고, 같은 파일에 서로 다른 매니저(로컬 임시 매니저와 전용 매니저)로 붙은 클라이언트도 같은 상태를 봐야 하기 때문입니다.
+한 커널(=파일)에 여러 클라이언트가 동시에 붙습니다. VS Code 확장, IntelliJ, ash, Ember 대화 화면, 에이전트가 함께 붙을 수 있습니다. 2025 설계의 셀 동기화, 셀 잠금, 포커스, 실행 알림, 알람을 이어받습니다(`설계초안/`의 WS 명세). 2025 WebSocket 동기화 자체도 되살립니다(FR-S9, 사용자 결정 2026-10-03). 커널이 이 상태를 들고 있습니다. 매니저는 언제든 사라질 수 있고, 같은 파일에 서로 다른 매니저(로컬 임시 매니저와 전용 매니저)로 붙은 클라이언트도 같은 상태를 봐야 하기 때문입니다.
 
 ### FR-S1 공유 문서 상태 — `Done`
 커널은 파일을 파싱한 문서(셀 목록)를 메모리에 두고 문서 버전 `doc_version`을 관리합니다. `doc_version`은 셀 생성·수정·삭제·이동과 바깥 편집으로 다시 읽기(`doc.reloaded`)에서만 1 늘어나고, 잠금·해제·충돌 표시·접속자 이벤트에서는 늘지 않습니다(그 이벤트들도 현재 `doc_version`을 담습니다, PROTOCOL §4). 셀마다 커널 수명 동안 바뀌지 않는 `cell_id`를 둡니다. 파일에 `# @id`가 있으면 그 값을 쓰고, 없으면 `c_<hex>`를 만들되 파일에는 쓰지 않습니다. 첫 동기화 스냅숏(`GET /kernels/{id}/document`)에는 셀(`cell_id`, 셀별 `version`, 소스, 최신 출력), 잠금, 접속자, `doc_version`, 그리고 `seq`가 함께 들어 있습니다. `seq`는 **스냅숏에 이미 반영된 마지막 이벤트의 번호**이고, 클라이언트는 `since=seq`로 구독해 `seq`보다 큰 이벤트만 적용합니다. 커널은 상태 변경·이벤트 발행·스냅숏을 한 잠금 안에서 하므로, 스냅숏과 경쟁한 편집은 빠지지도 두 번 적용되지도 않습니다. 셀의 `source`는 파서가 낸 본문 그대로(다음 표식 앞의 빈 줄 포함)이고, `type`은 정규 타입, `raw_type`은 표식에 쓰인 타입 원문(없으면 `null`)입니다.
@@ -356,16 +359,27 @@ INTENT D17. 사용자 결정: "원 설계대로 복구". 전용 매니저는 파
 `run.queued`, `run.started`, `run.finished`, `cell.*` 이벤트와 실행 기록 메타데이터에 실행을 요청한 클라이언트(`started_by`: client_id, 사용자, 기기)를 넣습니다. 인터럽트하면 `interrupted_by`도 넣습니다(2025 `execution_started.started_by`, `execution_interrupted.interrupted_by`). 셀을 실행하는 요청에는 `cell_ids`를 쓸 수 있습니다(인덱스 `cells`와 둘 중 하나). `run.started`는 `cells`와 나란한 `cell_ids`를, `cell.*`·`output`·`output.clear`는 공유 문서의 `cell_id`를 담아, 실행 중에 셀이 옮겨져도 출력이 맞는 셀로 갑니다.
 - 테스트: `test_fr_s6_runs_are_attributed`, `test_fr_s6_run_and_output_events_carry_cell_ids`, `test_fr_s6_output_clear_carries_cell_id`
 
-### FR-S7 알람 — `Done`
+### FR-S7 알람 — `Agreed` (2025 알람 필드 복구, 구현 대기 #47, #49)
 SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, 웹훅 대체)를 위해 롱폴링을 둡니다. `GET /kernels/{id}/runs/{run_ref}/wait?timeout=`는 그 실행이 끝나면 바로, 아니면 `timeout`(기본 60초, 최대 300초) 뒤에 돌려줍니다. 응답은 끝났을 때 실행 요약, 아직이면 `status: running`과 진행 정보이고, 다시 부를 때 쓸 `next` 정보가 들어 있습니다(2025 `executions/{cell_id}/wait`의 timeout·재폴링 모델). 실행이 끝나면 `run.finished` 이벤트가 모든 구독자에게 가므로, Ember는 이 이벤트로 휴대폰 푸시를 보냅니다.
-- 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`
+- 2025 알람 필드(복구, 구현 대기 #49): 요청은 `client_id`와 `poll_sequence`(기본 1)를 받고, 응답은 `poll_sequence`, `next_poll_sequence`, `auto_repoll {enabled, next_poll_url, recommended_delay, max_polls}`를 담습니다. `poll_sequence`가 `max_polls`(2025 값 100)를 넘으면 `429 poll_limit_exceeded`(2025 `POLL_LIMIT_EXCEEDED`)입니다.
+- 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`, 계획 `test_fr_s7_wait_carries_2025_poll_fields`
 - 넘김: 이 롱폴링은 매니저가 인증한 뒤 커널에 넘깁니다(FR-M6, `kind: "wait"`). 커널이 응답과 `next` 정보를 직접 씁니다. 구현 대기(#47).
 - 상태 메모: 커널의 `runs.wait`(끝나면 바로, 아니면 `timeout` 뒤)를 검증했습니다. 지금 구현에서는 HTTP 응답의 `next` 정보를 매니저가 붙이고, Rust `test_fr_s7_wait_returns_on_finish_or_timeout`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
 
-### FR-S8 권한 — `Done`
-셀 편집(FR-S2)과 잠금(FR-S3)은 `editor` 이상만 할 수 있습니다. `editor`는 `viewer3`(실행 가능)에 셀 편집을 더한 공유 권한이고, 2025 설계의 `user_permission: "write"`에 해당합니다. 접속자 표시와 포커스(FR-S4)는 `viewer1`부터 할 수 있습니다. FR-A3 표에 `editor`를 더합니다.
-- 테스트: `test_fr_a3_permission_matrix` (FR-A3과 공유), `test_fr_s8_edit_and_lock_need_editor`, `test_fr_s1_s2_s3_s5_s8_two_clients_edit_converge_save_and_run`
-- 상태 메모: 커널의 권한 검사(`client.permission`)를 검증했습니다. 매니저 쪽은 Rust `test_fr_a3_permission_matrix`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`)와 `test_fr_s8_permission_matrix_for_collaboration`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+### FR-S8 권한 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #49)
+셀 편집(FR-S2)과 잠금(FR-S3)은 쓰기 권한(2025 `user_permission: "write"`, `viewer3`와 `admin`)이 있어야 합니다. 접속자 표시와 포커스(FR-S4)는 `viewer1`부터입니다(FR-A3). 이 검사는 매니저만 합니다. 커널은 `client.permission`을 검사하지 않고 `forbidden`을 내지 않습니다(INTENT D5, D18). 사용자(2026-10-03): "커널 매니저가 이미 권한 검사를 하고 넘겨줬는데 커널이 왜 검증해야 할게 많나".
+- 수용 기준: `viewer2` 토큰의 셀 수정·잠금은 매니저가 `403`으로 거절하고 커널에 닿지 않습니다. 커널에 `permission: "viewer1"` 라벨로 `doc.cell.update`를 직접 보내도 커널은 권한 오류를 내지 않습니다.
+- 테스트(계획): `test_fr_s8_write_is_checked_by_the_manager`, `test_fr_s8_kernel_does_not_check_permission`. 지금의 `test_fr_s8_edit_and_lock_need_editor`(커널 쪽 검사)는 지웁니다.
+
+### FR-S9 2025 WebSocket 동기화 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #49)
+INTENT D19, PROTOCOL §5. 사용자 결정: "원 설계대로 복구". `GET /api/ws/kernels/{kernel_id}?token=&nickname=&client_id=`(2025 `/ws/kernels/{kernel_id}?token={token}`)는 매니저가 토큰과 권한을 확인한 뒤 커널에 넘깁니다(FR-M6). 커널은 `101`로 업그레이드하고 2025 메시지를 주고받습니다.
+- 받는 메시지: `request_code` → `code_data`, `request_history` → `history_data`, `request_locks` → `locks_data`, `start_typing` → 잠금과 `cell_locked`, `cell_focus` → `other_user_focus`, `cell_blur` → `other_user_blur`(2025에 송신 메시지가 없어 더함).
+- 보내는 메시지: 위 응답과 `users_focus_data`(접속 직후), `cell_unlocked_with_code`, `execution_started`, `execution_output`, `execution_complete`, `execution_error`, `execution_interrupted`. 2025 이름이 없는 이벤트는 `{"type": "event", "event": …}`로 그대로 싣습니다.
+- 2025 메시지의 `user_id`는 커널이 쓰지 않습니다. 누구인지는 매니저가 붙인 라벨(`client_id`, `user`, `nickname`)로 정합니다.
+- 권한 라벨로 거릅니다(FR-K9). `viewer1`은 `history_data`가 빈 목록이고 `execution_output`과 출력이 담긴 필드를 받지 않습니다. `viewer1`·`viewer2`의 `start_typing`은 잠그지 않고 `{"type": "error", "error": "INSUFFICIENT_PERMISSION"}`를 돌려받습니다.
+- 편집, 잠금 해제(최종 소스), 실행, 인터럽트는 2025처럼 REST(매니저)이고, 결과는 WebSocket으로 퍼집니다.
+- 수용 기준: 두 클라이언트가 WebSocket으로 붙은 뒤 한쪽이 `start_typing`하면 다른 쪽이 `cell_locked`를 받고, REST로 잠금을 풀며 소스를 보내면 `cell_unlocked_with_code`를 받습니다. REST로 실행하면 두 쪽 모두 `execution_started`, `execution_output`, `execution_complete`를 받습니다. 매니저를 `SIGKILL`로 죽여도(평문 연결) 다음 실행의 메시지가 옵니다. `viewer1` 클라이언트는 출력을 받지 않습니다.
+- 테스트(계획): `test_fr_s9_ws_initial_sync_code_history_locks`, `test_fr_s9_ws_typing_locks_and_unlock_with_code`, `test_fr_s9_ws_execution_broadcast`, `test_fr_s9_ws_survives_manager_kill`, `test_fr_s9_ws_viewer1_gets_no_outputs`
 
 ## 10. 허브 (H)
 
