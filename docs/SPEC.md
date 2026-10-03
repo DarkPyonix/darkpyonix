@@ -230,7 +230,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 - 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`, 파이썬 시제품), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`(등록 파일을 지우므로 #50에서 `test_fr_m3_url_and_token_are_printed_on_stdout`, `test_fr_m3_writes_no_registry_file`로 바꿉니다)
 
 ### FR-M4 전용 모드 — `Done`
-`darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다. 2025 비밀번호 인증과 파일 단위 토큰(FR-A4), 토큰 수명 규칙(FR-A5)도 전용 매니저가 맡습니다(구현 대기 #48).
+`darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다. 2025 비밀번호 로그인과 마스터·공유 토큰 재설정은 매니저 단위이고 전용 매니저가 맡습니다(FR-A4, 구현 대기 #48). 커널 접근 토큰(FR-A6)은 매니저가 아니라 커널에 묶입니다.
 - 테스트: Rust `test_fr_m4_dedicated_manager_never_idles_and_requires_token`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m4_shares_are_stored_hashed_and_survive_restart`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`)
 
 ### FR-M5 매니저 여러 개 공존 — `Done`
@@ -292,7 +292,7 @@ INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 �
 - 테스트(계획): `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`. 지금의 `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`는 지웁니다(#55).
 
 ### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
-모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 세 연산(초기 토큰 발급, 비밀번호 로그인, 마스터 토큰 재설정, FR-A4)만 `Authorization` 없이 열립니다. 뒤의 둘은 본문의 비밀번호로 인증합니다.
+모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 넷만 `Authorization: Bearer` 없이 열립니다. 초기 토큰 발급(FR-A6)은 인증이 없고, 매니저 로그인 `GET /api/auth`와 마스터 토큰 재설정 `PUT /api/auth/tokens/master`(FR-A4)는 `Authorization: Basic`의 비밀번호로, 커널 로그인 `POST /api/kernels/{kernel_id}/tokens/auth`(FR-A6)는 본문의 비밀번호로 인증합니다.
 - 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`, 등록 파일 제거와 함께 #50에서 `test_fr_a2_cli_uses_the_token_from_stdout`으로 바꿈)
 
 ### FR-A3 공유 권한 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #49)
@@ -311,34 +311,49 @@ INTENT D18. 사용자 결정: "원 설계대로 복구". 공유 토큰은 커널
 - 테스트: Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`). 계획: `test_fr_a3_write_needs_viewer3`, `test_fr_a3_user_permission_write_does_not_raise_a_viewer_token`, `test_fr_a3_editor_is_not_a_permission`
 - 상태 메모: 위 Rust 테스트는 `editor`가 있던 표를 검증합니다. 새 표로 고친 뒤 통과해야 `Done`입니다.
 
-### FR-A4 비밀번호 인증 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
-INTENT D17. 사용자 결정: "원 설계대로 복구". 전용 매니저는 파일(커널 ID)마다 비밀번호 하나, 관리자(마스터) 토큰, 공유 토큰을 둡니다. 2025 설계는 토큰을 `File`에 두었습니다(`class File: kernel_id, tokens, cells`). 임시 매니저는 이 연산에 `403 forbidden`으로 답합니다.
+### FR-A4 매니저 비밀번호와 마스터 토큰 (2025 복구) — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #48)
+INTENT D17. 사용자 결정(2026-10-03): "원 설계대로 복구". 범위는 사용자 확인(2026-10-04): "매니저 단위 맞아." 전용 매니저는 비밀번호 하나와 마스터 토큰 하나를 둡니다. 2025 API 명세서 요약표의 네 기능이고, 경로는 버전 없이 `/api` 아래입니다(INTENT D16). 임시 매니저는 이 넷에 `403 forbidden`으로 답합니다. 임시 매니저에는 비밀번호가 없고, 토큰은 자기를 띄운 프로세스에게 표준 출력으로만 알리기 때문입니다(FR-M3).
 
-| 2025 기능 | 2025 경로(요약표 / 상세) | 이 API | 인증 | 결과 |
+| 2025 기능 | 2025 경로와 설명 | 이 API | 인증 | 결과 |
 |---|---|---|---|---|
-| 초기 토큰 | 상세 `POST /kernels/{kernel_id}/tokens/initial` | `POST /api/kernels/{kernel_id}/tokens/initial` | 없음 | `{token, permission: "admin", password_required: true}` |
-| 비밀번호 재설정 | `PUT /auth/password` / 상세 `PUT /kernels/{kernel_id}/password` | `PUT /api/kernels/{kernel_id}/password` | 초기 토큰(첫 설정) 또는 그 파일의 관리자 토큰 | `{message, kernel_id}` |
-| 로그인 | `GET /auth` / 상세 `POST /kernels/{kernel_id}/tokens/auth` | `POST /api/kernels/{kernel_id}/tokens/auth` | 본문의 비밀번호 | `{token, kernel_id, permission}` |
-| 마스터 토큰 재설정 | `PUT /auth/tokens/master` | `PUT /api/kernels/{kernel_id}/tokens/master` | 본문의 비밀번호 | 새 관리자 토큰. 이전 관리자 토큰은 `401` |
-| 공유 토큰 재설정 | `PUT /auth/tokens/shared/{token_type}` | `PUT /api/kernels/{kernel_id}/tokens/shared/{token_type}` | 그 파일의 관리자 토큰 | 그 타입의 공유를 모두 거두고 새 공유 토큰 하나 |
-| 공유 토큰 발급 | 상세 `POST /kernels/{kernel_id}/tokens/share` | `POST /api/kernels/{kernel_id}/shares`(이미 있음) | 관리자 토큰 | `{share_id, token, url, permission}` |
-| 토큰 확인 | 상세 `GET /kernels/{kernel_id}/tokens/{token}/verify` | `GET /api/kernels/{kernel_id}/tokens/{token}/verify` | 같은 토큰 | `{valid, kernel_id, permission, blacklisted, password_set}` |
+| 로그인 | `GET /auth`, "비밀번호를 세션에 넣어서 진행" | `GET /api/auth` | 비밀번호(`Authorization: Basic`, 사용자 이름은 비움) | `{token}`: 이 매니저의 마스터 토큰 |
+| 비밀번호 재설정 | `PUT /auth/password`, "토큰을 인증하고, 새 비밀번호 등록" | `PUT /api/auth/password` | 마스터 토큰. 비밀번호가 아직 없으면 초기 토큰(FR-A6)도 됨 | `{message}` |
+| 마스터 토큰 재설정 | `PUT /auth/tokens/master`, "비밀번호를 인증하고, 새 토큰 발행" | `PUT /api/auth/tokens/master` | 비밀번호(`Authorization: Basic`) | 새 마스터 토큰. 이전 마스터 토큰은 `401` |
+| 공유 토큰 재설정 | `PUT /auth/tokens/shared/{token_type}`, "마스터 토큰을 세션에 넣어 인증하고, 각 타입별 공유 토큰 생성" | `PUT /api/auth/tokens/shared/{token_type}` | 마스터 토큰 | 그 타입의 매니저 공유 토큰을 새로 만들고, 이전 것은 거둠 |
 
-- 2025 문서는 같은 기능을 요약표와 상세 페이지 두 표기로 적었습니다. 상세가 요청·응답 본문을 가지고 있고, 비밀번호가 파일마다라는 것(`PASSWORD_NOT_SET: Password has not been set for this kernel`)과 맞습니다. 그래서 경로는 상세 모양을 `/api` 아래(INTENT D16)에 두고, 상세가 없는 두 재설정은 요약표의 끝 조각을 같은 파일 단위 경로에 붙였습니다. 이 대응은 리더 결정, 사용자 확인 대기입니다(PROJECT Q10).
-- 비밀번호는 솔트를 넣은 느린 해시로, 토큰은 해시로만 `manager.db`에 둡니다. 커널은 비밀번호와 토큰을 모릅니다(INTENT D5).
-- 파일 단위 관리자 토큰은 `admin` 권한이고 그 커널에만 묶입니다. 다른 커널을 가리키면 `404`입니다(공유 토큰과 같은 규칙, FR-A3). 전용 매니저 전체의 마스터 토큰(FR-M4)은 그대로 있습니다.
-- 초기 토큰은 2025 명세 그대로입니다. 커널을 열 때 자격 증명 없이 받고(본문은 2025처럼 `{kernel_id}`를 실을 수 있음), 응답은 `{token, permission: "admin", password_required: true}`입니다. 커널 ID 형식이 틀리면 `400`(2025 `INVALID_KERNEL_ID`)입니다. 발급 횟수, 출발지(루프백), 쓰임새에 제한을 두지 않습니다. 사용자 결정(2026-10-04): "초기 토큰은 애초에 열 때 토큰을 발급했을건데 뭐가 문제야? 토큰이 없으면 연결이 안되잖아. 초기 토큰 발급은 건드리지 마." 리더가 더했던 "한 번만 발급"(`409 already_initialized`)과 "비밀번호 설정에만 씀"은 지웠습니다(PROJECT Q11).
+- 이 마스터 토큰이 전용 매니저의 마스터 토큰(FR-M4)입니다. 하나뿐이고 이 매니저의 모든 커널에 통합니다.
+- 매니저 공유 토큰은 이 매니저로 들어오는 모든 커널에 그 타입의 권한으로 통합니다. 이 매니저에만 있으므로 다른 매니저에서는 통하지 않습니다. 커널 하나에 묶여 어느 매니저로든 통하는 토큰은 커널 접근 토큰입니다(FR-A6).
+- 비밀번호는 솔트를 넣은 느린 해시로, 토큰은 해시로만 그 매니저의 `manager.db`에 둡니다. 커널은 비밀번호와 토큰을 모릅니다(INTENT D5).
+- 2026-10-03 초안의 "파일마다 비밀번호"와 파일 단위 경로(`/api/kernels/{kernel_id}/password`, `/tokens/master`, `/tokens/shared/{token_type}`)는 지웠습니다. 2025 상세 페이지의 `PASSWORD_NOT_SET: Password has not been set for this kernel`은 이제 "이 매니저에 비밀번호가 없음"으로 읽습니다.
+- 리더 결정, 사용자 확인 대기(PROJECT Q15): "세션에 넣어서"를 `Authorization: Basic`으로 읽은 것, 그리고 비밀번호가 이미 있는 매니저에서는 초기 토큰으로 비밀번호를 바꿀 수 없게 한 것(`403`). 뒤의 것이 없으면 인증 없이 받는 초기 토큰(FR-A6)으로 누구나 매니저 비밀번호를 바꿀 수 있습니다.
 - 오류 코드: 2025 `PASSWORD_NOT_SET` → `400 password_not_set`, `INVALID_TOKEN` → `401 unauthorized`, `TOKEN_BLACKLISTED` → `401 token_revoked`, `INSUFFICIENT_PERMISSION` → `403 forbidden`, `KERNEL_NOT_FOUND` → `404 not_found`.
-- 수용 기준: 초기 토큰 → 비밀번호 설정 → 로그인 → 마스터 토큰 재설정 순서가 되고, 재설정 뒤 이전 관리자 토큰은 `401`입니다. 비밀번호 전 로그인은 `400 password_not_set`입니다. 공유 토큰 재설정 뒤 그 타입의 이전 공유 토큰은 `401 token_revoked`이고, 그 토큰으로 연 스트림은 닫힙니다(FR-M6). 임시 매니저는 모두 `403`입니다.
-- 테스트(계획): `test_fr_a4_initial_password_login_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_is_issued_without_credentials_every_time`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_verify_reports_permission_and_revocation`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
+- 수용 기준: 비밀번호가 없는 전용 매니저에서 초기 토큰으로 비밀번호를 정하고, `GET /api/auth`로 마스터 토큰을 받습니다. `PUT /api/auth/tokens/master` 뒤 이전 마스터 토큰은 `401`입니다. 비밀번호가 있는 매니저에서 초기 토큰으로 `PUT /api/auth/password`는 `403`입니다. 비밀번호 전 로그인은 `400 password_not_set`입니다. 비밀번호는 매니저마다 하나라서, 같은 비밀번호로 그 매니저의 어느 커널에도 로그인합니다(FR-A6). 공유 토큰 재설정 뒤 그 타입의 이전 토큰은 `401 token_revoked`이고, 그 토큰으로 연 스트림은 닫힙니다(FR-M6). 임시 매니저는 넷 모두 `403`입니다.
+- 테스트(계획): `test_fr_a4_first_password_login_and_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_cannot_replace_an_existing_password`, `test_fr_a4_one_password_per_manager`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
 
 ### FR-A5 토큰 수명 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
 2025 설계: "커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함", "공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요".
-- 커널을 종료하거나 재시작해도, 매니저를 다시 시작해도 그 파일의 비밀번호, 관리자 토큰, 공유 토큰은 남습니다.
-- 파일이 지워지면 매니저는 그 파일의 비밀번호와 토큰을 모두 지웁니다. 매니저는 `manager.db`에 커널 ID와 함께 경로를 두고, 시작할 때와 그 파일의 토큰을 쓸 때마다 경로가 있는지 확인합니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙으로 지워집니다.
+- 커널을 종료하거나 재시작해도, 매니저를 다시 시작해도 그 커널의 접근 토큰(초기 토큰, 로그인 토큰, 공유 토큰, FR-A6)은 남습니다.
+- 파일이 지워지면 매니저는 그 파일의 토큰을 모두 지웁니다. 매니저는 `manager.db`에 커널 ID와 함께 경로를 두고, 시작할 때와 그 파일의 토큰을 쓸 때마다 경로가 있는지 확인합니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙으로 지워집니다.
 - 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 되살리지 않습니다.
 - 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 파일을 지우면 그 토큰이 `401`이 되고 `manager.db`에 행이 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다.
 - 테스트(계획): `test_fr_a5_tokens_survive_kernel_shutdown_and_manager_restart`, `test_fr_a5_tokens_are_deleted_with_the_file`, `test_fr_a5_reshare_issues_a_new_token`
+
+### FR-A6 커널 접근 토큰 (2025 복구) — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #48)
+INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 커널에 접근하는 토큰입니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아."
+
+| 2025 기능 | 2025 경로 | 이 API | 인증 | 결과 |
+|---|---|---|---|---|
+| 초기 토큰 | `POST /kernels/{kernel_id}/tokens/initial` | `POST /api/kernels/{kernel_id}/tokens/initial` | 없음 | `{token, permission: "admin", password_required: true}` |
+| 로그인 | `POST /kernels/{kernel_id}/tokens/auth` | `POST /api/kernels/{kernel_id}/tokens/auth` | 본문의 비밀번호(요청을 받은 매니저의 비밀번호, FR-A4) | `{token, kernel_id, permission}` |
+| 공유 토큰 발급 | `POST /kernels/{kernel_id}/tokens/share` | `POST /api/kernels/{kernel_id}/shares`(이미 있음) | 그 커널의 공유 관리 권한 | `{share_id, token, url, permission}` |
+| 토큰 확인 | `GET /kernels/{kernel_id}/tokens/{token}/verify` | `GET /api/kernels/{kernel_id}/tokens/{token}/verify` | 같은 토큰 | `{valid, kernel_id, permission, blacklisted, password_set}` |
+
+- 초기 토큰은 2025 명세 그대로입니다. 커널을 열 때 자격 증명 없이 받고(본문은 2025처럼 `{kernel_id}`를 실을 수 있음), 응답은 `{token, permission: "admin", password_required: true}`입니다. 커널 ID 형식이 틀리면 `400`(2025 `INVALID_KERNEL_ID`)입니다. 발급 횟수, 출발지(루프백), 쓰임새에 제한을 두지 않습니다. 사용자 결정(2026-10-04): "초기 토큰은 애초에 열 때 토큰을 발급했을건데 뭐가 문제야? 토큰이 없으면 연결이 안되잖아. 초기 토큰 발급은 건드리지 마." 리더가 더했던 "한 번만 발급"(`409 already_initialized`)과 "비밀번호 설정에만 씀"은 지웠습니다(PROJECT Q11).
+- 로그인은 비밀번호를 받아 그 커널의 접근 토큰을 줍니다. 비밀번호는 매니저마다 하나이므로(FR-A4) 요청을 받은 매니저의 비밀번호입니다.
+- `password_set`은 요청을 받은 매니저에 비밀번호가 있는지입니다.
+- 커널 접근 토큰은 그 커널 하나에만 묶입니다. 다른 커널을 가리키면 `403`이 아니라 `404`입니다(FR-A3).
+- 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
+- 테스트(계획): `test_fr_a6_initial_token_is_issued_without_credentials_every_time`, `test_fr_a6_login_with_the_manager_password_returns_a_kernel_token`, `test_fr_a6_kernel_token_is_404_on_other_kernels`, `test_fr_a6_verify_reports_permission_and_revocation`
 
 ## 10a. 협업 문서 (S)
 

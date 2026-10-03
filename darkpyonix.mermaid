@@ -363,18 +363,23 @@ classDiagram
             +create_share(kernel_id str, permission Permission) ShareToken
             +revoke(share_id str) None
             +initial_token(kernel_id str) str
-            +set_password(kernel_id str, password str) None
-            +login(kernel_id str, password str) str
-            +reset_master(kernel_id str, password str) str
-            +reset_shared(kernel_id str, token_type Permission) ShareToken
+            +set_password(token str, password str) None
+            +login(password str) str
+            +kernel_login(kernel_id str, password str) str
+            +reset_master(password str) str
+            +reset_shared(token_type Permission) ShareToken
             +verify(kernel_id str, token str) dict
             +forget_deleted_files() None
+        }
+        class ManagerCredentials {
+            <<one per manager, manager.db>>
+            +password_hash str|None
+            +master_token_hash str
         }
         class FileCredentials {
             <<2025 File.tokens>>
             +kernel_id str
             +path str
-            +password_hash str|None
             +initial_token_hash str|None
             +admin_token_hash str|None
         }
@@ -429,6 +434,7 @@ classDiagram
     EventBroker ..> KernelClient
     AuthService --> Principal
     AuthService *-- ShareToken
+    AuthService *-- ManagerCredentials
     AuthService *-- FileCredentials
     FileCredentials o-- ShareToken : per type
     Principal --> Permission

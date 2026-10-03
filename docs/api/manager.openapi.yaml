@@ -98,11 +98,13 @@ tags:
 - name: Sharing
   description: Per-kernel share tokens with viewer permissions (dedicated manager).
 - name: Auth
-  description: 'The 2025 password authentication, restored by user decision 2026-10-03 (INTENT D17,
+  description: 'The 2025 authentication, restored by user decision 2026-10-03 (INTENT D17). `/api/auth…` is
 
-    SPEC FR-A4, FR-A5). Each file (kernel id) has one password, an admin (master) token and one
+    per manager: one password and one master token per manager (user confirmation 2026-10-04,
 
-    share token per viewer type. Dedicated manager only; an ephemeral manager answers `403 forbidden`.
+    SPEC FR-A4); dedicated manager only, an ephemeral manager answers `403 forbidden`.
+
+    `/api/kernels/{kernel_id}/tokens/…` are access tokens bound to one kernel (SPEC FR-A6, FR-A5).
 
     Status: planned, issue #48.
 
@@ -137,6 +139,162 @@ paths:
                 $ref: '#/components/schemas/ManagerInfo'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth:
+    get:
+      tags:
+      - Auth
+      operationId: login
+      summary: Log in to the manager
+      description: 'The 2025 "login" (`GET /auth`, "the password goes in the session"). The password of this
+
+        manager in `Authorization: Basic` with an empty user name; the manager''s master token out.
+
+        `400 password_not_set` while the manager has no password. One password and one master token per
+
+        manager (user confirmation 2026-10-04, SPEC FR-A4). Reading "session" as HTTP Basic is a leader
+
+        decision awaiting the user (PROJECT Q15). An ephemeral manager answers `403 forbidden`.
+
+        '
+      security:
+      - passwordBasic: []
+      responses:
+        '200':
+          description: The manager's master token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterToken'
+        '400':
+          description: '`bad_request`, or `password_not_set` (2025 `PASSWORD_NOT_SET`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/password:
+    put:
+      tags:
+      - Auth
+      operationId: setPassword
+      summary: Set or reset the manager's password
+      description: 'The 2025 "password reset" (`PUT /auth/password`): authenticate with a token, then register a
+
+        new password. The master token resets it. While the manager has no password, an initial token
+
+        (SPEC FR-A6) may set the first one; once a password exists, an initial token answers `403`
+
+        (leader decision awaiting the user, PROJECT Q15). Stored as a salted slow hash. SPEC FR-A4.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Password set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - message
+                properties:
+                  message:
+                    type: string
+                    example: Password set successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/tokens/master:
+    put:
+      tags:
+      - Auth
+      operationId: resetMasterToken
+      summary: Issue a new master token for the manager
+      description: 'The 2025 "master token reset" (`PUT /auth/tokens/master`): authenticate with the password in
+
+        `Authorization: Basic`, issue a new master token. The earlier master token stops working (`401`).
+
+        SPEC FR-A4.
+
+        '
+      security:
+      - passwordBasic: []
+      responses:
+        '200':
+          description: The new master token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterToken'
+        '400':
+          description: '`bad_request`, or `password_not_set`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/tokens/shared/{token_type}:
+    parameters:
+    - name: token_type
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SharePermission'
+    put:
+      tags:
+      - Auth
+      operationId: resetSharedToken
+      summary: Issue a new manager shared token of one type
+      description: 'The 2025 "shared token reset" (`PUT /auth/tokens/shared/{token_type}`): authenticate with the
+
+        master token, issue a new manager shared token of that type and revoke the previous one. A manager
+
+        shared token works on every kernel through this manager only; a token bound to one kernel and
+
+        valid through any manager is a kernel access token (SPEC FR-A6). Streams opened with the revoked
+
+        token are closed (`streams.close`, SPEC FR-M6). SPEC FR-A4.
+
+        '
+      responses:
+        '200':
+          description: The new shared token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareWithToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/kernels:
@@ -1239,70 +1397,19 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
-  /api/kernels/{kernel_id}/password:
-    parameters:
-    - $ref: '#/components/parameters/KernelId'
-    put:
-      tags:
-      - Auth
-      operationId: setPassword
-      summary: Set or reset the file's password
-      description: 'The 2025 "password reset" (`PUT /auth/password`, detail `PUT /kernels/{kernel_id}/password`):
-
-        authenticate with a token, then register a new password. The initial token sets the first
-
-        password; afterwards the file''s admin token resets it. Stored as a salted slow hash. SPEC FR-A4.
-
-        '
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-              - password
-              properties:
-                password:
-                  type: string
-                  minLength: 1
-      responses:
-        '200':
-          description: Password set.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - message
-                - kernel_id
-                properties:
-                  message:
-                    type: string
-                    example: Password set successfully
-                  kernel_id:
-                    type: string
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
   /api/kernels/{kernel_id}/tokens/auth:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     post:
       tags:
       - Auth
-      operationId: login
-      summary: Log in with the file's password
-      description: 'The 2025 "login" (`GET /auth`, detail `POST /kernels/{kernel_id}/tokens/auth`): the password
+      operationId: kernelLogin
+      summary: Log in to one kernel with the manager's password
+      description: 'The 2025 kernel login (`POST /kernels/{kernel_id}/tokens/auth`): the password in, an access
 
-        in, the file''s admin token out. `400 password_not_set` before a password exists. SPEC FR-A4.
+        token for this kernel out (SPEC FR-A6). The password is the one of the manager that receives the
+
+        request: one password per manager (SPEC FR-A4). `400 password_not_set` while that manager has none.
 
         '
       security: []
@@ -1319,7 +1426,7 @@ paths:
                   type: string
       responses:
         '200':
-          description: The file's admin token.
+          description: An access token for this kernel.
           content:
             application/json:
               schema:
@@ -1330,87 +1437,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/kernels/{kernel_id}/tokens/master:
-    parameters:
-    - $ref: '#/components/parameters/KernelId'
-    put:
-      tags:
-      - Auth
-      operationId: resetMasterToken
-      summary: Issue a new admin (master) token for the file
-      description: 'The 2025 "master token reset" (`PUT /auth/tokens/master`): authenticate with the password,
-
-        issue a new admin token. Earlier admin tokens of this file stop working (`401`). SPEC FR-A4.
-
-        '
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-              - password
-              properties:
-                password:
-                  type: string
-      responses:
-        '200':
-          description: The new admin token (shown once).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthToken'
-        '400':
-          description: '`bad_request`, or `password_not_set`.'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/kernels/{kernel_id}/tokens/shared/{token_type}:
-    parameters:
-    - $ref: '#/components/parameters/KernelId'
-    - name: token_type
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/SharePermission'
-    put:
-      tags:
-      - Auth
-      operationId: resetSharedToken
-      summary: Issue a new share token of one type
-      description: 'The 2025 "shared token reset" (`PUT /auth/tokens/shared/{token_type}`): authenticate with the
-
-        file''s admin token, revoke every share of that type and issue one new share token. Streams
-
-        opened with the revoked shares are closed (`streams.close`, SPEC FR-M6). SPEC FR-A4, FR-A5.
-
-        '
-      responses:
-        '200':
-          description: The new share, including its token (shown once).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ShareWithToken'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1513,11 +1539,19 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: 'The manager''s master token, a file''s admin token (SPEC FR-A4), or a share token. An
+      description: 'The manager''s master token (SPEC FR-A4), a manager shared token, or a kernel access token (SPEC FR-A6). An
 
         ephemeral manager prints its url and master token on stdout to the process that started it and
 
         writes them nowhere else (INTENT D4, SPEC FR-C1).
+
+        '
+    passwordBasic:
+      type: http
+      scheme: basic
+      description: 'The manager''s password as HTTP Basic credentials with an empty user name (SPEC FR-A4).
+
+        Only `GET /api/auth` and `PUT /api/auth/tokens/master` accept it.
 
         '
     tokenQuery:
@@ -1636,6 +1670,14 @@ components:
         password_required:
           type: boolean
           const: true
+    MasterToken:
+      type: object
+      description: The manager's master token (`GET /api/auth`, `PUT /api/auth/tokens/master`, SPEC FR-A4).
+      required:
+      - token
+      properties:
+        token:
+          type: string
     AuthToken:
       type: object
       description: 2025 `/kernels/{kernel_id}/tokens/auth` response.
@@ -1719,7 +1761,7 @@ components:
       - viewer3
       - viewer2
       - viewer1
-      description: '`admin` is the master token or a file''s admin token (SPEC FR-A4). Share permissions follow the
+      description: '`admin` is the master token (SPEC FR-A4) or a kernel login or initial token (SPEC FR-A6). Share permissions follow the
 
         2025 design (SPEC FR-A3): `viewer1` code only; `viewer2` code and run logs; `viewer3` code, run logs
 
