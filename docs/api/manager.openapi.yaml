@@ -159,9 +159,9 @@ paths:
 
         `400 password_not_set` while the manager has no password. One password and one master token per
 
-        manager (user confirmation 2026-10-04, SPEC FR-A4). Reading "session" as HTTP Basic is a leader
+        manager (user confirmation 2026-10-04, SPEC FR-A4). Reading "session" as HTTP Basic is a user
 
-        decision awaiting the user (PROJECT Q15). An ephemeral manager answers `403 forbidden`.
+        decision (2026-10-04, PROJECT Q15). An ephemeral manager answers `403 forbidden`.
 
         '
       security:
@@ -197,7 +197,7 @@ paths:
 
         (SPEC FR-A6) may set the first one; once a password exists, an initial token answers `403`
 
-        (leader decision awaiting the user, PROJECT Q15). Stored as a salted slow hash. SPEC FR-A4.
+        (user decision 2026-10-04, PROJECT Q15). Stored as a salted slow hash. SPEC FR-A4.
 
         '
       requestBody:
@@ -1875,9 +1875,9 @@ components:
       pattern: ^(read|history|execute|edit|manage)(\+(read|history|execute|edit|manage))*$
       description: 'The 2025 `{token_type}` of `PUT /auth/tokens/shared/{token_type}`, written as a capability set
 
-        joined by `+` in the order read, history, execute, edit, manage (e.g. `read+history`). Leader
+        joined by `+` in the order read, history, execute, edit, manage (e.g. `read+history`). User
 
-        decision awaiting the user (PROJECT Q15).
+        decision 2026-10-04 (PROJECT Q15).
 
         '
       example: read+history

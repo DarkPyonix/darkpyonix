@@ -26,7 +26,7 @@ Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-
 - 그룹 `239.255.68.80`, 포트 `46880`, 인터페이스 `127.0.0.1`, TTL 0(호스트 밖으로 나가지 않음), `IP_MULTICAST_LOOP` 켬.
 - 커널과 매니저 모두 `SO_REUSEADDR`(가능하면 `SO_REUSEPORT`)로 같은 포트에 바인드하고 그룹에 가입합니다.
 - 발견은 이 멀티캐스트 하나입니다. 등록 파일(`kernels/<kernel_id>.json`, `managers/<pid>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 사용자 지시로 지웁니다(INTENT D4, 구현 대기 #50). 루프백 멀티캐스트가 막힌 환경과 WSL↔Windows 사이 발견은 지원 범위 밖입니다(SPEC FR-D3).
-- 그룹 주소와 포트는 리더 결정, 사용자 확인 대기입니다(INTENT D4, PROJECT Q14).
+- 그룹 주소와 포트는 사용자 결정입니다(2026-10-04, "그대로 사용", INTENT D4, PROJECT Q14).
 
 ### 2.2 사용자 태그
 

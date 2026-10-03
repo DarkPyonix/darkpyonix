@@ -214,7 +214,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ## 5. 발견 (D)
 
 ### FR-D1 멀티캐스트 발견 — `Done`
-PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다. 발견은 이 루프백 멀티캐스트 하나입니다(INTENT D4). 그룹 주소와 포트(`239.255.68.80:46880`)는 리더 결정, 사용자 확인 대기입니다(PROJECT Q14).
+PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다. 발견은 이 루프백 멀티캐스트 하나입니다(INTENT D4). 그룹 주소와 포트(`239.255.68.80:46880`)는 사용자 결정입니다(2026-10-04, "그대로 사용", PROJECT Q14).
 - 수용 기준: 커널 세 개를 띄우고 query 하나를 보내면 세 개의 announce를 받습니다. 다른 `user_tag`의 query에는 응답하지 않습니다.
 - 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
@@ -406,7 +406,7 @@ INTENT D18. 사용자 결정(2026-10-04): "권한 이름 저따위 아니거든?
 - 2025 `user_permission`: 실행의 `"write"`는 `execute`, 셀 잠금·해제·편집의 `"write"`는 `edit`, 공유 설정의 `"admin"`은 `manage`입니다. 요청은 `user_permission`에 그 작업의 능력 이름을 실을 수 있습니다. 다른 이름이면 `400`이고, 허락은 토큰의 집합이 정합니다. 능력이 없으면 `403 forbidden`(2025 `INSUFFICIENT_PERMISSION`)입니다.
 - 등급 이름 `viewer1`·`viewer2`·`viewer3`·`admin`·`editor`와 2025 `"write"`는 능력 이름이 아니라서 `400`입니다(INTENT D18).
 - 커널 하나에 묶인 토큰(FR-A6)은 다른 커널을 가리키면 `403`이 아니라 `404`입니다. 공유 토큰 발급은 전용 매니저만 합니다. 권한 검사는 매니저만 합니다(INTENT D5).
-- 커널 시작·재시작·종료를 `execute`에, 네임스페이스 조회를 `history`에 둔 것은 리더 결정, 사용자 확인 대기입니다(PROJECT Q17).
+- 커널 시작·재시작·종료를 `execute`에, 네임스페이스 조회를 `history`에 둔 것은 임시이고 사용자 재검토 예정입니다(2026-10-04, "일단 그렇게 해둬 나중에 내가 다시 볼게", PROJECT Q17).
 - 수용 기준: 작업마다 그 능력이 있는 토큰은 통과하고, 없는 토큰은 `403`입니다. `["read", "edit"]` 토큰은 잠그고 고칠 수 있지만 실행은 `403`입니다. `["read", "execute"]` 토큰은 실행할 수 있지만 잠금과 수정은 `403`입니다. `["manage"]` 토큰은 공유를 만들 수 있지만 문서 조회는 `403`입니다. `["read"]` 토큰의 이벤트 스트림에는 `output`이 없습니다. `viewer2`나 `editor`로 공유를 만들면 `400`입니다. 실행 요청에 `user_permission: "edit"`을 실으면 `400`입니다.
 - 테스트(계획): `test_fr_a3_each_operation_needs_its_capability`, `test_fr_a3_execute_and_edit_are_independent`, `test_fr_a3_capabilities_have_no_order`, `test_fr_a3_tier_names_are_refused`, `test_fr_a3_user_permission_names_the_needed_capability`, `test_fr_a3_read_only_events_omit_outputs`. 지금의 Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`)는 능력 집합으로 고칩니다(#49). 셋째는 이름 그대로 둡니다.
 - 상태 메모: 위 Rust 테스트는 `editor`가 있던 등급 표를 검증합니다. 능력 표로 고친 뒤 통과해야 `Done`입니다.
@@ -425,7 +425,7 @@ INTENT D17. 사용자 결정(2026-10-03): "원 설계대로 복구". 범위는 �
 - 매니저 공유 토큰은 이 매니저로 들어오는 모든 커널에 그 타입의 능력 집합(FR-A3)으로 통합니다. 이 매니저에만 있으므로 다른 매니저에서는 통하지 않습니다. 커널 하나에 묶여 어느 매니저로든 통하는 토큰은 커널 접근 토큰입니다(FR-A6).
 - 비밀번호는 솔트를 넣은 느린 해시로, 토큰은 해시로만 그 매니저의 `manager.db`에 둡니다. 커널은 비밀번호와 토큰을 모릅니다(INTENT D5).
 - 2026-10-03 초안의 "파일마다 비밀번호"와 파일 단위 경로(`/api/kernels/{kernel_id}/password`, `/tokens/master`, `/tokens/shared/{token_type}`)는 지웠습니다. 2025 상세 페이지의 `PASSWORD_NOT_SET: Password has not been set for this kernel`은 이제 "이 매니저에 비밀번호가 없음"으로 읽습니다.
-- 리더 결정, 사용자 확인 대기(PROJECT Q15): "세션에 넣어서"를 `Authorization: Basic`으로 읽은 것, 2025 `token_type`(`viewer1`…)을 능력 집합 표기로 읽은 것, 그리고 비밀번호가 이미 있는 매니저에서는 초기 토큰으로 비밀번호를 바꿀 수 없게 한 것(`403`). 뒤의 것이 없으면 인증 없이 받는 초기 토큰(FR-A6)으로 누구나 매니저 비밀번호를 바꿀 수 있습니다.
+- 사용자 결정(2026-10-04, "이대로", PROJECT Q15): "세션에 넣어서"를 `Authorization: Basic`으로 읽은 것, 2025 `token_type`(`viewer1`…)을 능력 집합 표기로 읽은 것, 그리고 비밀번호가 이미 있는 매니저에서는 초기 토큰으로 비밀번호를 바꿀 수 없게 한 것(`403`). 뒤의 것이 없으면 인증 없이 받는 초기 토큰(FR-A6)으로 누구나 매니저 비밀번호를 바꿀 수 있습니다.
 - 오류 코드: 2025 `PASSWORD_NOT_SET` → `400 password_not_set`, `INVALID_TOKEN` → `401 unauthorized`, `TOKEN_BLACKLISTED` → `401 token_revoked`, `INSUFFICIENT_PERMISSION` → `403 forbidden`, `KERNEL_NOT_FOUND` → `404 not_found`.
 - 수용 기준: 비밀번호가 없는 전용 매니저에서 초기 토큰으로 비밀번호를 정하고, `GET /api/auth`로 마스터 토큰을 받습니다. `PUT /api/auth/tokens/master` 뒤 이전 마스터 토큰은 `401`입니다. 비밀번호가 있는 매니저에서 초기 토큰으로 `PUT /api/auth/password`는 `403`입니다. 비밀번호 전 로그인은 `400 password_not_set`입니다. 비밀번호는 매니저마다 하나라서, 같은 비밀번호로 그 매니저의 어느 커널에도 로그인합니다(FR-A6). 공유 토큰 재설정 뒤 그 타입의 이전 토큰은 `401 token_revoked`이고, 그 토큰으로 연 스트림은 닫힙니다(FR-M6). 임시 매니저는 넷 모두 `403`입니다.
 - 테스트(계획): `test_fr_a4_first_password_login_and_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_cannot_replace_an_existing_password`, `test_fr_a4_one_password_per_manager`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
