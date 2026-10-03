@@ -42,7 +42,6 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 
 **10월 셋째 주 범위에서 뺀 것과 이유**
 - (변수 체크포인트·복원은 범위가 아닙니다. 변수는 실행 기록에 남은 코드로 재현합니다. INTENT 1.2 D.)
-- `parallel`/`concurrent`와 interop 셀의 실행 의미(Q7, Q8): 문법은 받아들이고 보존하지만, 실행 의미는 이슈 #5와 #7의 결정이 먼저입니다.
 
 `vscode-darkpyonix`와 `intellij-darkpyonix`가 매니저 API에 붙는 작업은 M2 이후에 시작할 수 있습니다. ember는 M1~M4가 커널 API에 의존하지 않습니다(Ember 구현 담당 확인).
 
@@ -56,6 +55,6 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | Q4 | 기존 Jupyter 도구와의 호환(Jupyter Server REST 흉내)이 필요한지 | 보류 |
 | Q5 | `__runs__/`의 보관 정책 | Git 추적은 결정됨(기본 포함, 원하면 폴더째 제외, INTENT D8). 용량 상한과 오래된 실행 정리는 FR-R5의 사이드카 외에 두지 않음 |
 | Q6 | `restart hard`에서 OS 잠금이 잠깐 풀리는 틈을 어떻게 막을지(재실행 전 잠금 파일 핸들 상속 등) | M1에서 결정 |
-| Q7 | grid 레이아웃을 여닫는 태그가 필요한지, horizontal/vertical 전환으로 충분한지 | 이슈 #7 |
-| Q8 | `parallel`/`concurrent`와 언어 interop 셀의 실행 의미 | 이슈 #5, #7 |
+| Q7 | grid 레이아웃을 여닫는 태그가 필요한지, horizontal/vertical 전환으로 충분한지 | 추천안: 태그 없이 전환만(SPEC FR-F7 `Draft`, [제안](docs/proposals/cells-parallel-interop.md) §2). 이슈 #7에서 인용 답 대기, 답이 다르면 답을 따름 |
+| Q8 | `parallel`/`concurrent`와 언어 interop 셀의 실행 의미 | 추천안을 SPEC FR-X7~X12, FR-F8~F13에 `Draft`로 반영(asyncio+스레드 기본, 프로세스는 옵션이며 10-18 범위 밖). 이슈 #5, #7 답 대기 |
 | Q9 | iroh 릴레이를 어디서 돌릴지: 작은 VPS(릴레이 + QAD) 또는 Cloudflare Container(WebSocket만, QAD 없음) | 권장(2026-10-03): VPS로 시작. Ember NFR-N1 측정을 VPS 위에서 QAD 켬/끔 두 번 하고, QAD를 끈 직접 경로 성공률도 85% 이상이면 Container로 옮김(SPEC FR-H3). 사용자 확인 대기 |
