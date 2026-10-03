@@ -275,6 +275,63 @@ def test_fr_s6_runs_are_attributed(kernel):
     assert meta["started_by"] is None and meta["interrupted_by"] is None
 
 
+def test_fr_s6_run_and_output_events_carry_cell_ids(kernel):
+    path, connect = kernel()
+    a = connect()
+    snap = a.request("doc.snapshot", {}, timeout=5)
+    a.subscribe(since=snap["seq"])
+    pre, c1, c2, c3 = [c["cell_id"] for c in snap["cells"]]
+
+    run = a.request("run", {"mode": "all", "client": A}, timeout=5)
+    evs = drain(a, finished(run["run_id"]))
+    started = [e["data"] for e in evs if e["type"] == "run.started"][0]
+    assert started["cells"] == [0, 1, 2, 3] and started["cell_ids"] == [pre, c1, c2, c3]
+    outs = [e["data"] for e in evs if e["type"] == "output"]
+    text = {}
+    for o in outs:
+        key = (o["index"], o["cell_id"])
+        text[key] = text.get(key, "") + o["output"]["text"]
+    assert text == {(1, c1): "x is 1\n", (2, c2): "y is 10\n"}
+    for e in evs:
+        if e["type"] in ("cell.started", "cell.finished"):
+            assert e["data"]["cell_id"] == [pre, c1, c2, c3][e["data"]["index"]]
+
+    # After a move the index changes but the cell_id still names the same cell.
+    a.request("doc.cell.move", {"client": A, "cell_id": c2, "to_index": 1}, timeout=5)
+    run = a.request("run", {"cell_ids": [c2], "client": A}, timeout=5)
+    evs = drain(a, finished(run["run_id"]))
+    started = [e["data"] for e in evs if e["type"] == "run.started"][0]
+    assert started["cells"] == [1] and started["cell_ids"] == [c2]
+    outs = [e["data"] for e in evs if e["type"] == "output"]
+    assert outs and set((o["index"], o["cell_id"]) for o in outs) == {(1, c2)}
+
+
+def test_fr_s6_output_clear_carries_cell_id():
+    from darkpyonix.kernel.capture import OutputRouter
+    from darkpyonix.kernel.model import CellRecord
+
+    class _Run(object):
+        run_id = "r1"
+
+    events = []
+    router = OutputRouter(lambda t, d: events.append((t, d)))
+    router.start()
+    try:
+        router.begin_cell(_Run(), CellRecord(2, "code", "", ""), "c_abc")
+        router.write_stream("stdout", "hi\n")
+        router.clear(wait=True)
+        router.write_output({"output_type": "display_data", "data": {}, "metadata": {}})
+        router.end_cell()
+        router.begin_cell(_Run(), CellRecord(3, "code", "", ""))
+        router.clear()
+        router.end_cell()
+    finally:
+        router.stop()
+    assert [(t, d["index"], d["cell_id"]) for t, d in events] == [
+        ("output", 2, "c_abc"), ("output.clear", 2, "c_abc"), ("output", 2, "c_abc"),
+        ("output.clear", 3, None)]
+
+
 def test_fr_s7_wait_returns_on_finish_or_timeout(kernel):
     path, connect = kernel(loop=True)
     a, b = connect(), connect()

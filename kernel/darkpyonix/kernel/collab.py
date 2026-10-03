@@ -14,7 +14,15 @@ event ``seq`` that matches the state it returns. ``emit`` must not call back int
 Identity (FR-S1): a cell keeps its ``cell_id`` for the kernel's lifetime. The id is the
 cell's ``# @id`` when the file has one, else ``c_<hex>`` generated here and never written
 to the file. ``version`` (per cell) starts at 1 and grows with every content change;
-``doc_version`` grows with every structural or content change of the document.
+``doc_version`` grows only on cell create/update/delete/move and on reload. Lock, unlock,
+conflict and presence events carry the current ``doc_version`` without changing it.
+
+Snapshot ``seq`` is the seq of the last event already reflected in the snapshot: state changes,
+their events and snapshots all happen under one lock, so a client that subscribes with
+``since=seq`` sees every later change exactly once.
+
+``request_id`` (optional, client-chosen, 1..64 chars) on a ``doc.*`` / ``presence.*`` request
+is echoed by every event that request causes.
 
 Disk (FR-S5): edits are written atomically ``save_debounce`` seconds after the last one,
 through ``darkpyonix.format`` so untouched cells keep their exact bytes. The background
@@ -93,6 +101,25 @@ def _str_param(params: Dict[str, Any], name: str, required: bool = True) -> Opti
     return value
 
 
+def _request(fn: Handler) -> Handler:  # type: ignore[misc]
+    """Serve a ``DocumentState`` method under its lock with ``params["request_id"]`` set, so
+    every event the request causes echoes it (PROTOCOL §4)."""
+    def wrapper(self: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            rid = params.get("request_id") if isinstance(params, dict) else None
+            if rid is not None and (not isinstance(rid, str) or not 1 <= len(rid) <= 64):
+                raise DKPError("bad_request", "request_id must be a string of 1 to 64 characters")
+            outer = self._rid
+            self._rid = rid
+            try:
+                return fn(self, params)  # type: ignore[call-arg]
+            finally:
+                self._rid = outer
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper  # type: ignore[return-value]
+
+
 class _Entry(object):
     """One cell of the shared document."""
 
@@ -119,7 +146,7 @@ class _Lock(object):
 
 class _Presence(object):
     __slots__ = ("client", "focused_cell_id", "focused_at", "cursor", "last_seen",
-                 "last_seen_iso", "last_emit", "pending")
+                 "last_seen_iso", "last_emit", "pending", "pending_rid")
 
     def __init__(self, client: Dict[str, Any], now: float) -> None:
         self.client = client
@@ -130,6 +157,7 @@ class _Presence(object):
         self.last_seen_iso = now_iso()
         self.last_emit = None  # type: Optional[float]
         self.pending = False  # a coalesced cursor change waits to be emitted
+        self.pending_rid = None  # type: Optional[str]  # request_id of the last coalesced update
 
 
 class DocumentState(object):
@@ -157,6 +185,7 @@ class DocumentState(object):
         self._next_poll = 0.0
         self._known_stat = None  # type: Optional[Tuple[int, int]]
         self._known_sha = None  # type: Optional[str]
+        self._rid = None  # type: Optional[str]  # request_id of the request being served
 
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -235,7 +264,7 @@ class DocumentState(object):
             for p in list(self._presence.values()):
                 if p.pending and (p.last_emit is None
                                   or now - p.last_emit >= CURSOR_MIN_INTERVAL):
-                    self._emit_presence(p, now)
+                    self._emit_presence(p, now, p.pending_rid)
             for cell_id, lk in list(self._locks.items()):
                 if now - lk.last_activity >= self.idle_lock_seconds:
                     self._release(cell_id, "idle", lk.client)
@@ -275,7 +304,10 @@ class DocumentState(object):
 
     # ------------------------------------------------------------ helpers
 
-    def _emit(self, type_: str, data: Dict[str, Any]) -> None:
+    def _emit(self, type_: str, data: Dict[str, Any], rid: Optional[str] = None) -> None:
+        rid = rid if rid is not None else self._rid
+        if rid is not None:
+            data["request_id"] = rid
         self._emit_cb(type_, data)
 
     def _client(self, params: Dict[str, Any], need: str) -> Dict[str, Any]:
@@ -322,7 +354,8 @@ class DocumentState(object):
 
     def _cell_dict(self, e: _Entry) -> Dict[str, Any]:
         c = e.cell
-        out = {"cell_id": e.cell_id, "index": c.index, "type": c.type, "title": c.title,
+        out = {"cell_id": e.cell_id, "index": c.index, "type": c.type, "raw_type": c.raw_type,
+               "title": c.title,
                "metadata": dict(c.metadata), "source": c.source,
                "source_sha256": c.source_sha256, "version": e.version}  # type: Dict[str, Any]
         lk = self._locks.get(e.cell_id)
@@ -391,6 +424,7 @@ class DocumentState(object):
 
     # ------------------------------------------------------------ edits (FR-S2)
 
+    @_request
     def cell_create(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, EDIT_PERMISSION)
@@ -466,6 +500,7 @@ class DocumentState(object):
         entry.conflict = False
         entry.disk_cell = None
 
+    @_request
     def cell_update(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, EDIT_PERMISSION)
@@ -492,6 +527,7 @@ class DocumentState(object):
                                                 "by": by_of(client)})
             return {"cell": out}
 
+    @_request
     def cell_delete(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, EDIT_PERMISSION)
@@ -518,6 +554,7 @@ class DocumentState(object):
                                             "cell_id": entry.cell_id, "by": by_of(client)})
             return {"deleted": True}
 
+    @_request
     def cell_move(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, EDIT_PERMISSION)
@@ -539,6 +576,7 @@ class DocumentState(object):
 
     # ------------------------------------------------------------ locks (FR-S3)
 
+    @_request
     def lock(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, EDIT_PERMISSION)
@@ -555,6 +593,7 @@ class DocumentState(object):
             self._wake.set()
             return {"lock": out}
 
+    @_request
     def unlock(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, EDIT_PERMISSION)
@@ -620,11 +659,15 @@ class DocumentState(object):
             out["selection"] = [list(pt) for pt in sel]
         return out
 
-    def _emit_presence(self, p: _Presence, now: float) -> None:
+    def _emit_presence(self, p: _Presence, now: float, rid: Optional[str] = None) -> None:
         p.pending = False
+        p.pending_rid = None
         p.last_emit = now
-        self._emit("presence.update", self._presence_dict(p))
+        data = self._presence_dict(p)
+        data["doc_version"] = self.doc_version
+        self._emit("presence.update", data, rid)
 
+    @_request
     def presence_update(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, PRESENCE_PERMISSION)
@@ -660,9 +703,11 @@ class DocumentState(object):
                     self._emit_presence(p, now)
                 else:
                     p.pending = True
+                    p.pending_rid = self._rid
             self._wake.set()
             return {}
 
+    @_request
     def presence_leave(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             client = self._client(params, PRESENCE_PERMISSION)
@@ -678,6 +723,7 @@ class DocumentState(object):
             data = self._presence_dict(p)
             data["focused_cell_id"] = None
             data["cursor"] = None
+            data["doc_version"] = self.doc_version
             self._emit("presence.leave", data)
 
     # ------------------------------------------------------------ disk (FR-S5)
@@ -803,7 +849,7 @@ class DocumentState(object):
         for e in conflicts:
             holder = self._locks[e.cell_id].client
             self._emit("doc.conflict", {
-                "cell_id": e.cell_id,
+                "doc_version": self.doc_version, "cell_id": e.cell_id,
                 "local": {"source": e.cell.source, "version": e.version, "by": by_of(holder)},
                 "disk": {"source": None if e.disk_cell is None else e.disk_cell.source},
             })

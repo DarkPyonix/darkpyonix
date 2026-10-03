@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import os
+import threading
 import time
 
 import pytest
@@ -239,6 +240,114 @@ def test_fr_s1_snapshot_plus_events_converge(nb):
             assert set(ev["data"]["by"]) == {"client_id", "user", "nickname"}
 
 
+def test_fr_s1_snapshot_racing_edits_is_exact(nb):
+    """``seq`` is the last event reflected in the snapshot: snapshot + events after ``seq``
+    equals the final state, with no edit lost or applied twice, even while edits race it."""
+    rec = Recorder()
+
+    def slow_emit(type_, data):  # widen the window between a change and its event
+        time.sleep(0.0002)
+        rec(type_, data)
+
+    ds = DocumentState(nb, slow_emit, clock=FakeClock(), seq_provider=lambda: rec.log.seq)
+    c1 = ids(ds)[1]
+    done = threading.Event()
+    errors = []
+
+    def editor(who, n):
+        try:
+            mine = []
+            for i in range(n):
+                cell = ds.cell_create({"client": who, "after": c1, "source": "v = %d\n" % i})["cell"]
+                cell = ds.cell_update({"client": who, "cell_id": cell["cell_id"],
+                                       "base_version": cell["version"],
+                                       "source": "v = %d  # edited\n" % i})["cell"]
+                mine.append(cell)
+                if i % 3 == 0:
+                    ds.cell_move({"client": who, "cell_id": cell["cell_id"], "to_index": 1})
+                if i % 4 == 1:
+                    old = mine.pop(0)
+                    ds.cell_delete({"client": who, "cell_id": old["cell_id"],
+                                    "base_version": old["version"]})
+                ds.presence_update({"client": who, "focused_cell_id": cell["cell_id"]})
+        except Exception as e:  # pragma: no cover - reported below
+            errors.append(e)
+
+    snaps = []
+
+    def snapshotter():
+        while not done.is_set():
+            snaps.append(ds.snapshot({}))
+            time.sleep(0)  # yield; snapshots compete with the editors for the lock
+
+    threads = [threading.Thread(target=editor, args=(A, 40)),
+               threading.Thread(target=editor, args=(B, 40))]
+    watcher = threading.Thread(target=snapshotter)
+    watcher.start()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    done.set()
+    watcher.join()
+    assert not errors, errors
+
+    final = ds.snapshot({})
+    assert len(snaps) > 10
+    mid = [s for s in snaps if 0 < s["seq"] < final["seq"]]
+    assert mid, "no snapshot raced the edits"
+    for snap in snaps[::max(1, len(snaps) // 150)]:
+        replica = Replica(snap)
+        events, oldest = rec.log.since(snap["seq"])
+        assert oldest is None
+        assert all(ev["seq"] > snap["seq"] for ev in events)
+        for ev in events:
+            replica.apply(ev)
+        assert replica.state() == state_of(final), snap["seq"]
+        cell_ids = [c["cell_id"] for c in replica.cells]
+        assert len(cell_ids) == len(set(cell_ids))
+        assert set(replica.presence) == set(x["client_id"] for x in final["presence"])
+
+
+def test_fr_s1_doc_version_bumps_only_on_content(nb):
+    clock = FakeClock()
+    ds, rec = make(nb, clock=clock)
+    pre, c1, c2, c3 = ids(ds)
+    v = ds.snapshot({})["doc_version"]
+
+    # Lock, unlock and presence never bump, but carry the current doc_version.
+    ds.presence_update({"client": A, "focused_cell_id": c1})
+    ds.lock({"client": A, "cell_id": c1})
+    ds.unlock({"client": A, "cell_id": c1})
+    clock.advance(1)
+    ds.presence_update({"client": A, "cursor": {"cell_id": c1, "line": 0, "column": 0}})
+    ds.presence_leave({"client": A})
+    assert rec.types() == ["presence.update", "doc.lock", "doc.unlock", "presence.update",
+                           "presence.leave"]
+    assert all(ev["data"]["doc_version"] == v for ev in rec.events)
+    assert ds.snapshot({})["doc_version"] == v
+
+    # An edit that changes nothing emits nothing and keeps the version.
+    rec.clear()
+    same = by_id(ds.snapshot({}), c1)["source"]
+    ds.cell_update({"client": A, "cell_id": c1, "base_version": 1, "source": same})
+    ds.cell_move({"client": A, "cell_id": c1, "to_index": 1})
+    assert rec.events == [] and ds.snapshot({})["doc_version"] == v
+
+    # Create, update, move and delete each bump it by one.
+    made = ds.cell_create({"client": A, "source": "n = 1\n"})["cell"]
+    ds.cell_update({"client": A, "cell_id": made["cell_id"], "base_version": 1, "source": "n = 2\n"})
+    ds.cell_move({"client": A, "cell_id": made["cell_id"], "to_index": 1})
+    ds.cell_delete({"client": A, "cell_id": made["cell_id"], "base_version": 2})
+    assert [(ev["type"], ev["data"]["doc_version"]) for ev in rec.events] == [
+        ("doc.cell.created", v + 1), ("doc.cell.updated", v + 2),
+        ("doc.cell.moved", v + 3), ("doc.cell.deleted", v + 4)]
+    rec.clear()
+    ds.lock({"client": B, "cell_id": c2})
+    assert rec.of("doc.lock")[0]["doc_version"] == v + 4
+    assert ds.snapshot({})["doc_version"] == v + 4
+
+
 # ------------------------------------------------------------------ FR-S2
 
 
@@ -300,6 +409,99 @@ def test_fr_s2_edit_ops_and_version_conflict(nb):
                  {"client": A, "cell_id": after["cell_id"], "base_version": 1, "source": ""})
     # the indices in the snapshot follow the order
     assert [c["index"] for c in ds.snapshot({})["cells"]] == list(range(len(ids(ds))))
+
+
+def test_fr_s2_cells_source_type_title_and_append(nb):
+    ds, rec = make(nb)
+    pre, c1, c2, c3 = ids(ds)
+    cells = ds.snapshot({})["cells"]
+    parsed = dpformat.parse(read_file(nb))
+    # source is exactly the parser's body, trailing blank lines before the next marker included.
+    assert [c["source"] for c in cells] == [c.source for c in parsed.cells]
+    assert cells[1]["source"] == "x = 1\n\n"
+    # type is canonical; raw_type is what the marker says (null without brackets).
+    assert [c["type"] for c in cells] == ["preamble", "code", "markdown", "code"]
+    assert [c["raw_type"] for c in cells] == [None, "code", "markdown", None]
+
+    # create without after/before appends at the end, with a title and the type as written.
+    made = ds.cell_create({"client": A, "type": "Shell", "title": "Setup", "source": "ls\n"})["cell"]
+    assert made["index"] == 4 and ids(ds)[-1] == made["cell_id"]
+    assert (made["type"], made["raw_type"], made["title"]) == ("shell", "Shell", "Setup")
+    assert rec.of("doc.cell.created")[0]["cell"]["title"] == "Setup"
+
+    # title is editable through update, and clearing it is an edit too.
+    cell = ds.cell_update({"client": A, "cell_id": c1, "base_version": 1, "title": "Load data"})["cell"]
+    assert cell["title"] == "Load data" and cell["version"] == 2
+    assert rec.of("doc.cell.updated")[-1]["cell"]["title"] == "Load data"
+    cell = ds.cell_update({"client": A, "cell_id": c1, "base_version": 2, "title": None})["cell"]
+    assert cell["title"] is None and cell["version"] == 3
+    ds.cell_update({"client": A, "cell_id": c3, "base_version": 1, "title": "Result"})
+    expect_error("bad_request", ds.cell_update,
+                 {"client": A, "cell_id": pre, "base_version": 1, "title": "x"})
+    ds.flush()
+    saved = dpformat.parse(read_file(nb)).cells
+    assert [c.title for c in saved] == [None, None, None, "Result", "Setup"]
+    assert [c.raw_type for c in saved][4] == "Shell"
+    assert [c.source for c in saved][:3] == [c["source"] for c in ds.snapshot({})["cells"]][:3]
+
+
+def test_fr_s2_request_id_is_echoed(nb):
+    clock = FakeClock()
+    ds, rec = make(nb, clock=clock, idle_lock_seconds=10)
+    pre, c1, c2, c3 = ids(ds)
+
+    made = ds.cell_create({"client": A, "request_id": "w1-1", "source": "a = 1\n"})["cell"]
+    ds.cell_update({"client": A, "request_id": "w2-1", "cell_id": made["cell_id"],
+                    "base_version": 1, "source": "a = 2\n"})
+    ds.cell_move({"client": A, "request_id": "w1-2", "cell_id": made["cell_id"], "to_index": 1})
+    ds.lock({"client": A, "request_id": "w1-3", "cell_id": c1})
+    ds.unlock({"client": A, "request_id": "w1-4", "cell_id": c1, "source": "x = 5\n"})
+    ds.cell_delete({"client": A, "request_id": "w2-2", "cell_id": made["cell_id"],
+                    "base_version": 2})
+    assert [(e["type"], e["data"].get("request_id")) for e in rec.events] == [
+        ("doc.cell.created", "w1-1"), ("doc.cell.updated", "w2-1"), ("doc.cell.moved", "w1-2"),
+        ("doc.lock", "w1-3"), ("doc.cell.updated", "w1-4"), ("doc.unlock", "w1-4"),
+        ("doc.cell.deleted", "w2-2")]
+
+    # Without a request_id the field is absent.
+    rec.clear()
+    ds.cell_update({"client": B, "cell_id": c2, "base_version": 1, "source": "b = 1\n"})
+    assert "request_id" not in rec.events[-1]["data"]
+
+    # Presence: immediate updates echo theirs; a coalesced cursor carries the last one merged.
+    rec.clear()
+    ds.presence_update({"client": B, "request_id": "p1"})
+    clock.advance(1)
+    for col, rid in ((1, "p2"), (2, "p3"), (3, "p4")):
+        ds.presence_update({"client": B, "request_id": rid,
+                            "cursor": {"cell_id": c2, "line": 0, "column": col}})
+    clock.advance(0.06)
+    ds.tick()
+    assert [(d["cursor"] and d["cursor"]["column"], d.get("request_id"))
+            for d in rec.of("presence.update")] == [(None, "p1"), (1, "p2"), (3, "p4")]
+
+    # Leaving releases B's lock: both events carry the leave's request_id.
+    ds.lock({"client": B, "cell_id": c3})
+    rec.clear()
+    ds.presence_leave({"client": B, "request_id": "bye"})
+    assert [(e["type"], e["data"].get("request_id")) for e in rec.events] == [
+        ("doc.unlock", "bye"), ("presence.leave", "bye")]
+    assert rec.of("doc.unlock")[0]["reason"] == "disconnected"
+
+    # An event no request caused (idle unlock) has none.
+    ds.lock({"client": A, "request_id": "L", "cell_id": c3})
+    rec.clear()
+    clock.advance(11)
+    ds.tick()
+    assert rec.of("doc.unlock")[0]["reason"] == "idle"
+    assert "request_id" not in rec.of("doc.unlock")[0]
+
+    before = ids(ds)
+    for bad in ("", "x" * 65, 5):
+        expect_error("bad_request", ds.cell_create, {"client": A, "request_id": bad})
+        expect_error("bad_request", ds.presence_update, {"client": A, "request_id": bad})
+    assert ids(ds) == before
+    assert ds.cell_create({"client": A, "request_id": "x" * 64})["cell"]
 
 
 # ------------------------------------------------------------------ FR-S3
@@ -522,7 +724,7 @@ def test_fr_s5_external_edit_reloads_and_locked_cell_conflicts(nb):
     assert locked["conflict"] == {"disk_source": "darkpyonix.markdown('disk')\n\n"}
     assert locked["lock"]["locked_by"] == "A"
     conflict = rec.of("doc.conflict")[0]
-    assert conflict == {"cell_id": c2,
+    assert conflict == {"doc_version": reloaded["doc_version"], "cell_id": c2,
                         "local": {"source": "darkpyonix.markdown('local')\n\n", "version": 2,
                                   "by": {"client_id": "A", "user": "user-A", "nickname": "dev-A"}},
                         "disk": {"source": "darkpyonix.markdown('disk')\n\n"}}

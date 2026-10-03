@@ -545,6 +545,8 @@ class Executor(object):
         self.emit("kernel.status", {"status": "busy", "run_id": run.run_id})
         self._store_call("begin", run)
         self.emit("run.started", {"run_id": run.run_id, "mode": run.mode, "cells": indexes,
+                                  "cell_ids": [cell_ids[i] if cell_ids is not None and i < len(cell_ids)
+                                               else None for i in indexes],
                                   "params": dict(run.params), "started_by": run.started_by})
         status = "ok"
         if load_error is not None:
@@ -617,7 +619,7 @@ class Executor(object):
         self.emit("cell.started", {"run_id": run.run_id, "index": cell.index,
                                    "cell_id": doc_cell_id, "execution_count": count,
                                    "started_by": run.started_by})
-        self.router.begin_cell(run, rec)
+        self.router.begin_cell(run, rec, doc_cell_id)
         t0 = time.monotonic()
         status, error = self._exec_cell(run, cell, line_offset, count)
         if error is not None:
