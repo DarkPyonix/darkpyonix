@@ -392,6 +392,15 @@ Flathub의 앱 ID `dev.darkpyonix.Ember`는 도메인 darkpyonix.dev로 검증�
 - 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`)를 따릅니다.
 - 테스트(`hub/worker/test/config.test.ts`): `test_fr_h8_config_names_relays_and_pkarr_url`, `test_fr_h8_config_follows_the_worker_vars`
 
+### FR-H9 기기 목록 변경 알림 — `Agreed` [provisional]
+Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기는 하트비트 한 번 안에 끊긴다"(ember FR-N3)를 맞출 수 없었습니다(Ember FR-N2 연동 중 보고, 2026-10-03). 허브가 목록이 바뀐 것을 알려 줍니다.
+- **판(version)과 ETag.** 계정마다 기기 목록의 판 번호를 두고, 목록에 보이는 것이 바뀔 때마다 하나 올립니다: 기기 추가·되살림(FR-H11), 삭제, 이름·앱 정보 변경, `online` 변화. `last_seen`만 바뀌는 것(주소 게시, 릴레이 입장)은 판을 올리지 않습니다(5분마다 오는 게시가 모든 대기자를 깨우지 않도록). `GET /v1/devices`는 `ETag: W/"v<판>"`을 붙입니다(약한 ETag: `last_seen`은 판에 들지 않음).
+- **조건부 요청.** `If-None-Match`가 지금 ETag와 같으면 304(본문 없음)입니다.
+- **롱 폴링.** `?wait=<초>`(0~25)를 함께 주면, ETag가 같을 때 바로 304를 내지 않고 판이 바뀌거나 `wait`초가 지날 때까지 기다립니다. 바뀌면 200과 새 목록·새 ETag, 시간이 다 되면 304입니다. Worker는 기다리는 동안 2초마다 그 계정의 판 한 행만 읽습니다. 그래서 변경은 최대 약 2초 뒤에 전해지고, 대기 중인 클라이언트 하나는 25초에 D1 읽기 14번 정도(하루 약 4만8천 번)를 씁니다. 판이 바뀐 뒤에는 자격 증명을 다시 확인하므로, 기다리던 기기 자신이 지워졌으면 401 `device_removed`가 옵니다. 25초 상한은 프록시·모바일 망이 유휴 연결을 끊는 시간보다 짧게 둔 값입니다.
+- **SSE가 아니라 롱 폴링인 이유.** Durable Object 없이 Worker는 다른 요청이 한 쓰기를 밀어 받을 수 없으므로, SSE로 해도 연결 안에서 똑같이 D1을 주기적으로 읽어야 합니다. 그러면 SSE는 연결을 더 오래 잡고(Worker 동시 연결, 모바일 배터리), 중간 프록시의 버퍼링 문제가 생기며, 다시 붙을 때의 상태 맞추기를 따로 정해야 합니다. 롱 폴링+ETag는 보통 HTTP 클라이언트로 되고, 끊겨도 마지막 ETag로 이어서 묻기만 하면 되며, `wait` 없이 쓰면 값싼 조건부 폴링이 됩니다. 계약은 그대로 두고 나중에 Durable Object로 대기자를 즉시 깨우게 바꿀 수 있습니다. 실제 부하와 Ember 사용으로 확정할 때까지 `[provisional]`입니다.
+- 수용 기준: 응답에 ETag가 있고, 같은 ETag의 `If-None-Match`는 304, 다른 ETag는 바로 200입니다. 기다리는 중에 기기를 지우거나 이름을 바꾸면 200과 새 ETag가 오고, 아무 일 없으면 `wait` 뒤 304입니다. 기다리던 기기가 지워지면 401 `device_removed`입니다. 주소 게시는 ETag를 바꾸지 않고, `online` 변화는 바꿉니다. `wait`가 범위 밖이면 400입니다.
+- 테스트(`hub/worker/test/notify.test.ts`): `test_fr_h9_device_list_has_an_etag_and_answers_304`, `test_fr_h9_long_poll_wakes_on_a_change`, `test_fr_h9_long_poll_times_out_with_304`, `test_fr_h9_waiting_device_that_is_removed_gets_device_removed`, `test_fr_h9_only_visible_changes_move_the_etag`, `test_fr_h9_wait_is_validated`
+
 ### FR-H10 기기 앱 정보 — `Agreed` [provisional]
 기기 목록만으로 "어느 기기가 ember 노드이고 무슨 버전이며 무엇을 제공하는지" 알 수 있게, 기기가 자기 앱 정보를 허브에 적습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - 기기는 `PATCH /v1/devices/{자기 endpoint_id} {"app": {...}}`로 적고 `{"app": null}`로 지웁니다. **그 기기 자신만** 적을 수 있습니다(세션이나 메인 서버가 남의 `app`을 적으면 403). 기기 목록과 조회의 `Device.app`에 그대로 나옵니다(없으면 `null`).

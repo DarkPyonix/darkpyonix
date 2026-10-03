@@ -481,10 +481,29 @@ paths:
     get:
       tags: [Devices]
       operationId: listDevices
-      summary: Devices of the caller's account
+      summary: Devices of the caller's account, with change notification by ETag and long-poll
+      description: |
+        The response carries a weak `ETag` for the account's device list; it changes when a
+        device is added, restored, removed, renamed, reports its app, or goes on/offline
+        (not for `last_seen` alone). Send it back as `If-None-Match` to get 304 when nothing
+        changed. Add `wait` to long-poll: the hub holds the request until the list changes
+        (200) or `wait` seconds pass (304), checking about every 2 seconds (FR-H9, provisional).
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: {type: string, example: 'W/"v12"'}
+        - name: wait
+          in: query
+          required: false
+          description: Seconds to wait for a change when `If-None-Match` matches. 0 to 25.
+          schema: {type: integer, minimum: 0, maximum: 25}
       responses:
         "200":
           description: Devices, oldest first. Removed devices are not listed.
+          headers:
+            ETag:
+              schema: {type: string, example: 'W/"v12"'}
           content:
             application/json:
               schema:
@@ -494,8 +513,15 @@ paths:
                   devices:
                     type: array
                     items: {$ref: "#/components/schemas/Device"}
+        "304":
+          description: Unchanged since `If-None-Match` (after waiting, if `wait` was given).
+          headers:
+            ETag:
+              schema: {type: string}
+        "400":
+          description: "`wait` is not an integer from 0 to 25."
         "401":
-          description: No valid session or device token; `code` is `device_removed` for a removed device's token.
+          description: No valid session or device token; `code` is `device_removed` for a removed device's token (also when the waiting device was removed meanwhile).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
