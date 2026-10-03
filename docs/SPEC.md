@@ -21,11 +21,10 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 
 ## 2. 커널 (K)
 
-### FR-K1 설치 없이 어떤 인터프리터로도 실행 — `Agreed`
+### FR-K1 설치 없이 어떤 인터프리터로도 실행 — `Done`
 매니저는 사용자가 고른 인터프리터에, 커널 소스 루트를 `sys.path` 앞에 넣는 부트스트랩(`-c`)으로 커널을 띄웁니다. 그 인터프리터에 DarkPyonix가 설치되어 있지 않아도 됩니다.
 - 수용 기준: DarkPyonix가 설치되지 않은 가상환경의 인터프리터로 커널을 띄우고 셀을 실행할 수 있습니다. 사용자 코드의 `import darkpyonix`가 성공합니다.
-- 테스트: `test_fr_k1_kernel_runs_from_uninstalled_interpreter`
-- 상태 메모 (2026-10-03 감사): DarkPyonix가 설치되지 않은 인터프리터에서 부트스트랩 명령으로 `import darkpyonix`가 되고 커널이 announce하는 것까지 검증했습니다. 가상환경 인터프리터로 띄운 커널에서 셀을 실행하고, 그 셀의 `import darkpyonix`가 성공하는지 보는 시험은 아직 없습니다.
+- 테스트: `test_fr_k1_kernel_runs_from_uninstalled_interpreter`, `test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell`(인터프리터마다 `.scratch/` 아래에 `--without-pip` 가상환경을 만들고, 그 인터프리터로 띄운 커널의 셀에서 `import darkpyonix`가 커널 소스 루트에서 불러와지고 `sys.prefix`가 그 가상환경임을 확인)
 
 ### FR-K2 파일에 묶인 커널 ID — `Done`
 커널 ID는 PROTOCOL §2.6의 규칙으로 만듭니다.
@@ -52,17 +51,15 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 수용 기준: 대기 중에는 `repr`가 채워지고, 실행 중에는 `name`과 `type`만 채워집니다. 실행 중에 조회해도 사용자 객체의 `__repr__`가 호출되지 않습니다.
 - 테스트: `test_fr_k6_namespace_lists_user_variables`, `test_fr_k6_namespace_does_not_call_repr_while_busy`
 
-### FR-K7 재시작 — `Agreed`
+### FR-K7 재시작 — `Done`
 `restart`(soft)는 네임스페이스를 비우고 실행 횟수를 0으로 돌립니다. `restart hard`는 같은 인터프리터와 인자로 프로세스를 다시 실행합니다(커널 ID 유지).
 - 수용 기준: soft 재시작 뒤 이전 변수가 없습니다. hard 재시작 뒤 커널 ID가 같고 `pid`나 시작 시각이 바뀝니다.
-- 테스트: `test_fr_k7_soft_restart_clears_namespace`, `test_fr_k7_hard_restart_stops_loop_and_sets_flag`(실행기 쪽), `test_fr_k7_hard_restart_keeps_kernel_id`(아직 없음)
-- 상태 메모 (2026-10-03 감사): soft 재시작은 검증했습니다. hard 재시작은 실행기가 루프를 멈추고 플래그를 세우는 데까지만 검증했습니다. 실제 커널 프로세스가 다시 실행되어 커널 ID가 같고 `pid`나 시작 시각이 바뀌는 시험은 아직 없습니다.
+- 테스트: `test_fr_k7_soft_restart_clears_namespace`, `test_fr_k7_hard_restart_stops_loop_and_sets_flag`(실행기 쪽), `test_fr_k7_hard_restart_keeps_kernel_id`(실제 커널 프로세스: 같은 커널 ID, 같은 인터프리터와 경로로 다시 announce하고 `started_at`이 늦어지며 이전 변수가 없음. POSIX에서는 `os.execv`라 `pid`는 그대로입니다)
 
-### FR-K8 종료 — `Agreed`
+### FR-K8 종료 — `Done`
 `shutdown`은 실행 중인 셀을 인터럽트하고, 실행 기록을 마저 쓰고, `bye`를 보내고, 등록 파일을 지우고, 코드 0으로 끝납니다.
 - 수용 기준: 종료 뒤 등록 파일과 잠금이 남지 않고 실행 기록의 상태는 `interrupted`입니다.
-- 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(아직 없음)
-- 상태 메모 (2026-10-03 감사): 실행 중인 셀을 인터럽트하고 실행 기록을 `interrupted`로 마무리하는 실행기 쪽과, SIGTERM으로 끝날 때 등록 파일이 지워지는 것(`test_fr_k4_kernel_survives_launcher_exit`)은 검증했습니다. 실제 커널에 `shutdown` 요청을 보내 `bye`, 종료 코드 0, 등록 파일과 잠금이 남지 않음을 확인하는 시험은 아직 없습니다.
+- 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, 등록 파일 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
 
 ## 3. 실행 (X)
 
@@ -109,11 +106,12 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 - 수용 기준: 실행 기록이 `nbformat.validate`를 통과합니다(테스트 환경에 nbformat이 있을 때). 표준 라이브러리 `json`으로 읽은 구조가 위 필드를 모두 가집니다.
 - 테스트: `test_fr_r1_run_log_is_valid_nbformat`, `test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt`
 
-### FR-R2 실행 중 저장 — `Agreed`
+### FR-R2 실행 중 저장 — `Done`
 커널은 실행 중에도 기록을 최대 1초 간격으로 원자적으로(임시 파일 → `os.replace`) 다시 씁니다. `index.json`에는 최신순 실행 요약(`run_id`, `status`, `started_at`, `ended_at`, `mode`)을 둡니다.
 - 수용 기준: 실행 중에 커널을 `SIGKILL`로 죽여도 기록 파일은 유효한 JSON이고, 죽기 1초 전까지의 출력이 들어 있습니다. 상태는 `running`으로 남고, 다음 커널이 그 파일을 열면 `crashed`로 바꿉니다.
-- 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`
-- 상태 메모 (2026-10-03 감사): 기록이 최대 1초 간격으로 원자적으로 다시 쓰이는 것, `RunStore`로 기록하던 프로세스를 `SIGKILL`로 죽여도 유효한 JSON과 `running` 상태가 남는 것, `recover_crashed()`가 `crashed`로 바꾸는 것은 검증했습니다. 시험은 실제 커널 대신 `RunStore`만 쓰는 대역 프로세스를 죽이고 복구 함수를 직접 부르며, 마지막 출력이 죽기 1.3초 전 이내인지 봅니다(기준은 1초). 실제 커널을 실행 중에 죽이고, 다음 커널이 시작하면서 그 기록을 `crashed`로 바꾸는 시험은 아직 없습니다.
+- 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`, `test_fr_r2_real_kernel_killed_mid_run_is_recovered_as_crashed`(실제 커널을 다음 다시 쓰기 직전, 즉 가장 불리한 순간에 `SIGKILL`하고, 셀이 찍은 모든 출력 중 죽기 1초 전보다 오래된 것이 기록에 다 있는지 확인한 뒤, 같은 파일로 새 커널을 띄워 기록이 `crashed`가 되는지 봅니다)
+- 구현 메모: 다시 쓰기 주기는 스냅숏 시작부터 다음 스냅숏 시작까지 0.8초(`runs.WRITE_INTERVAL`)입니다. 1초 주기로는 캡처 라우터의 폴링 지연(최대 20 ms)과 쓰기 시간이 더해져 가장 불리한 순간에 1.01–1.04초 전 출력이 빠졌습니다(2026-10-03 측정).
+- 측정(2026-10-03, Mac mini 8코어, 가장 불리한 순간에 죽임): 기록에 없는 가장 오래된 출력이 죽기 0.79–0.86초 전. CPU를 16개 바쁜 루프로 2배 초과 점유한 상태에서도 0.77–0.86초.
 
 ### FR-R3 매직 변수 `__runs__` — `Done`
 커널 네임스페이스에는 `__runs__` 객체가 있습니다.
@@ -175,10 +173,9 @@ FORMAT §2의 문법(프리앰블, 셀 표식, 제목, 타입, 메타데이터, 
 - 수용 기준: `docs/examples/darkpyonix_format.py`를 파싱하면 프리앰블 1개와 셀 22개(code 11, markdown 2, binding 2, argparse·shell·parallel·concurrent·cinterop·cppinterop·rustinterop 각 1)가 나오고, 타입, 제목, `@width` 메타데이터, `concorrunt`→`concurrent` 별칭이 FORMAT대로 나옵니다. 파싱 후 다시 직렬화하면 원문과 바이트 단위로 같습니다.
 - 테스트: `test_fr_f1_reference_file_parses`, `test_fr_f1_parse_serialize_roundtrip`
 
-### FR-F2 `darkpyonix.markdown` — `Agreed`
+### FR-F2 `darkpyonix.markdown` — `Done`
 FORMAT §3.2. 커널 안에서는 `text/markdown` `display_data`를 내고(`silent=True`이면 기록에 남기지 않음), 커널 밖에서는 아무것도 하지 않습니다. 모르는 키워드 인자는 경고만 남깁니다.
-- 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`
-- 상태 메모: 커널 밖 동작과 `darkpyonix.kernel.hostctx` 계약까지는 검증했습니다. 실제 커널이 `display_data`로 내보내는 경로는 실행기(executor)와 합친 뒤 검증하고 `Done`으로 바꿉니다. 2026-10-03 감사: 실행기는 합쳐졌고 `hostctx.emit_display`의 커널 경로는 `test_fr_x5_hostctx_exposes_params_and_display`가 검증합니다. 셀 안에서 `darkpyonix.markdown`을 불러 `text/markdown` `display_data`가 나오고 `silent=True`면 기록에 남지 않는지 보는 시험은 아직 없습니다.
+- 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`(커널 밖 동작, 경고, `hostctx` 계약), `test_fr_f2_markdown_in_real_kernel_is_display_data_and_silent_is_not_logged`(실제 커널: 두 호출 모두 실시간 `output` 이벤트로 `text/markdown` `display_data`가 나가고, 실행 기록에는 `silent=True`가 아닌 것만 남음)
 
 ### FR-F3 `darkpyonix.params` — `Done`
 FORMAT §3.3. 값의 우선순위는 실행 요청 `params` → 명령줄 `--name` → `default`입니다.
@@ -190,10 +187,9 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 - 수용 기준: `[code]` 셀 변수를 참조하는 binding 클래스 본문은 `NameError`를 냅니다. import한 이름과 앞선 binding은 보입니다.
 - 테스트: `test_fr_f4_binding_cannot_see_code_cell_variables`
 
-### FR-F5 일반 파이썬과 같은 동작 — `Agreed`
-노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다.
-- 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유), `test_fr_f5_reduced_reference_runs_under_plain_python`
-- 상태 메모 (2026-10-03 감사): 표준 출력과 표준 오류가 같음은 검증했습니다. 종료 코드(오류로 끝나는 파일에서 `python file.py`의 0이 아닌 종료 코드와 커널 실행 상태 `error`)를 맞춰 보는 시험은 아직 없습니다.
+### FR-F5 일반 파이썬과 같은 동작 — `Done`
+노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다. 종료 코드 0은 실행 상태 `ok`, 0이 아닌 종료 코드는 `error`에 대응합니다.
+- 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유), `test_fr_f5_reduced_reference_runs_under_plain_python`, `test_fr_f5_exit_code_matches_run_status`(실제 커널: 정상 종료 0 ↔ `ok`, 예외 1 ↔ `error`, `sys.exit(3)` ↔ `error`, 중간의 `sys.exit(0)` ↔ `ok`이고 남은 셀을 실행하지 않음. 각 경우 표준 출력도 같음)
 
 ### FR-F6 `darkpyonix.run_command` — `Done`
 셸 명령을 하위 프로세스로 실행하고 출력을 줄 단위로 스트림 출력으로 보냅니다. `check=True`이면 실패 시 `CalledProcessError`입니다. 인터럽트가 오면 하위 프로세스 그룹에 SIGINT를 전달합니다.

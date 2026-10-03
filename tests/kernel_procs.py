@@ -53,3 +53,43 @@ def wait_pid_gone(pid: int, timeout: float = 5.0) -> bool:
             return True
         time.sleep(0.02)
     return False
+
+
+# ------------------------------------------------------------------ DKP/1 helpers
+
+def write_notebook(scratch: str, name: str, text: str) -> str:
+    """Write ``text`` (dedented) as a notebook file under ``scratch``."""
+    import textwrap
+    path = os.path.join(scratch, name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(textwrap.dedent(text).lstrip("\n"))
+    return path
+
+
+def connect(info):
+    """A connected, subscribed ``KernelClient`` for an announce body."""
+    from darkpyonix.kernel.client import KernelClient
+    c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+    c.connect()
+    c.subscribe()
+    return c
+
+
+def run_and_wait(c, params=None, timeout: float = 30.0):
+    """Send ``run`` and collect events until it finishes. Returns (status, events)."""
+    acc = c.request("run", params or {"mode": "all"})
+    events = []
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        ev = c.next_event(timeout=0.5)
+        if ev is None:
+            continue
+        events.append(ev)
+        if ev["type"] == "run.finished" and ev["data"]["run_id"] == acc["run_id"]:
+            return ev["data"]["status"], events
+    raise AssertionError("run %s did not finish" % acc["run_id"])
+
+
+def stream_text(nb, name: str = "stdout") -> str:
+    return "".join(o.get("text", "") for cell in nb["cells"] for o in cell.get("outputs", [])
+                   if o.get("output_type") == "stream" and o.get("name") == name)

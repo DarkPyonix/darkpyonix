@@ -13,8 +13,9 @@ import time
 import pytest
 
 from conftest import KERNEL_ROOT
+from kernel_procs import connect, kill, wait_pid_gone, write_notebook
 from darkpyonix import format as dpformat
-from darkpyonix.kernel import document, runs
+from darkpyonix.kernel import document, launcher, runs
 from darkpyonix.kernel.model import CellRecord, Run, RunRequest
 from darkpyonix.kernel.protocol import DKPError, kernel_id_for, new_run_id, now_iso
 
@@ -180,6 +181,95 @@ def test_fr_r2_log_survives_kernel_kill(scratch, python):
     assert store.recover_crashed() == []
 
 
+_KILL_NB = r"""
+import time
+# %% [code]
+ticks = open(TICKS, "a")
+print("start", flush=True)
+while True:
+    t = "%.6f" % time.time()
+    ticks.write(t + "\n")
+    ticks.flush()
+    print("t=" + t, flush=True)
+    time.sleep(0.02)
+"""
+
+
+def test_fr_r2_real_kernel_killed_mid_run_is_recovered_as_crashed(scratch, dp_home, python):
+    """SIGKILL a real kernel mid-run: the log keeps everything printed up to 1 s before the
+    kill, stays ``running``, and the next kernel for the file marks it ``crashed``."""
+    ticks_path = os.path.join(scratch, "ticks.txt")
+    path = write_notebook(scratch, "crash.py", _KILL_NB.replace("TICKS", repr(ticks_path)))
+    kid = kernel_id_for(path)
+    pid = launcher.launch(path, python=python)
+    second = None
+    try:
+        info = launcher.wait_for_announce(kid, pid=pid, timeout=15)
+        assert info is not None
+        c = connect(info)
+        run_id = c.request("run", {"mode": "all"})["run_id"]
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            ev = c.next_event(timeout=0.5)
+            if ev and ev["type"] == "output" and "start" in ev["data"]["output"].get("text", ""):
+                break
+        else:
+            raise AssertionError("cell did not start")
+        # Kill at the worst moment: just before the next periodic rewrite is due, so the
+        # newest output on disk is as old as the rewrite schedule allows.
+        log = os.path.join(runs.runs_dir_for(path), run_id + ".ipynb")
+        changes, last_sig = [], None
+        while True:
+            st = os.stat(log)
+            sig = (st.st_ino, st.st_mtime_ns, st.st_size)
+            now = time.time()
+            if sig != last_sig:
+                changes.append(now)
+                last_sig = sig
+            elif len(changes) >= 4:
+                period = (changes[-1] - changes[-3]) / 2
+                if now - changes[-1] >= period - 0.01:
+                    break
+            assert now < deadline + 30, "the log is not being rewritten"
+            time.sleep(0.002)
+        killed_at = time.time()
+        os.kill(pid, signal.SIGKILL)
+        assert wait_pid_gone(pid)
+        c.close()
+
+        with open(log, encoding="utf-8") as f:
+            nb = json.load(f)                                  # valid JSON after SIGKILL
+        assert nb["metadata"]["darkpyonix"]["status"] == "running"
+        logged = set(line[2:] for o in nb["cells"][1]["outputs"] if o["output_type"] == "stream"
+                     for line in o["text"].splitlines() if line.startswith("t="))
+        with open(ticks_path, encoding="utf-8") as f:
+            printed = [line.strip() for line in f if line.strip()]
+        assert logged and set(printed) >= logged
+        missing = [float(t) for t in printed if t not in logged]
+        lag = killed_at - min(missing) if missing else 0.0
+        print("FR-R2 oldest output missing from the log: %.3f s before the kill" % lag)
+        assert lag <= 1.0, "output printed %.3f s before the kill is not in the log" % lag
+
+        second = launcher.launch(path, python=python)
+        info = launcher.wait_for_announce(kid, pid=second, timeout=15)
+        assert info is not None
+        c = connect(info)
+        try:
+            got = c.request("runs.get", {"run_id": run_id})["metadata"]["darkpyonix"]
+            listed = c.request("runs.list", {"limit": 5})["runs"]
+        finally:
+            c.close()
+        assert got["status"] == "crashed" and got["ended_at"]
+        assert [r["status"] for r in listed if r["run_id"] == run_id] == ["crashed"]
+        assert not [n for n in os.listdir(runs.runs_dir_for(path)) if n.endswith(".tmp")]
+    finally:
+        for p in (pid, second):
+            if p is not None:
+                kill(p, signal.SIGTERM)
+                if not wait_pid_gone(p):
+                    kill(p, signal.SIGKILL)
+                    wait_pid_gone(p)
+
 def test_fr_r2_recover_leaves_this_processes_current_run_alone(scratch):
     path = notebook_file(scratch)
     store = runs.RunStore(path, kernel_id_for(path))
@@ -227,9 +317,10 @@ def test_fr_r2_update_is_throttled(scratch):
     t.join()
     writes = len(seen) - 1          # the first sample is the file written by begin()
     assert n > 500
-    assert 2 <= writes <= 5, writes  # ~3 s of updates → ~3 rewrites, never one per update
+    # ~3 s of updates → one rewrite per WRITE_INTERVAL (< 1 s), never one per update
+    assert 2 <= writes <= 5, writes
     gaps = [b - a for a, b in zip(seen[1:], seen[2:])]
-    assert all(g > 0.9 for g in gaps), gaps
+    assert all(runs.WRITE_INTERVAL - 0.05 < g < 1.0 for g in gaps), gaps
     with open(log, encoding="utf-8") as f:
         assert len(json.load(f)["cells"][0]["outputs"]) == n   # the last update was written
 
