@@ -203,6 +203,25 @@ describe("device links", () => {
     expect(list.devices.map((d) => d.endpoint_id)).toEqual([b.endpointId]);
   });
 
+  it("test_fr_h1_only_a_session_removes_another_main_server", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 25, login: "owner" });
+    const a = await newDevice();
+    const b = await newDevice();
+    const c = await newDevice();
+    const mainA = await linkDevice(deps, { cookie }, a, "main_server");
+    await linkDevice(deps, { cookie }, b, "main_server");
+    await linkDevice(deps, { cookie }, c, "computer");
+    const byToken = await call(deps, "DELETE", `/v1/devices/${b.endpointId}`, { token: mainA });
+    expect(byToken.status).toBe(403);
+    expect((await call(deps, "GET", `/v1/devices/${b.endpointId}`, { cookie })).status).toBe(200);
+    expect((await call(deps, "DELETE", `/v1/devices/${c.endpointId}`, { token: mainA })).status).toBe(204);
+    expect((await call(deps, "DELETE", `/v1/devices/${b.endpointId}`, { cookie })).status).toBe(204);
+    expect((await call(deps, "DELETE", `/v1/devices/${a.endpointId}`, { token: mainA })).status).toBe(204);
+    const list = (await (await call(deps, "GET", "/v1/devices", { cookie })).json()) as { devices: unknown[] };
+    expect(list.devices).toHaveLength(0);
+  });
+
   it("test_fr_h1_client_role_joins_and_connects_but_cannot_share_or_name", async () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 12, login: "owner" });

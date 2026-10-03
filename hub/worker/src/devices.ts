@@ -495,8 +495,21 @@ async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Pr
 
 export async function removeDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
-  // A device may always leave by itself; removing another device needs account rights.
-  const accountId = requireSelfOrAccountAdmin(await principal(request, env, now), endpointId);
+  // A device may always leave by itself; removing another device needs account rights, and
+  // removing another main server needs a session (FR-H1): a leaked main server token must
+  // not evict the account's other main servers and lose their names.
+  const p = await principal(request, env, now);
+  const accountId = requireSelfOrAccountAdmin(p, endpointId);
+  if (p.kind !== "session" && p.endpointId !== endpointId) {
+    const target = await env.DB.prepare(
+      "SELECT role FROM devices WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL",
+    )
+      .bind(accountId, endpointId)
+      .first<{ role: string }>();
+    if (target?.role === "main_server") {
+      throw ApiError.forbidden("only a signed-in session may remove another main_server");
+    }
+  }
   const { results: names } = await env.DB.prepare("SELECT name FROM names WHERE endpoint_id = ?")
     .bind(endpointId)
     .all<{ name: string }>();
