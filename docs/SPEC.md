@@ -321,10 +321,10 @@ INTENT D17. 사용자 결정: "원 설계대로 복구". 전용 매니저는 파
 - 2025 문서는 같은 기능을 요약표와 상세 페이지 두 표기로 적었습니다. 상세가 요청·응답 본문을 가지고 있고, 비밀번호가 파일마다라는 것(`PASSWORD_NOT_SET: Password has not been set for this kernel`)과 맞습니다. 그래서 경로는 상세 모양을 `/api` 아래(INTENT D16)에 두고, 상세가 없는 두 재설정은 요약표의 끝 조각을 같은 파일 단위 경로에 붙였습니다. 이 대응은 리더 결정, 사용자 확인 대기입니다(PROJECT Q10).
 - 비밀번호는 솔트를 넣은 느린 해시로, 토큰은 해시로만 `manager.db`에 둡니다. 커널은 비밀번호와 토큰을 모릅니다(INTENT D5).
 - 파일 단위 관리자 토큰은 `admin` 권한이고 그 커널에만 묶입니다. 다른 커널을 가리키면 `404`입니다(공유 토큰과 같은 규칙, FR-A3). 전용 매니저 전체의 마스터 토큰(FR-M4)은 그대로 있습니다.
-- 초기 토큰은 2025 명세대로 자격 증명 없이 받습니다. 비밀번호가 없을 때 한 번만 발급하고(두 번째는 `409 already_initialized`), 비밀번호 설정에만 쓸 수 있습니다. "한 번만"은 리더 제안, 사용자 확인 대기입니다(PROJECT Q11).
+- 초기 토큰은 2025 명세 그대로입니다. 커널을 열 때 자격 증명 없이 받고(본문은 2025처럼 `{kernel_id}`를 실을 수 있음), 응답은 `{token, permission: "admin", password_required: true}`입니다. 커널 ID 형식이 틀리면 `400`(2025 `INVALID_KERNEL_ID`)입니다. 발급 횟수, 출발지(루프백), 쓰임새에 제한을 두지 않습니다. 사용자 결정(2026-10-04): "초기 토큰은 애초에 열 때 토큰을 발급했을건데 뭐가 문제야? 토큰이 없으면 연결이 안되잖아. 초기 토큰 발급은 건드리지 마." 리더가 더했던 "한 번만 발급"(`409 already_initialized`)과 "비밀번호 설정에만 씀"은 지웠습니다(PROJECT Q11).
 - 오류 코드: 2025 `PASSWORD_NOT_SET` → `400 password_not_set`, `INVALID_TOKEN` → `401 unauthorized`, `TOKEN_BLACKLISTED` → `401 token_revoked`, `INSUFFICIENT_PERMISSION` → `403 forbidden`, `KERNEL_NOT_FOUND` → `404 not_found`.
 - 수용 기준: 초기 토큰 → 비밀번호 설정 → 로그인 → 마스터 토큰 재설정 순서가 되고, 재설정 뒤 이전 관리자 토큰은 `401`입니다. 비밀번호 전 로그인은 `400 password_not_set`입니다. 공유 토큰 재설정 뒤 그 타입의 이전 공유 토큰은 `401 token_revoked`이고, 그 토큰으로 연 스트림은 닫힙니다(FR-M6). 임시 매니저는 모두 `403`입니다.
-- 테스트(계획): `test_fr_a4_initial_password_login_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_is_issued_once`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_verify_reports_permission_and_revocation`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
+- 테스트(계획): `test_fr_a4_initial_password_login_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_is_issued_without_credentials_every_time`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_verify_reports_permission_and_revocation`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
 
 ### FR-A5 토큰 수명 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
 2025 설계: "커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함", "공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요".

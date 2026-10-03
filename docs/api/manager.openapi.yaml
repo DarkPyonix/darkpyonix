@@ -1202,17 +1202,30 @@ paths:
       tags:
       - Auth
       operationId: createInitialToken
-      summary: Issue the initial admin token of a file
-      description: 'The 2025 "initial token" (`POST /kernels/{kernel_id}/tokens/initial`). Issued without
+      summary: Issue the initial token of a kernel
+      description: 'The 2025 "initial token" (`POST /kernels/{kernel_id}/tokens/initial`), unchanged. A client
 
-        credentials while the file has no password; it is good only for setting the password
+        receives it without credentials when it opens the kernel, because it cannot connect without
 
-        (`PUT /api/kernels/{kernel_id}/password`). A second call answers `409 already_initialized`
+        a token. No limit on how often, from where, or for what it is used (user decision 2026-10-04:
 
-        (leader proposal, awaiting user confirmation: PROJECT Q11). SPEC FR-A4.
+        leave the initial token as the 2025 design has it). `400` when the kernel id is malformed (2025 `INVALID_KERNEL_ID`).
+
+        SPEC FR-A4.
 
         '
       security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The 2025 request body. `kernel_id`, when present, must equal the path parameter.
+              properties:
+                kernel_id:
+                  type: string
+                  pattern: ^k_[0-9a-f]{20}$
       responses:
         '201':
           description: The initial token (shown once).
@@ -1224,12 +1237,6 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          description: '`already_initialized`: the file already has an initial token or a password.'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/kernels/{kernel_id}/password:
@@ -2030,7 +2037,6 @@ components:
               - locked
               - password_not_set
               - poll_limit_exceeded
-              - already_initialized
               - token_revoked
             message:
               type: string
