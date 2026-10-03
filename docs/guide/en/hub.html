@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>darkpyonix.dev hub &middot; darkpyonix guide</title>
+<meta name="description" content="The darkpyonix.dev hub connects machines, issues share links and HTTPS names, and hosts ash. Its roles are a draft.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/hub.html">
+<link rel="alternate" hreflang="en" href="hub.html">
+<link rel="alternate" hreflang="ko" href="../ko/hub.html">
+<link rel="alternate" hreflang="x-default" href="../en/hub.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="hub.html" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/hub.html" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="Guide">
+      <h2>Guide</h2>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="getting-started.html">Install and first run</a></li>
+        <li><a href="notebook-format.html">Notebook files</a></li>
+        <li><a href="cli.html">The darkpyonix CLI</a></li>
+        <li><a href="run-logs.html">Run logs</a></li>
+        <li><a href="manager-api.html">Manager HTTP API</a></li>
+        <li><a href="clients.html">Editors, ash and agents</a></li>
+        <li><a href="hub.html" aria-current="page">darkpyonix.dev hub</a></li>
+      </ul>
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#roles">What it does</a></li>
+        <li><a href="#hosts">Hosts</a></li>
+        <li><a href="#privacy">What the hub sees</a></li>
+        <li><a href="#today">What works today</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">The hub</p>
+    <h1>darkpyonix.dev</h1>
+    <p class="lede">The hub connects your machines to each other and to the people you share with. It passes connections along; it does not run kernels. Everything on this page is planned.</p>
+
+    <h2 id="roles">What it does <span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/21">#21</a></span></h2>
+    <ul>
+      <li><strong>Sign-in</strong> with GitHub, and a list of your devices.</li>
+      <li><strong>Rendezvous and relay</strong> between machines: a direct connection through NAT when possible, a relay otherwise.</li>
+      <li><strong>Share links</strong> that open a shared kernel in ash.</li>
+      <li><strong>HTTPS names</strong> for a dedicated manager.</li>
+      <li><strong>Hosting ash</strong>, the shared notebook.</li>
+    </ul>
+
+    <h2 id="hosts">Hosts <span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/pull/41">#41</a></span></h2>
+    <p>How the work splits across hosts is a draft in pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/41">#41</a> and waits for the maintainer's
+      approval. The draft:</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Host</th><th scope="col">Serves</th></tr></thead>
+        <tbody>
+          <tr><td><code>darkpyonix.dev/</code></td><td>The main page and the ash web app, built by <code>darkpyonix-ash</code>.</td></tr>
+          <tr><td><code>darkpyonix.dev/&lt;repo&gt;/</code></td><td>Project guides such as this one. They do not move.</td></tr>
+          <tr><td><code>api.darkpyonix.dev</code></td><td>The hub API: sign-in, devices, address directory, shares, names.</td></tr>
+          <tr><td><code>relay.darkpyonix.dev</code></td><td>The relay for machine-to-machine connections.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+
+    <h2 id="privacy">What the hub sees</h2>
+    <p>The hub connects two ends. Content is meant to be encrypted between them (SPEC NFR-H1), so the hub does
+      not read your code or outputs. In the draft, a share link keeps its token in the URL fragment, which
+      browsers never send to a server.</p>
+
+    <h2 id="today">What works today</h2>
+    <p>The hub is not running yet. To reach a kernel on another machine today, run a dedicated manager there
+      (<code>darkpyonix manager --dedicated --host ... --port ...</code>) and reach it over a network you
+      already trust, such as a VPN.</p>
+    <nav class="pagenav" aria-label="Pagination">
+      <a class="prev" href="clients.html"><span>Previous</span>&larr; Editors, ash and agents</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT License (Apache-2.0 proposed, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

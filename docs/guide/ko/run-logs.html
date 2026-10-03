@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>실행 기록 &middot; darkpyonix 가이드</title>
+<meta name="description" content="DarkPyonix의 모든 실행은 파일 옆 __runs__/<파일>/<run_id>.ipynb에 기록됩니다. 커널 안의 __runs__ 변수는 그 기록을 속성 접근이 되는 dict로 읽습니다.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/ko/run-logs.html">
+<link rel="alternate" hreflang="ko" href="run-logs.html">
+<link rel="alternate" hreflang="en" href="../en/run-logs.html">
+<link rel="alternate" hreflang="x-default" href="../en/run-logs.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>가이드</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">메뉴</button>
+  <nav class="langswitch" aria-label="언어">
+    <a href="../en/run-logs.html" hreflang="en">EN</a>
+    <a href="run-logs.html" aria-current="true" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="어둡게" data-light="밝게" aria-pressed="false">어둡게</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="가이드">
+      <h2>가이드</h2>
+      <ul>
+        <li><a href="index.html">개요</a></li>
+        <li><a href="getting-started.html">설치와 첫 실행</a></li>
+        <li><a href="notebook-format.html">노트북 파일</a></li>
+        <li><a href="cli.html">darkpyonix CLI</a></li>
+        <li><a href="run-logs.html" aria-current="page">실행 기록</a></li>
+        <li><a href="manager-api.html">매니저 HTTP API</a></li>
+        <li><a href="clients.html">편집기, ash, 에이전트</a></li>
+        <li><a href="hub.html">darkpyonix.dev 허브</a></li>
+      </ul>
+      <h2>이 페이지</h2>
+      <ul>
+        <li><a href="#folder">__runs__ 폴더</a></li>
+        <li><a href="#written">기록 방식</a></li>
+        <li><a href="#cells">기록과 셀 맵핑</a></li>
+        <li><a href="#magic">__runs__ 변수</a></li>
+        <li><a href="#git">기록과 Git</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">실행 기록</p>
+    <h1>모든 실행은 노트북 하나를 남깁니다</h1>
+    <p class="lede">출력을 로그 파일로 돌릴 필요가 없습니다. 커널이 실행마다 소스 파일 옆에 nbformat 4 노트북을, 실행하는 동안 계속 씁니다.</p>
+
+    <h2 id="folder"><code>__runs__</code> 폴더</h2>
+    <figure class="codeblock" data-copy="복사" data-copied="복사됨">
+      <figcaption>구조</figcaption>
+<pre><code>experiments/
+├─ train.py
+└─ __runs__/
+   └─ train.py/
+      ├─ 20261003-142233-a1f0.ipynb
+      ├─ 20261003-150102-77c2.ipynb
+      └─ index.json</code></pre>
+    </figure>
+
+    <ul>
+      <li>실행 하나는 요청 하나입니다. 파일 전체든 셀 몇 개든 같습니다.</li>
+      <li><code>run_id</code>는 UTC 기준 <code>YYYYMMDD-HHMMSS-&lt;4 hex&gt;</code>라서 이름순이 시간순입니다.</li>
+      <li><code>index.json</code>은 실행 목록을 최신순으로 ID, 상태, 시작, 끝, 모드와 함께 담습니다. 깨지면 다시 만듭니다.</li>
+      <li><code>.ipynb</code>는 어떤 Jupyter 뷰어로도 열립니다. 노트북의 <code>metadata.darkpyonix</code>에는 run id, 커널 ID, 파일 해시, 모드, 파라미터, 상태, 시각, 인터프리터, 호스트가 들어 있습니다.</li>
+    </ul>
+
+    <h2 id="written">기록 방식</h2>
+    <p>커널은 실행 중에도 최대 1초 간격으로 기록을 원자적으로(임시 파일 뒤 이름 변경) 다시 씁니다. 커널이 죽어도
+      파일은 유효한 JSON이고, 죽기 약 1초 전까지의 출력이 들어 있습니다. 상태는 <code>running</code>으로 남고, 그
+      파일의 다음 커널이 <code>crashed</code>로 바꿉니다.</p>
+    <p>상태 값은 <code>running</code>, <code>ok</code>, <code>error</code>, <code>interrupted</code>,
+      <code>crashed</code>입니다. 셀 하나의 스트림 출력이 16 MiB(<code>DARKPYONIX_RUN_OUTPUT_LIMIT</code>)를 넘으면 나머지는 노트북 옆 <code>&lt;run_id&gt;.cell&lt;index&gt;.log</code>에 씁니다. 노트북이 열 수 있는 크기로 남게 하기 위해서입니다. 실시간 이벤트에는 제한이 없습니다.</p>
+
+    <h2 id="cells">기록과 셀 맵핑</h2>
+    <p>기록 안의 셀마다 번호, 타입, 제목, 상태, 시각, 그리고 셀 본문의 해시 <code>source_sha256</code>이 있습니다.
+      편집기는 최신 기록을 <code>id</code>, 소스 해시, 번호 순서로 파일의 셀에 맵핑합니다. 실행 뒤 소스가 바뀐 셀은
+      "이전 소스의 결과"로 보여 줄 수 있습니다.</p>
+
+    <h2 id="magic"><code>__runs__</code> 변수</h2>
+    <p>커널 안에서는 같은 기록이 변수로 보입니다. 그래서 사람이든 에이전트든 코드에서 파일을 열지 않고 지난 결과를
+      읽습니다.</p>
+    <figure class="codeblock" data-copy="복사" data-copied="복사됨">
+      <figcaption>셀 안에서</figcaption>
+<pre><code>run = __runs__.latest                 <span class="c"># 마지막으로 끝난 실행, 없으면 None</span>
+run.run_id, run.status, run.params    <span class="c"># '20261003-150102-77c2', 'ok', {'lr': 0.01}</span>
+run.cells[0].text                     <span class="c"># 기록된 첫 셀의 표준 출력</span>
+run.cell(<span class="s">"Train"</span>).result             <span class="c"># 그 셀 마지막 식의 repr</span>
+__runs__.list(limit=<span class="n">5</span>)                 <span class="c"># 최신순 요약</span>
+__runs__.current.path                 <span class="c"># 지금 쓰고 있는 .ipynb 경로</span></code></pre>
+    </figure>
+
+    <p>실행과 셀은 속성 접근이 되는 <code>dict</code> 하위 클래스입니다. 속성은 먼저 dict 키에서, 없으면
+      <code>metadata.darkpyonix</code>에서 찾습니다. <code>cell.text</code>는 stdout을, <code>cell.stderr</code>는
+      stderr를 이어 붙인 문자열이고, <code>run.cell(key)</code>는 ID, 제목, 파일 셀 번호로 셀을 찾습니다.
+      <code>json.dumps(run)</code>은 노트북을 그대로 돌려주며, 반환값을 바꿔도 기록은 바뀌지 않습니다.</p>
+    <p>변수 자체는 저장하지 않습니다. 값이 다시 필요하면 기록에 남은 코드를 다시 실행합니다.</p>
+
+    <h2 id="git">기록과 Git</h2>
+    <p><code>__runs__/</code>는 기본적으로 Git에 포함합니다. 실행 기록도 작업의 일부이기 때문입니다. 원하지 않으면
+      <code>.gitignore</code>에 넣습니다.</p>
+    <nav class="pagenav" aria-label="페이지 이동">
+      <a class="prev" href="cli.html"><span>이전</span>&larr; darkpyonix CLI</a>
+      <a class="next" href="manager-api.html"><span>다음</span>매니저 HTTP API &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT 라이선스 (Apache-2.0 전환 제안, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>2026-10-03 저장소 기준으로 검토한 가이드입니다</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

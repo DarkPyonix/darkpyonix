@@ -30,19 +30,19 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 
 ## 마일스톤
 
-사용자 지시(2026-10-03, thisisthepy 리더 경유): "실제 사용할 수 있는 정도의 수준으로 개발 완료는 전부 2026년 11월 안으로 당겨야 한다." 그래서 쓸 수 있는 수준의 완료는 모두 2026-11-30 이전이고, 그 안에 못 들어가는 것은 이유와 함께 범위에서 뺍니다. 품질 기준은 낮추지 않습니다. 날짜는 2026-10-03에 리더가 정한 목표입니다. 근거는 남은 작업량과 의존 관계이고, 이 저장소에 아직 구현 이력이 없어서 실측 속도는 반영되지 않았습니다. M1을 마친 뒤 실제 속도로 다시 맞춥니다.
+사용자 지시(2026-10-02): "10월 셋째쭈 구현까지 기간 당겨야 해. 기간을 당기고 서브 에이전트를 충분히 활용하는걸로 하자." 그래서 쓸 수 있는 수준의 구현은 모두 10월 셋째 주, 2026-10-18까지 끝냅니다. 이 문서에 먼저 기록돼 있던 "11월 안으로" 지시(thisisthepy 리더 경유)를 대체하는 일정이고, 서브 에이전트를 병렬로 써서 기간을 줄입니다. 그 안에 못 들어가는 것은 이유와 함께 범위에서 뺍니다. 품질 기준은 낮추지 않습니다. 아래 목표일은 GitHub 마일스톤의 기한과 같습니다. 이 저장소의 실측 구현 속도가 쌓이면 다시 맞춥니다.
 
 | # | 이름 | 목표일 | 완료 조건 (SPEC) | 의존 |
 |---|---|---|---|---|
 | M0 | 문서 확정 | 2026-10-03 | INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT, OpenAPI, 클래스 다이어그램이 `develop`에 있음 | — |
-| M1 | 커널 코어 | 2026-10-10 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1(FR-D2는 2026-10-03 Withdrawn), FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
-| M2 | 매니저·CLI·런타임 API | 2026-10-17 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
-| M3 | 전용 매니저와 공유 | 2026-10-24 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
-| M4 | 허브 | 2026-11-20 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`hub/worker/`), 계정은 GitHub 로그인(FR-H6), 릴레이는 `relay.darkpyonix.dev`(`hub/server/`, FR-H3). 릴레이를 VPS에 둘지 Container로 옮길지는 Ember NFR-N1의 QAD 켬/끔 측정으로 정함(Q9). 사용자 준비물: Cloudflare 존·API 토큰, GitHub OAuth App, 릴레이 VPS | Q1을 2026-10-24까지 결정, Ember M5와 함께 |
+| M1 | 커널 코어 | 2026-10-06 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1(FR-D2는 2026-10-03 Withdrawn), FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
+| M2 | 매니저·CLI·런타임 API | 2026-10-10 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
+| M3 | 전용 매니저와 공유 | 2026-10-13 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
+| M3b | 노트북 렌더러 확장 | 2026-10-16 | `vscode-darkpyonix`(Ember 기본 설치)와 `intellij-darkpyonix`가 `.py`/`.pynb` 셀을 그리고, 매니저 API로 `__runs__`의 최근 실행 기록을 셀에 맞춰 보여 줌(FR-R4). 실행·중지와 SSE 실시간 출력. VS Code 먼저, IntelliJ 다음. 코드는 확장 저장소에 있고 여기서는 추적만 함 | M2 |
+| M4 | 허브 | 2026-10-18 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`hub/worker/`), 계정은 GitHub 로그인(FR-H6), 릴레이는 `relay.darkpyonix.dev`(`hub/server/`, FR-H3). 릴레이를 VPS에 둘지 Container로 옮길지는 Ember NFR-N1의 QAD 켬/끔 측정으로 정함(Q9). 사용자 준비물: Cloudflare 존·API 토큰, GitHub OAuth App, 릴레이 VPS | Q1(조건부 결정됨, iroh로 시작), Ember M5와 함께 |
 
-**11월 범위에서 뺀 것과 이유**
+**10월 셋째 주 범위에서 뺀 것과 이유**
 - (변수 체크포인트·복원은 범위가 아닙니다. 변수는 실행 기록에 남은 코드로 재현합니다. INTENT 1.2 D.)
-- `parallel`/`concurrent`와 interop 셀의 실행 의미(Q7, Q8): 문법은 받아들이고 보존하지만, 실행 의미는 이슈 #5와 #7의 결정이 먼저입니다.
 
 `vscode-darkpyonix`와 `intellij-darkpyonix`가 매니저 API에 붙는 작업은 M2 이후에 시작할 수 있습니다. ember는 M1~M4가 커널 API에 의존하지 않습니다(Ember 구현 담당 확인).
 
@@ -56,8 +56,8 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | Q4 | 기존 Jupyter 도구와의 호환(Jupyter Server REST 흉내)이 필요한지 | 보류 |
 | Q5 | `__runs__/`의 보관 정책 | Git 추적은 결정됨(기본 포함, 원하면 폴더째 제외, INTENT D8). 용량 상한과 오래된 실행 정리는 FR-R5의 사이드카 외에 두지 않음 |
 | Q6 | `restart hard`에서 OS 잠금이 잠깐 풀리는 틈을 어떻게 막을지(재실행 전 잠금 파일 핸들 상속 등) | M1에서 결정 |
-| Q7 | grid 레이아웃을 여닫는 태그가 필요한지, horizontal/vertical 전환으로 충분한지 | 이슈 #7 |
-| Q8 | `parallel`/`concurrent`와 언어 interop 셀의 실행 의미 | 이슈 #5, #7 |
+| Q7 | grid 레이아웃을 여닫는 태그가 필요한지, horizontal/vertical 전환으로 충분한지 | 추천안: 태그 없이 전환만(SPEC FR-F7 `Draft`, [제안](docs/proposals/cells-parallel-interop.md) §2). 이슈 #7에서 인용 답 대기, 답이 다르면 답을 따름 |
+| Q8 | `parallel`/`concurrent`와 언어 interop 셀의 실행 의미 | 추천안을 SPEC FR-X7~X12, FR-F8~F13에 `Draft`로 반영(asyncio+스레드 기본, 프로세스는 옵션이며 10-18 범위 밖). 이슈 #5, #7 답 대기 |
 | Q9 | iroh 릴레이를 어디서 돌릴지: 작은 VPS(릴레이 + QAD) 또는 Cloudflare Container(WebSocket만, QAD 없음) | 권장(2026-10-03): VPS로 시작. Ember NFR-N1 측정을 VPS 위에서 QAD 켬/끔 두 번 하고, QAD를 끈 직접 경로 성공률도 85% 이상이면 Container로 옮김(SPEC FR-H3). 사용자 확인 대기 |
 | Q10 | 2025 인증 계열의 범위와 경로. 2025 문서의 요약표(`/auth`…, 파일 구분 없음)와 상세 페이지(`/kernels/{kernel_id}/…`)가 다릅니다 | 결정(2026-10-04). 비밀번호와 마스터 토큰은 사용자: "매니저 단위 맞아." 요약표 넷은 `/api/auth…`이고 파일마다 비밀번호는 지웁니다(SPEC FR-A4). 상세의 `/kernels/{kernel_id}/tokens/…`는 사용자: "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아." 그래서 커널에 묶이고 어느 매니저로든 통합니다(SPEC FR-A5, FR-A6) |
 | Q11 | 초기 토큰(2025, 인증 없음)을 바깥에 열린 전용 매니저에서 누가 먼저 받을 수 있는지 | 결정(2026-10-04, 사용자: "초기 토큰은 애초에 열 때 토큰을 발급했을건데 뭐가 문제야? 토큰이 없으면 연결이 안되잖아. 초기 토큰 발급은 건드리지 마."). 2025 그대로 둡니다. "한 번만 발급"과 `409 already_initialized`는 지웠습니다(SPEC FR-A4) |
@@ -65,5 +65,5 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | Q13 | 2025 `user_permission: "write"`를 `viewer3`와 `admin`으로 읽은 것(셀 편집과 잠금도 `viewer3`부터) | 결정(2026-10-04, 사용자: "권한 이름 저따위 아니거든? 시멘틱하게 다시 추론해 … 실행 권한이랑 코드 수정 권한은 다른거야. 권한 등급 개념 아니니까 이상한 방향으로 가지 마."). 사용자가 승인한 능력 다섯(`read` 코드 보기, `history` 실행 기록과 출력, `execute` 실행과 인터럽트, `edit` 코드 수정과 셀 잠금, `manage` 공유 설정)의 집합으로 바꿨습니다. 등급과 순서는 없습니다. 2025 `"write"`는 실행이면 `execute`, 셀 편집·잠금이면 `edit`, 공유 설정의 `"admin"`은 `manage`입니다(INTENT D18, SPEC FR-A3) |
 | Q14 | 발견 멀티캐스트 그룹 주소와 포트. 지금 `239.255.68.80:46880`은 리더가 혼자 정한 값입니다 | 리더 결정, 사용자 확인 대기 (INTENT D4) |
 | Q15 | 매니저 인증의 세부. (1) 2025 `GET /auth`의 "비밀번호를 세션에 넣어서"를 `Authorization: Basic`(사용자 이름 비움)으로 읽은 것. (2) 비밀번호가 이미 있는 매니저에서는 초기 토큰으로 비밀번호를 바꿀 수 없게 한 것. 없으면 인증 없이 받는 초기 토큰으로 누구나 매니저 비밀번호를 바꿉니다(SPEC FR-A4) | 리더 결정, 사용자 확인 대기 |
-| Q17 | 능력 다섯에 들지 않은 작업의 대응. 커널 시작·재시작·종료·강제 종료는 `execute`, 네임스페이스 조회와 실행 대기 결과는 `history`, 커널 목록·상태·접속자 표시와 포커스는 `read`로 두었습니다(INTENT D18, SPEC FR-A3) | 리더 결정, 사용자 확인 대기 |
 | Q16 | 커널 접근 토큰 저장 위치. 어느 매니저로든 통하도록 런타임 홈의 `tokens/<kernel_id>.json`(0600)에 해시로 두고, 같은 계정의 모든 매니저가 읽어 검사합니다. 파일 옆(`__runs__/`)은 Git으로 퍼지고, `manager.db`는 다른 매니저가 못 읽고, 커널 메모리는 커널이 멈추면 사라져서 고르지 않았습니다(INTENT D17, PROTOCOL §6) | 리더 결정, 사용자 확인 대기 |
+| Q17 | 능력 다섯에 들지 않은 작업의 대응. 커널 시작·재시작·종료·강제 종료는 `execute`, 네임스페이스 조회와 실행 대기 결과는 `history`, 커널 목록·상태·접속자 표시와 포커스는 `read`로 두었습니다(INTENT D18, SPEC FR-A3) | 리더 결정, 사용자 확인 대기 |
