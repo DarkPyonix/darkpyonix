@@ -80,7 +80,8 @@ DarkPyonix 전체는 **에이전트 대화가 먼저이고, 필요할 때 코딩
 
 처음에는 FastAPI 매니저 앞에 nginx를 둘 생각이었습니다. 사용자 결정(2026-10-03): "nginx가 유저들한테 불편을 줄 것 같아. 혹시 매니저 자체를 rust로 대체할 수 있는 부분을 대체해서 nginx 없이도 빠른 속도를 내도록 해줄 수 있어?" 그래서 매니저와 CLI를 Rust 바이너리 `darkpyonix` 하나로 만듭니다.
 
-- 이 바이너리 하나가 HTTP/1.1·HTTP/2, SSE, WebSocket, TLS(rustls, 전용 모드는 ACME로 인증서 자동 발급), 정적 파일(ash·문서), 리버스 프록시(VS Code `serve-web` 등)를 직접 맡습니다. nginx가 하던 일이 모두 여기 들어오므로 사용자는 따로 설정할 것이 없습니다.
+- 이 바이너리 하나가 HTTP/1.1·HTTP/2, SSE, WebSocket, TLS(rustls, 전용 모드는 ACME로 인증서 자동 발급), API 문서 페이지, 리버스 프록시(VS Code `serve-web` 등)를 직접 맡습니다. nginx가 하던 일이 모두 여기 들어오므로 사용자는 따로 설정할 것이 없습니다.
+- 매니저는 커널에 접근하는 API만 제공합니다. ash는 매니저가 서빙하지 않습니다. ash는 허브(`hub/`)가 호스팅하고, 매니저 API에 공유 토큰으로 붙습니다(FR-H4). 사용자 지적(2026-10-03): "ash은 darkpyonix.dev에서 배포되는거고 ember나 커널 매니저가 관계되는게 아니야. 커널 매니저는 접근 api만 주는거라고."
 - CLI도 같은 바이너리입니다. 에이전트가 수없이 부르는 `darkpyonix run/stop/logs`가 인터프리터 기동 없이 바로 뜹니다.
 - 커널은 여전히 표준 라이브러리 파이썬입니다(§2 조건 1–2). 바이너리는 커널 소스를 안에 담고 있다가 런타임 홈(`~/.darkpyonix/runtime/<버전>/`)에 풀어서 부트스트랩합니다(D3). 그래서 바이너리 하나만 깔아도 동작합니다. PyPI에는 같은 바이너리를 담은 휠(maturin `bin`)과 런타임 API 패키지를 냅니다.
 - 계약은 그대로 `docs/api/manager.openapi.yaml`입니다. 테스트는 언어와 무관하게 HTTP 표면을 대상으로 파이썬 pytest로 돌립니다(SPEC NFR-M3).

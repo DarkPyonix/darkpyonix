@@ -12,7 +12,7 @@ DarkPyonix kernel stack:
   interpreter without installation.
 - `darkpyonix/manager/`: the **kernel manager** and the `darkpyonix` CLI, a Rust workspace
   (INTENT D10). A disposable HTTP front for kernels. It discovers running kernels, launches
-  new ones, and serves IDEs, agents and the shared notebook (ash). It embeds the Python kernel
+  new ones, and serves the kernel access API to IDEs, agents and the shared notebook (ash); it does not host ash. It embeds the Python kernel
   sources from `darkpyonix/kernel/`. `darkpyonix/kernel/darkpyonix/manager/` is the superseded
   Python prototype.
 - `darkpyonix/kernel/darkpyonix/` (top level): the **runtime API** that notebook files import
