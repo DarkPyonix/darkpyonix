@@ -30,7 +30,10 @@ info:
     session cookie. OpenAI / Sign in with ChatGPT is not a hub feature; it stays in the
     user's own ember server.
 
-    **Devices (FR-H1).** A device asks to join with `POST /v1/device-links`, a signed-in person
+    **Devices (FR-H1).** Roles: `main_server` (account rights, may hold names), `computer`
+    (runs kernels; may publish shares), `client` (only connects to other devices, e.g. a
+    phone; may not publish shares or hold names). The `client` role is provisional.
+    A device asks to join with `POST /v1/device-links`, a signed-in person
     (or the account's main server) approves the user code, and the device claims a device
     token by signing the challenge with its iroh key.
 
@@ -292,7 +295,7 @@ paths:
               properties:
                 endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
                 name: {type: string, minLength: 1, maxLength: 64}
-                role: {type: string, enum: [main_server, computer]}
+                role: {type: string, enum: [main_server, computer, client]}
       responses:
         "201":
           description: Link created.
@@ -395,7 +398,7 @@ paths:
                   user_code: {type: string}
                   endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
                   name: {type: string}
-                  role: {type: string, enum: [main_server, computer]}
+                  role: {type: string, enum: [main_server, computer, client]}
                   expires_at: {type: integer}
         "401":
           description: No valid session or device token.
@@ -747,6 +750,8 @@ paths:
           description: Malformed share id.
         "401":
           description: Missing or invalid device token.
+        "403":
+          description: A `client` device (it hosts nothing to share).
         "409":
           description: The share id is published by another device.
 
@@ -983,7 +988,7 @@ components:
       properties:
         endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
         name: {type: string}
-        role: {type: string, enum: [main_server, computer]}
+        role: {type: string, enum: [main_server, computer, client]}
         created_at: {type: integer, description: Unix seconds.}
         last_seen: {type: [integer, "null"], description: Unix seconds of the last relay admission, presence report or address publish.}
         online: {type: boolean, description: Connected to the relay host now, as it last reported.}
