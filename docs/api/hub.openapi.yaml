@@ -1,18 +1,22 @@
 openapi: 3.1.0
 info:
-  title: DarkPyonix Hub API (darkpyonix.dev)
-  version: 0.3.0
-  summary: GitHub accounts, device registry, address directory, share links and HTTPS names for DarkPyonix; the iroh relay on its own host.
+  title: DarkPyonix Hub API (api.darkpyonix.dev)
+  version: 0.4.0
+  summary: GitHub accounts, device registry, address directory, share links, HTTPS names and hosted ash notebooks for DarkPyonix; the iroh relay on its own host.
   description: |
     The hub connects a user's machines (the main server and its branch computers) and lets
     shared notebooks reach a dedicated manager, **without seeing their traffic** (SPEC NFR-H1).
 
-    **Two hosts** (SPEC §10, INTENT D15):
+    **Hosts** (SPEC §10, INTENT D15 and its 2026-10-03 amendment, a proposal):
 
-    - `https://darkpyonix.dev` is a **Cloudflare Worker** (`hub/worker/`, TypeScript, D1).
-      It serves GitHub sign-in, the device registry, the address directory, share links, the
-      ash viewer (Workers static assets) and HTTPS names (ACME TXT through the Cloudflare DNS
-      API).
+    - `https://darkpyonix.dev` (the root) is the **front**: the landing page and the ash web
+      app, static files only (SPEC FR-H12). It is not part of this API. Its pages are
+      `/n/{notebook_id}` (hosted notebooks), `/s/{share_id}#<token>` (share links), `/link`
+      (device approval) and `/new`; they call this API from the browser.
+    - `https://api.darkpyonix.dev` is a **Cloudflare Worker** (`hub/worker/`, TypeScript, D1
+      for metadata, a private R2 bucket for notebook content). It serves GitHub sign-in, the
+      device registry, the address directory, share resolution, HTTPS names (ACME TXT through
+      the Cloudflare DNS API) and hosted notebooks. It serves no HTML front.
     - `https://relay.darkpyonix.dev` is the **relay host** (`hub/server/`, the `iroh-relay`
       server crate). Workers cannot accept UDP, and iroh's QUIC address discovery (QAD) needs
       UDP 7842, so the relay runs where it can. Operations served there carry a path-level
@@ -23,7 +27,7 @@ info:
     The peer-to-peer transport is **iroh 1.x** (PROJECT Q1). A device *is* an iroh endpoint:
     its id is the endpoint id, the lowercase hex of its ed25519 public key.
     `PUT`/`GET /pkarr/{key}` is iroh's pkarr relay protocol, so the stock `PkarrPublisher`
-    and `PkarrResolver` work against `https://darkpyonix.dev/pkarr`.
+    and `PkarrResolver` work against `https://api.darkpyonix.dev/pkarr`.
 
     **Accounts (FR-H6).** An account is a GitHub user (its numeric user id). People sign in
     in a browser (`/auth/login`, OAuth authorization code with PKCE S256 and state) and get a
@@ -44,8 +48,24 @@ info:
     a **resolve token** (`dpr_...`, read-only: it reads same-account address records and
     nothing else) goes in the `token` query parameter; device tokens are never accepted in
     a query (SPEC NFR-H2). The Worker never logs request URLs. Cookie-authenticated writes must come
-    from `https://darkpyonix.dev` (`Origin`), else 403. Tokens and session ids are stored
+    from the front, `https://darkpyonix.dev` (`Origin`), else 403; user name subdomains
+    (`<name>.darkpyonix.dev`) are other people's servers and are refused too. Tokens and session ids are stored
     hashed. "Account rights" means a signed-in session or the account's `main_server` device.
+
+    **Browsers (FR-H13).** The session cookie is host-only on `api.darkpyonix.dev`
+    (`__Host-dp_session`, `SameSite=Lax`); the front calls this API with
+    `credentials: "include"`. CORS is open to exactly the front origin (plus operator-set dev
+    origins): `Access-Control-Allow-Origin: <origin>`, `Access-Control-Allow-Credentials: true`,
+    `Vary: Origin`, `Access-Control-Expose-Headers: ETag`. Every path also answers `OPTIONS`
+    preflights (204) for that origin; preflights are not listed per path. No CORS headers for
+    any other origin, including `null` (sandboxed notebook content, SPEC NFR-H3).
+
+    **Hosted notebooks (FR-H14..H19).** A notebook (`n_` + 32 hex) belongs to one account and
+    holds immutable, numbered versions. A version is one notebook file (`.py`/`.pynb`,
+    docs/FORMAT.md) and optionally one run record (`.ipynb` from `__runs__`). Visibility is
+    `private`, `unlisted` or `public`. The hub stores and serves notebooks; it never runs
+    them. A notebook may point at a share (`share_id`) so that a link with the share token in
+    its fragment opens the owner's live kernel through the relay.
 
     **Errors.** Error bodies are `Error` objects. Every 401 carries a `code`:
     `device_removed` when the device token belongs to a removed device (stop retrying, drop
@@ -54,7 +74,7 @@ info:
     name: MIT
     url: https://github.com/DarkPyonix/darkpyonix/blob/main/LICENSE
 servers:
-  - url: https://darkpyonix.dev
+  - url: https://api.darkpyonix.dev
 security:
   - device: []
   - session: []
@@ -69,7 +89,9 @@ tags:
   - name: Relay
     description: The iroh relay on relay.darkpyonix.dev, and the Worker callbacks it uses (FR-H3).
   - name: Shares
-    description: Public share links and the ash viewer (FR-H4).
+    description: Share links resolved to the hosting device (FR-H4). The share page itself is on the front.
+  - name: Notebooks
+    description: Hosted ash notebooks, their versions and visibility (FR-H14..H19).
   - name: Names
     description: "`<name>.darkpyonix.dev` and ACME DNS-01 challenges (FR-H5)."
 
@@ -109,10 +131,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [api_version, hub_version, relay_urls, pkarr_url, link_url]
+                required: [api_version, hub_version, api_url, front_url, relay_urls, pkarr_url, link_url]
                 properties:
                   api_version: {type: integer, const: 1}
                   hub_version: {type: string}
+                  api_url: {type: string, format: uri, example: "https://api.darkpyonix.dev", description: This API's base URL.}
+                  front_url: {type: string, format: uri, example: "https://darkpyonix.dev", description: "The front (ash web app); share and notebook links live here."}
                   relay_urls:
                     type: array
                     items: {type: string}
@@ -121,27 +145,8 @@ paths:
                   pkarr_url:
                     type: string
                     description: Base URL for iroh's PkarrPublisher and PkarrResolver (append `?token=<resolve token>` to resolve).
-                    example: "https://darkpyonix.dev/pkarr"
-                  link_url: {type: string, example: "https://darkpyonix.dev/link"}
-
-  /.well-known/org.flathub.VerifiedApps.txt:
-    get:
-      tags: [System]
-      operationId: getFlathubVerifiedApps
-      summary: Flathub website verification (FR-H7)
-      description: |
-        The token Flathub issues to verify app ids under this domain (`dev.darkpyonix.Ember`),
-        as plain text. Its content is the Worker's `FLATHUB_VERIFICATION_TOKEN` var or secret;
-        when that is unset or empty the file does not exist.
-      security: []
-      responses:
-        "200":
-          description: The verification token.
-          content:
-            text/plain:
-              schema: {type: string}
-        "404":
-          description: No token configured.
+                    example: "https://api.darkpyonix.dev/pkarr"
+                  link_url: {type: string, example: "https://darkpyonix.dev/link", description: The device approval page on the front.}
 
   # ------------------------------------------------------------------ accounts (FR-H6)
 
@@ -152,7 +157,7 @@ paths:
       summary: Start GitHub sign-in (redirects to GitHub)
       description: |
         Redirects to `https://github.com/login/oauth/authorize` with `client_id`,
-        `redirect_uri=https://darkpyonix.dev/auth/callback`, a random `state`, and a PKCE
+        `redirect_uri=https://api.darkpyonix.dev/auth/callback`, a random `state`, and a PKCE
         `code_challenge` (S256). No scope is requested: only the public profile is read. The
         state is also set in the `__Host-dp_oauth` cookie (10 minutes).
       security: []
@@ -160,7 +165,7 @@ paths:
         - name: return_to
           in: query
           required: false
-          description: A path on this origin to return to after sign-in (anything else becomes `/`).
+          description: A path on the front (`https://darkpyonix.dev`) to return to after sign-in (anything else becomes `/`).
           schema: {type: string}
       responses:
         "302":
@@ -177,8 +182,8 @@ paths:
         Checks that `state` matches the `__Host-dp_oauth` cookie and an unexpired, unused
         transaction; exchanges `code` with the PKCE verifier; reads `GET https://api.github.com/user`;
         revokes the GitHub token; finds or creates the account for that GitHub user id; sets
-        `__Host-dp_session` (HttpOnly, Secure, SameSite=Lax, 30 days) and redirects to
-        `return_to`.
+        `__Host-dp_session` (host-only on this API host, HttpOnly, Secure, SameSite=Lax,
+        30 days) and redirects to `https://darkpyonix.dev` + `return_to` (FR-H13).
       security: []
       parameters:
         - {name: code, in: query, required: false, schema: {type: string}}
@@ -186,7 +191,7 @@ paths:
         - {name: error, in: query, required: false, schema: {type: string}}
       responses:
         "302":
-          description: Signed in; to `return_to`.
+          description: Signed in; to the front at `return_to`.
         "400":
           description: Missing code or state, state not bound to this browser, unknown/used/expired state, or GitHub refused the code.
         "403":
@@ -259,22 +264,6 @@ paths:
               schema: {$ref: "#/components/schemas/Error"}
 
   # ------------------------------------------------------------------ devices (FR-H1)
-
-  /link:
-    get:
-      tags: [Devices]
-      operationId: openLinkPage
-      summary: The page where a signed-in person approves a device's user code
-      security: []
-      parameters:
-        - {name: code, in: query, required: false, schema: {type: string, example: BCDF-GHJK}}
-      responses:
-        "200":
-          description: HTML (signed in).
-          content:
-            text/html: {}
-        "302":
-          description: Not signed in; to `/auth/login?return_to=/link?code=...`.
 
   /v1/device-links:
     post:
@@ -754,7 +743,7 @@ paths:
       description: |
         Requires a resolve token, device token or session of the same account. For iroh's
         stock `PkarrResolver`, configure the URL as
-        `https://darkpyonix.dev/pkarr?token=<resolve token>` (iroh appends the key as a path
+        `https://api.darkpyonix.dev/pkarr?token=<resolve token>` (iroh appends the key as a path
         segment and keeps the query). Only resolve tokens are accepted in the query (NFR-H2).
       parameters:
         - name: token
@@ -789,7 +778,7 @@ paths:
       summary: iroh relay (WebSocket upgrade, iroh relay protocol), on the relay host
       description: |
         Served by the `iroh-relay` crate on the relay host. The relay handshake proves the
-        client's endpoint id; the relay then asks `POST https://darkpyonix.dev/internal/v1/relay/admit`
+        client's endpoint id; the relay then asks `POST https://api.darkpyonix.dev/internal/v1/relay/admit`
         (with the auth token the client presented, if any) and may cache an allow for
         `cache_secs`. Admitted: registered, non-removed devices; or any endpoint presenting
         a valid guest relay pass from `GET /v1/shares/{share_id}` as `Authorization: Bearer`
@@ -989,38 +978,366 @@ paths:
         "404":
           description: No such share in the caller's reach.
 
-  /s/{share_id}:
-    parameters:
-      - $ref: "#/components/parameters/ShareId"
-    get:
-      tags: [Shares]
-      operationId: openShareLink
-      summary: The page a share link opens (ash viewer; a placeholder until ash ships)
-      description: The token in the URL fragment stays in the browser.
-      security: []
-      responses:
-        "200":
-          description: HTML.
-          content:
-            text/html: {}
-        "404":
-          description: Unknown or unpublished share.
+  # ------------------------------------------------------------------ notebooks (FR-H14..H19)
 
-  /ash/:
+  /v1/notebooks:
     get:
-      tags: [Shares]
-      operationId: getAshViewer
-      summary: The official ash viewer (Workers static assets; a placeholder until ash ships)
+      tags: [Notebooks]
+      operationId: listMyNotebooks
+      summary: The caller's account's notebooks, every visibility (FR-H15)
+      responses:
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notebooks]
+                properties:
+                  notebooks:
+                    type: array
+                    items: {$ref: "#/components/schemas/Notebook"}
+        "401":
+          description: No valid session or device token.
+    post:
+      tags: [Notebooks]
+      operationId: createNotebook
+      summary: Create an empty notebook (FR-H14)
       description: |
-        The built ash viewer is deployed as static assets under `/ash/` (its other files are
-        outside this contract, like the manager's `/docs/` pages), and `/s/{share_id}`
-        serves its `index.html`.
+        A signed-in session, or the device token of a `main_server` or `computer` device of the
+        account. The id is 128 random bits, since an `unlisted` notebook is reachable by anyone
+        who knows it. Visibility defaults to `private`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              additionalProperties: false
+              properties:
+                title: {type: string, minLength: 1, maxLength: 120}
+                visibility: {$ref: "#/components/schemas/Visibility"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Notebook"}
+        "400":
+          description: Malformed body.
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: A `client` device, or a cross-origin cookie request.
+        "409":
+          description: "`quota_exceeded` (FR-H19)."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "429":
+          description: Too many notebooks created this minute (FR-H19).
+
+  /v1/users/{github_login}/notebooks:
+    parameters:
+      - name: github_login
+        in: path
+        required: true
+        schema: {type: string, pattern: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"}
+    get:
+      tags: [Notebooks]
+      operationId: listPublicNotebooks
+      summary: A user's `public` notebooks (FR-H15)
       security: []
       responses:
         "200":
-          description: HTML.
+          description: Newest first; `public` only, never `unlisted`, `private` or taken down.
           content:
-            text/html: {}
+            application/json:
+              schema:
+                type: object
+                required: [notebooks]
+                properties:
+                  notebooks:
+                    type: array
+                    items: {$ref: "#/components/schemas/Notebook"}
+        "404":
+          description: No such user on this hub.
+        "429":
+          description: Too many anonymous reads (FR-H19).
+
+  /v1/notebooks/{notebook_id}:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+    get:
+      tags: [Notebooks]
+      operationId: getNotebook
+      summary: A notebook and its versions
+      description: |
+        Anyone for `public` and `unlisted` (the latter with `X-Robots-Tag: noindex`); the
+        owning account for `private`. A notebook the caller may not read is 404, never 403.
+      security: [{}, {device: []}, {session: []}]
+      responses:
+        "200":
+          description: The notebook.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Notebook"
+                  - type: object
+                    required: [versions]
+                    properties:
+                      versions:
+                        type: array
+                        description: Newest first.
+                        items: {$ref: "#/components/schemas/NotebookVersion"}
+        "404":
+          description: Unknown, deleted, taken down (for others than the owner), or not readable by the caller.
+        "429":
+          description: Too many anonymous reads (FR-H19).
+    patch:
+      tags: [Notebooks]
+      operationId: updateNotebook
+      summary: Change title, visibility, or the attached share (FR-H15, FR-H17)
+      description: |
+        Account rights (session or `main_server`) or the device that created the notebook.
+        `share_id` must be a share published by a device of the same account; `null` detaches.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                title: {type: string, minLength: 1, maxLength: 120}
+                visibility: {$ref: "#/components/schemas/Visibility"}
+                share_id: {type: [string, "null"], pattern: "^s_[0-9a-f]{16}$"}
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Notebook"}
+        "400":
+          description: Malformed body.
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: Not allowed to change this notebook, or a cross-origin cookie request.
+        "404":
+          description: Unknown notebook in the caller's reach, or the share is not published.
+        "409":
+          description: "`share_not_in_account`, or widening the visibility of a taken-down notebook."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+    delete:
+      tags: [Notebooks]
+      operationId: deleteNotebook
+      summary: Delete a notebook and every version (FR-H18)
+      description: Account rights or the creating device. Content is removed from storage at once, or by the hourly cron within 24 hours.
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: Not allowed, or a cross-origin cookie request.
+        "404":
+          description: Unknown notebook in the caller's reach.
+
+  /v1/notebooks/{notebook_id}/versions:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+    post:
+      tags: [Notebooks]
+      operationId: pushNotebookVersion
+      summary: Add a version (FR-H14)
+      description: |
+        A session or a `main_server`/`computer` device token of the owning account.
+        `source` is the notebook file as it is on disk (UTF-8, no NUL, file name ending in
+        `.py` or `.pynb`). `run` is optional: one run record from
+        `__runs__/<file>/<run_id>.ipynb` (nbformat 4; outputs of type `stream`,
+        `display_data`, `execute_result` or `error`). Sidecar logs are not uploaded. The new
+        number is the notebook's highest number so far plus one, assigned atomically.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: {type: string, format: binary, description: "The notebook file; its file name comes from Content-Disposition. At most 1 MiB."}
+                run: {type: string, format: binary, description: "A run record (.ipynb). At most 16 MiB."}
+                message: {type: string, maxLength: 500}
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NotebookVersion"}
+        "400":
+          description: Malformed source (not UTF-8, NUL, bad file name) or run record (not nbformat 4, unknown output type).
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: A `client` device, another account's device, or a cross-origin cookie request.
+        "404":
+          description: Unknown notebook in the caller's reach.
+        "409":
+          description: "`quota_exceeded` (versions per notebook or stored bytes, FR-H19)."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413":
+          description: Source over 1 MiB, run over 16 MiB, or request over 18 MiB.
+        "429":
+          description: Too many uploads this minute (FR-H19).
+
+  /v1/notebooks/{notebook_id}/versions/{version}:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+      - $ref: "#/components/parameters/NotebookVersionRef"
+    get:
+      tags: [Notebooks]
+      operationId: getNotebookVersion
+      summary: One version's metadata
+      security: [{}, {device: []}, {session: []}]
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NotebookVersion"}
+        "404":
+          description: Unknown or deleted version, `latest` of a notebook with no versions, or not readable by the caller.
+        "429":
+          description: Too many anonymous reads (FR-H19).
+    delete:
+      tags: [Notebooks]
+      operationId: deleteNotebookVersion
+      summary: Delete one version (its number is never reused, FR-H18)
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: Not allowed, or a cross-origin cookie request.
+        "404":
+          description: Unknown version in the caller's reach.
+
+  /v1/notebooks/{notebook_id}/versions/{version}/source:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+      - $ref: "#/components/parameters/NotebookVersionRef"
+    get:
+      tags: [Notebooks]
+      operationId: getNotebookSource
+      summary: The version's notebook file, byte for byte
+      description: |
+        Sent with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox;
+        default-src 'none'`, `Content-Disposition: attachment` and `ETag: "<sha256>"`, so it
+        never renders as a document (SPEC NFR-H3). `Cache-Control: private, max-age=60`.
+      security: [{}, {device: []}, {session: []}]
+      responses:
+        "200":
+          description: The file.
+          content:
+            text/plain:
+              schema: {type: string}
+        "304":
+          description: Matches `If-None-Match`.
+        "404":
+          description: Unknown version or not readable by the caller.
+        "429":
+          description: Too many anonymous reads (FR-H19).
+
+  /v1/notebooks/{notebook_id}/versions/{version}/run:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+      - $ref: "#/components/parameters/NotebookVersionRef"
+    get:
+      tags: [Notebooks]
+      operationId: getNotebookRun
+      summary: The version's run record (nbformat 4), byte for byte
+      description: Same headers as the source (SPEC NFR-H3).
+      security: [{}, {device: []}, {session: []}]
+      responses:
+        "200":
+          description: The run record.
+          content:
+            application/json:
+              schema: {type: object}
+        "304":
+          description: Matches `If-None-Match`.
+        "404":
+          description: The version has no run record, is unknown, or is not readable by the caller.
+        "429":
+          description: Too many anonymous reads (FR-H19).
+
+  /v1/notebooks/{notebook_id}/report:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+    post:
+      tags: [Notebooks]
+      operationId: reportNotebook
+      summary: Report a `public` or `unlisted` notebook to the operator (FR-H19)
+      security: [{}, {session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        "202":
+          description: Recorded for the operator.
+        "400":
+          description: Malformed body.
+        "404":
+          description: Not readable by the caller.
+        "429":
+          description: Too many reports from this address.
+
+  /admin/v1/notebooks/{notebook_id}/takedown:
+    parameters:
+      - $ref: "#/components/parameters/NotebookId"
+    post:
+      tags: [Notebooks]
+      operationId: takeDownNotebook
+      summary: Operator takedown (FR-H19)
+      description: The notebook becomes 404 for everyone but its owner, who sees `taken_down`.
+      security:
+        - operatorSecret: []
+      responses:
+        "204":
+          description: Taken down (also when it already was).
+        "401":
+          description: Operator secret missing or wrong.
+        "404":
+          description: Unknown notebook.
+    delete:
+      tags: [Notebooks]
+      operationId: restoreNotebook
+      summary: Undo an operator takedown
+      security:
+        - operatorSecret: []
+      responses:
+        "204":
+          description: Restored.
+        "401":
+          description: Operator secret missing or wrong.
+        "404":
+          description: Unknown notebook.
 
   # ------------------------------------------------------------------ names (FR-H5)
 
@@ -1150,6 +1467,10 @@ components:
       type: http
       scheme: bearer
       description: The secret shared by the Worker and the relay host (`RELAY_SHARED_SECRET`).
+    operatorSecret:
+      type: http
+      scheme: bearer
+      description: The hub operator's secret (`OPERATOR_SECRET`), for takedowns (FR-H19).
   parameters:
     EndpointId:
       name: endpoint_id
@@ -1167,6 +1488,20 @@ components:
       in: path
       required: true
       schema: {type: string, pattern: "^[a-z0-9]([a-z0-9-]{1,30}[a-z0-9])$"}
+    NotebookId:
+      name: notebook_id
+      in: path
+      required: true
+      schema: {type: string, pattern: "^n_[0-9a-f]{32}$"}
+    NotebookVersionRef:
+      name: version
+      in: path
+      required: true
+      description: A version number, or `latest`.
+      schema:
+        oneOf:
+          - {type: integer, minimum: 1}
+          - {type: string, const: latest}
   schemas:
     Error:
       type: object
@@ -1176,7 +1511,7 @@ components:
         code:
           type: string
           description: Machine-readable, where documented. Every 401 has one.
-          enum: [invalid_credentials, device_removed, main_server_exists, replace_mismatch]
+          enum: [invalid_credentials, device_removed, main_server_exists, replace_mismatch, quota_exceeded, share_not_in_account]
     Device:
       type: object
       required: [endpoint_id, name, role, created_at, last_seen, online, app]
@@ -1234,3 +1569,51 @@ components:
         name: {type: string}
         fqdn: {type: string, example: "studio.darkpyonix.dev"}
         endpoint_id: {type: string}
+    Visibility:
+      type: string
+      enum: [private, unlisted, public]
+      default: private
+      description: "`private`: the owning account only. `unlisted`: anyone with the id, never listed, noindex. `public`: anyone, listed under the user (FR-H15)."
+    Notebook:
+      type: object
+      required: [notebook_id, owner, title, visibility, share_id, latest_version, created_at, updated_at, taken_down]
+      properties:
+        notebook_id: {type: string, pattern: "^n_[0-9a-f]{32}$"}
+        owner:
+          type: object
+          required: [github_login]
+          properties:
+            github_login: {type: string, description: Display only.}
+        title: {type: string}
+        visibility: {$ref: "#/components/schemas/Visibility"}
+        share_id:
+          type: [string, "null"]
+          description: The attached share for opening the owner's live kernel (FR-H17). Without the share token (URL fragment) it grants nothing.
+        latest_version: {type: [integer, "null"], description: Highest remaining version; null when none.}
+        created_at: {type: integer, description: Unix seconds.}
+        updated_at: {type: integer, description: Unix seconds.}
+        taken_down: {type: boolean, description: Operator takedown (FR-H19); only the owner ever sees true.}
+    NotebookVersion:
+      type: object
+      required: [version, created_at, message, source, run]
+      properties:
+        version: {type: integer, minimum: 1}
+        created_at: {type: integer, description: Unix seconds.}
+        message: {type: [string, "null"]}
+        source:
+          type: object
+          required: [filename, sha256, size, cells]
+          properties:
+            filename: {type: string, example: train.py}
+            sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            size: {type: integer}
+            cells: {type: integer, description: Cell count by docs/FORMAT.md §2.2 markers (the preamble not counted).}
+        run:
+          oneOf:
+            - type: object
+              required: [run_id, sha256, size]
+              properties:
+                run_id: {type: string, example: 20261003-142233-a1f0}
+                sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+                size: {type: integer}
+            - {type: "null"}

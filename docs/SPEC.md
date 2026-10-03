@@ -18,6 +18,8 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 | 실행 기록 | 실행 하나를 담은 nbformat 4 노트북 파일(`__runs__/…/<run_id>.ipynb`) |
 | 매니저 | 커널을 발견·실행하고 HTTP API를 내는 프로세스. 임시/전용 모드 |
 | 런타임 홈 | `DARKPYONIX_HOME`, 기본 `~/.darkpyonix` |
+| 호스팅 노트북 | 허브(`api.darkpyonix.dev`)에 보관한 노트북. 판(version)의 묶음이고, 판은 노트북 파일 하나와 선택적인 실행 기록 하나입니다(FR-H14) |
+| 프런트 | 루트 `darkpyonix.dev`의 정적 웹 앱(랜딩 + ash). API를 부를 뿐 서버 코드가 없습니다(FR-H12) |
 
 ## 2. 커널 (K)
 
@@ -316,27 +318,41 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 
 전송은 iroh 1.x로 정했습니다(PROJECT Q1, 2026-10-03, 조건부: ember SPEC NFR-N1을 못 맞추면 직접 구현을 검토). 그래서 허브는 직접 만든 랑데부·중계 대신 iroh가 이미 쓰는 프로토콜을 그대로 받습니다. 기기는 iroh 엔드포인트이고, 기기 ID는 그 엔드포인트 ID(ed25519 공개 키, 소문자 hex 64자)입니다.
 
-**두 호스트(INTENT D15, 2026-10-03).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다.
+**호스트 역할 분담(INTENT D15와 그 개정, 2026-10-03, 개정은 제안).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다. 동적 기능은 서브도메인에 두고, 루트는 그것을 띄우는 프런트입니다(FR-H12).
 
 | 호스트 | 구현 | 맡는 일 |
 |---|---|---|
-| `https://darkpyonix.dev` | Cloudflare Worker `hub/worker/` (TypeScript, D1, 정적 자산, Cron) | GitHub 로그인(FR-H6), 기기 등록(FR-H1), 주소 디렉터리(FR-H2), 릴레이 입장 판정 API(FR-H3), 공유와 ash 호스팅(FR-H4), 이름과 ACME TXT(FR-H5), Flathub 검증 파일(FR-H7), 설정 발견(FR-H8) |
+| `https://darkpyonix.dev` | 정적 프런트: darkpyonix-ash 웹 빌드 + 랜딩, Workers 정적 자산(정적 전용 Worker) | 랜딩, ash 웹 앱, 노트북 페이지(FR-H16, FR-H17), 공유 링크 페이지(FR-H4), 기기 승인 페이지(FR-H1), Flathub 검증 파일(FR-H7), 옛 가이드 주소의 이동(FR-H12). 서버 코드와 쿠키가 없습니다 |
+| `https://api.darkpyonix.dev` | Cloudflare Worker `hub/worker/` (TypeScript, D1, R2, Cron) | GitHub 로그인(FR-H6, FR-H13), 기기 등록(FR-H1), 주소 디렉터리(FR-H2), 릴레이 입장 판정 API(FR-H3), 공유 해석(FR-H4), 이름과 ACME TXT(FR-H5), 설정 발견(FR-H8), 노트북 보관(FR-H14~H19) |
 | `https://relay.darkpyonix.dev` | 릴레이 호스트 `hub/server/` (Rust, `iroh-relay` 서버 크레이트) | iroh 릴레이 `/relay`, `/ping`, `/generate_204`, UDP 7842의 QUIC 주소 발견(QAD). 누구를 들일지는 Worker에 묻습니다 |
+| `https://docs.darkpyonix.dev` | 조직 GitHub Pages(`DarkPyonix.github.io`의 custom domain) | 프로젝트 가이드 `/<저장소>/`. 허브의 일이 아니고, 여기서는 이름만 예약합니다 |
 
-- Worker는 apex(`darkpyonix.dev`)에만 붙습니다(custom domain). `relay.darkpyonix.dev`는 Cloudflare 프록시를 끈(DNS only) A/AAAA 레코드로 릴레이 호스트를 가리킵니다. 프록시는 UDP 7842를 넘기지 않고, QAD는 릴레이 호스트 자신의 TLS 인증서를 쓰기 때문입니다.
+- API Worker는 `api.darkpyonix.dev`에만 붙습니다(custom domain). 프런트는 apex(`darkpyonix.dev`)에 붙는 별도의 정적 전용 Worker입니다. `relay.darkpyonix.dev`는 Cloudflare 프록시를 끈(DNS only) A/AAAA 레코드로 릴레이 호스트를 가리킵니다. 프록시는 UDP 7842를 넘기지 않고, QAD는 릴레이 호스트 자신의 TLS 인증서를 쓰기 때문입니다.
 - Worker의 부하: iroh `PkarrPublisher`는 5분마다(그리고 주소가 바뀔 때) 다시 올립니다. 기기 10대면 하루 약 3,000번의 `PUT /pkarr`와 그만큼의 D1 쓰기 두 번이고, 요청마다 ed25519 검증 한 번과 D1 질의 몇 개입니다. Workers 무료 한도(하루 10만 요청, D1 쓰기 10만)의 몇 % 수준이라 "가볍다"는 조건을 만족합니다. 운영은 CPU 한도 여유를 위해 Workers Paid를 권합니다.
 - 언어는 TypeScript입니다. 근거는 INTENT D15에 있습니다.
+
+**이행 메모(D15 개정, 제안).** 저장소 기준으로 Worker는 아직 배포되지 않았습니다(`wrangler.toml`의 `database_id`가 자리표시값). 그래서 옛 apex API와의 호환 기간은 두지 않고, 개정이 승인되면 한 번에 바꿉니다.
+
+| 이미 만든 것 | 바뀌는 것 |
+|---|---|
+| Worker 라우트 `darkpyonix.dev`(custom domain), 변수 `PUBLIC_URL` | 라우트 `api.darkpyonix.dev`, 변수 `API_URL`·`FRONT_URL`(FR-H8). R2 바인딩 `NOTEBOOKS`와 마이그레이션 `0007_notebooks.sql` 추가 |
+| FR-H4 자리표시 뷰어(`hub/worker/public/ash/`, `GET /ash/`, `GET /s/{share_id}`), `/link` HTML 페이지 | Worker의 정적 자산과 HTML 페이지를 걷어 내고 프런트로 옮김. 계약에서 `/ash/`, `/s/{share_id}`, `/link`, `/.well-known/org.flathub.VerifiedApps.txt` 연산을 뺌 |
+| 쿠키 `__Host-dp_session`, `__Host-dp_oauth`(apex) | 같은 이름으로 `api.darkpyonix.dev`에. 출처 검사는 `FRONT_URL` 기준(FR-H13). 배포 전이라 옮길 세션이 없음 |
+| GitHub OAuth App 콜백 `https://darkpyonix.dev/auth/callback` | `https://api.darkpyonix.dev/auth/callback`, `return_to`는 프런트 경로(FR-H6 개정) |
+| 릴레이 호스트의 입장·presence 호출 대상(apex) | `https://api.darkpyonix.dev/internal/v1/relay/*` |
+| Ember의 기본 허브 URL `https://darkpyonix.dev`(darkpyonix-ember `hub/src/config.rs` `DEFAULT_HUB_URL`과 그 시험들) | `https://api.darkpyonix.dev`. 그 뒤의 주소는 모두 `GET /v1/config`(FR-H8)에서 읽음 |
+| 조직 Pages `DarkPyonix.github.io`의 CNAME `darkpyonix.dev`, apex의 GitHub Pages A/AAAA 레코드 | CNAME `docs.darkpyonix.dev`, DNS `docs` → `darkpyonix.github.io`(DNS only). apex 레코드를 지운 뒤 프런트 Worker의 custom domain을 붙임(Cloudflare는 기존 레코드가 있으면 custom domain을 만들지 않음). 옛 가이드 주소는 프런트가 301(FR-H12) |
 
 계약은 [api/hub.openapi.yaml](api/hub.openapi.yaml) 하나이고, 릴레이 호스트가 답하는 연산은 경로 단위 `servers: relay.darkpyonix.dev`로 표시합니다. Worker 테스트가 Worker의 모든 연산이 문서의 상태 코드로만 답하고 Worker의 라우트와 문서의 연산이 정확히 같음을 확인합니다(`test_hub_every_operation_answers_with_a_documented_status`, `test_hub_every_worker_route_is_documented_and_vice_versa`). 릴레이 호스트의 같은 이름 테스트(`hub/server/tests/hub/openapi.rs`)는 `servers`가 붙은 연산만 확인합니다.
 
 전송 계층 교체 가능성: 허브가 iroh에 묶이는 곳은 릴레이 호스트와 주소 레코드 형식(pkarr 서명 패킷)뿐입니다. 계정, 기기 등록, 공유, 이름은 "ed25519 공개 키 하나 = 기기"라는 가정만 씁니다. 직접 구현으로 바꾸면 그 두 곳만 바꿉니다.
 
-**인증 모델.** 계정은 GitHub 사용자입니다(FR-H6). 사람은 브라우저에서 GitHub로 로그인해 세션 쿠키(`__Host-dp_session`)를 받고, 기기는 기기 링크(FR-H1)로 계정에 들어와 기기 토큰을 받습니다. "계정 권한"은 로그인한 세션 또는 그 계정의 `main_server` 기기 토큰입니다. 단, `main_server` 역할을 들이는 승인(메인 서버 바꾸기 포함, FR-H1)은 세션만 할 수 있습니다. 토큰과 세션 ID는 SHA-256 해시로만 저장하고, GitHub 액세스 토큰은 사용자 정보를 한 번 읽은 뒤 바로 폐기(revoke)하며 저장하지 않습니다. 쿠키로 인증한 쓰기 요청은 `Origin`이 `https://darkpyonix.dev`가 아니면 403입니다. 자격 증명 오류(401)의 본문은 `{"error": <설명>, "code": <코드>}`이고, `code`는 `device_removed`(지운 기기의 토큰. 다시 시도해도 소용없으니 기기는 토큰을 버리고 사용자에게 알립니다) 또는 `invalid_credentials`(없거나 모르는 토큰·세션)입니다. 상태 코드는 둘 다 401입니다. 410은 자원이 사라졌다는 뜻이지 자격 증명이 틀렸다는 뜻이 아니고, 401을 유지하면 "401이면 다시 인증"하는 기존 클라이언트가 그대로 동작합니다(FR-H1). OpenAI 로그인("Sign in with ChatGPT")과 ChatGPT 플랜 사용은 허브 기능이 아니고, 사용자가 직접 띄운 ember server가 합니다(PROJECT Q2).
+**인증 모델.** 계정은 GitHub 사용자입니다(FR-H6). 사람은 브라우저에서 GitHub로 로그인해 `api.darkpyonix.dev`의 호스트 전용 세션 쿠키(`__Host-dp_session`)를 받고(프런트는 자격 증명을 실은 CORS 요청으로 씁니다, FR-H13), 기기는 기기 링크(FR-H1)로 계정에 들어와 기기 토큰을 받습니다. "계정 권한"은 로그인한 세션 또는 그 계정의 `main_server` 기기 토큰입니다. 단, `main_server` 역할을 들이는 승인(메인 서버 바꾸기 포함, FR-H1)은 세션만 할 수 있습니다. 토큰과 세션 ID는 SHA-256 해시로만 저장하고, GitHub 액세스 토큰은 사용자 정보를 한 번 읽은 뒤 바로 폐기(revoke)하며 저장하지 않습니다. 쿠키로 인증한 쓰기 요청은 `Origin`이 프런트(`https://darkpyonix.dev`)가 아니면 403입니다(FR-H13). 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트이지만 남의 서버이므로 신뢰하지 않습니다. 자격 증명 오류(401)의 본문은 `{"error": <설명>, "code": <코드>}`이고, `code`는 `device_removed`(지운 기기의 토큰. 다시 시도해도 소용없으니 기기는 토큰을 버리고 사용자에게 알립니다) 또는 `invalid_credentials`(없거나 모르는 토큰·세션)입니다. 상태 코드는 둘 다 401입니다. 410은 자원이 사라졌다는 뜻이지 자격 증명이 틀렸다는 뜻이 아니고, 401을 유지하면 "401이면 다시 인증"하는 기존 클라이언트가 그대로 동작합니다(FR-H1). OpenAI 로그인("Sign in with ChatGPT")과 ChatGPT 플랜 사용은 허브 기능이 아니고, 사용자가 직접 띄운 ember server가 합니다(PROJECT Q2).
 
 ### FR-H1 기기 등록 — `Agreed`
 기기는 iroh 엔드포인트 ID로 계정에 들어옵니다. 흐름은 OAuth 기기 인증(RFC 8628) 모양에 키 소유 증명을 더한 **기기 링크**입니다.
 1. 기기가 `POST /v1/device-links {endpoint_id, name, role}`로 요청하고 `link_id`, 사용자 코드(`BCDF-GHJK` 형식, 모음 없는 20글자), 챌린지, 만료(15분)를 받습니다.
-2. 사람이 `https://darkpyonix.dev/link?code=<사용자 코드>`를 열어 GitHub로 로그인한 상태에서 기기 이름·역할·엔드포인트 ID를 확인하고 승인하거나 거절합니다(`POST /v1/link-codes/{user_code} {"approve": bool}`). 같은 계정의 메인 서버도 기기 토큰으로 승인할 수 있어서, 새 컴퓨터는 브라우저 없이 메인 서버(ember server)를 거쳐 들어올 수 있습니다. `computer` 기기 토큰으로는 승인할 수 없습니다(403). **`main_server` 역할을 요청한 링크는 로그인한 브라우저 세션만 승인할 수 있습니다.** 메인 서버의 기기 토큰으로 그런 링크를 승인하면 403이고(거절은 됩니다), 그래서 새어 나간 메인 서버 토큰 하나로 계정 권한을 가진 기기를 더 만들 수 없습니다. 사용자 코드는 짧으므로 코드 조회와 결정은 계정당 분당 30번으로 제한합니다(429). 링크 요청도 주소당 분당 30번입니다.
+2. 사람이 `https://darkpyonix.dev/link?code=<사용자 코드>`(프런트 페이지, FR-H12)를 열어 GitHub로 로그인한 상태에서 기기 이름·역할·엔드포인트 ID를 확인하고 승인하거나 거절합니다(`POST /v1/link-codes/{user_code} {"approve": bool}`). 같은 계정의 메인 서버도 기기 토큰으로 승인할 수 있어서, 새 컴퓨터는 브라우저 없이 메인 서버(ember server)를 거쳐 들어올 수 있습니다. `computer` 기기 토큰으로는 승인할 수 없습니다(403). **`main_server` 역할을 요청한 링크는 로그인한 브라우저 세션만 승인할 수 있습니다.** 메인 서버의 기기 토큰으로 그런 링크를 승인하면 403이고(거절은 됩니다), 그래서 새어 나간 메인 서버 토큰 하나로 계정 권한을 가진 기기를 더 만들 수 없습니다. 사용자 코드는 짧으므로 코드 조회와 결정은 계정당 분당 30번으로 제한합니다(429). 링크 요청도 주소당 분당 30번입니다.
 3. 기기는 `interval`마다 `POST /v1/device-links/{link_id}/token`을 부르며, 매번 `darkpyonix-hub/v2/link\n<link_id>\n<challenge>`에 대한 자기 키 서명을 냅니다. 결정 전에는 202, 승인되면 한 번만 201과 기기 토큰, 거절되면 403입니다.
 4. 다시 시작한 기기는 `GET /v1/device-links/{link_id}`로 링크 상태(`pending`, `approved`, `denied`, `claimed`, `expired`)와 사용자 코드, 챌린지, 만료를 다시 읽습니다. 자격 증명은 필요 없습니다. `link_id`는 128비트 난수라 기기만 알고, 챌린지는 비밀이 아니며(서명에는 기기 키가 필요), 토큰은 이 응답에 없습니다. 만료된 링크는 시간마다 지워지므로 그 뒤에는 404입니다. `claimed`인데 기기가 토큰을 잃었다면 그 키는 지우고 다시 들입니다(FR-H11).
 
@@ -365,7 +381,7 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 
 ### FR-H2 주소 디렉터리와 발견 — `Agreed`
 기기는 현재 iroh 주소(릴레이 URL과 직접 주소)를 자기 키로 서명한 pkarr 패킷으로 허브에 올리고, 같은 계정의 기기는 엔드포인트 ID만으로 서로의 주소를 찾습니다.
-- 프로토콜: iroh의 pkarr 릴레이 HTTP 프로토콜을 그대로 씁니다. `PUT /pkarr/<z32 키>`로 올리고 `GET /pkarr/<z32 키>`로 받습니다. 본문은 `서명(64) || 타임스탬프 µs 빅엔디언(8) || DNS 패킷(최대 1000바이트)`이고, 서명 대상은 BEP 44 형식 `3:seqi<ts>e1:v<len>:<dns>`입니다(iroh-dns 1.3 `SignedPacket`). Worker는 이 형식과 DNS 응답 파싱(이름 압축 포함), `_iroh` TXT의 `relay=`/`addr=` 속성 해석을 TypeScript로 다시 구현합니다. 그래서 iroh의 기본 `PkarrPublisher`·`PkarrResolver`를 `https://darkpyonix.dev/pkarr?token=<조회 토큰>`에 그대로 붙일 수 있습니다. 쿼리 문자열에는 기기 토큰이 아니라 조회 전용 토큰만 넣습니다(NFR-H2). 같은 내용을 JSON으로 보는 `GET /v1/devices/{endpoint_id}/addresses`도 둡니다.
+- 프로토콜: iroh의 pkarr 릴레이 HTTP 프로토콜을 그대로 씁니다. `PUT /pkarr/<z32 키>`로 올리고 `GET /pkarr/<z32 키>`로 받습니다. 본문은 `서명(64) || 타임스탬프 µs 빅엔디언(8) || DNS 패킷(최대 1000바이트)`이고, 서명 대상은 BEP 44 형식 `3:seqi<ts>e1:v<len>:<dns>`입니다(iroh-dns 1.3 `SignedPacket`). Worker는 이 형식과 DNS 응답 파싱(이름 압축 포함), `_iroh` TXT의 `relay=`/`addr=` 속성 해석을 TypeScript로 다시 구현합니다. 그래서 iroh의 기본 `PkarrPublisher`·`PkarrResolver`를 `https://api.darkpyonix.dev/pkarr?token=<조회 토큰>`(D15 개정 전에는 apex)에 그대로 붙일 수 있습니다. 쿼리 문자열에는 기기 토큰이 아니라 조회 전용 토큰만 넣습니다(NFR-H2). 같은 내용을 JSON으로 보는 `GET /v1/devices/{endpoint_id}/addresses`도 둡니다.
 - 받는 쪽 검사: 서명이 맞고, DNS 패킷이 파싱되고, 키가 폐기되지 않은 등록 기기이고, 타임스탬프가 저장된 것보다 큰 것만 받습니다(아니면 400/403/409). "더 새 것만"은 D1의 조건부 upsert 한 문장이라 동시 요청에도 원자적입니다. 너무 잦은 게시는 429입니다(Workers Rate Limiting, 키당 분당 30번).
 - 조회 범위: `GET`은 같은 계정의 기기 토큰이나 세션이 있어야 합니다. 조회가 공개되지 않으므로 기기는 직접 주소까지 올려도(`AddrFilter::unfiltered`) 공인 IP가 계정 밖으로 새지 않습니다.
 - DNS 발견(iroh-dns-server, `_iroh.<z32>.<도메인>` TXT)은 쓰지 않습니다. DNS 질의에는 계정 범위를 걸 수 없고, 우리 기기는 모두 허브와 HTTPS로 말하므로 얻는 것이 없습니다.
@@ -379,14 +395,16 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
   - (B) **Cloudflare Container에 iroh-relay(HTTPS/WebSocket만, QAD 없음)**: 운영할 서버가 없고 Worker와 같은 계정·배포로 묶입니다. 대신 QAD가 없어 기기가 자기 공인 주소를 모르므로 직접 연결 비율이 떨어지고 릴레이를 거치는 연결이 늘어납니다. 요청은 Worker → Durable Object → 컨테이너로 한 번 더 거치고, 모든 기기가 같은 릴레이 인스턴스를 만나야 하므로 인스턴스 하나에 몰립니다. 상시 켜진 인스턴스의 실행 시간과 전송량이 과금됩니다.
   - (C) **둘 다(Container 릴레이 + QAD 전용 VPS)**: iroh에서 QAD는 릴레이 목록(`RelayMap`)의 항목마다 붙고(`RelayConfig::quic`), 그 호스트는 릴레이 URL의 호스트입니다. 그래서 "QAD만 하는 VPS"도 릴레이 항목으로 올라가야 하고, 기기가 그것을 홈 릴레이로 고를 수 있으니 결국 릴레이도 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 되므로 이득이 없습니다.
 - **권장: (A)로 시작하고, ember NFR-N1 측정으로 (B)로 옮길지 정합니다.** ember NFR-N1의 기준은 대칭 NAT를 뺀 조합에서 직접 경로 성공률 85% 이상입니다. iroh가 말하는 약 90% 직접 연결은 QAD를 전제로 한 수치라, QAD 없이 이 기준을 맞춘다는 근거가 아직 없습니다. 측정은 (A) 위에서 두 번 합니다. 클라이언트 `RelayMap`에 QAD를 켠 경우(`quic: Some(7842)`)와 끈 경우(`quic: None`, (B)와 같은 조건)입니다. QAD를 끈 경우도 85%를 넘으면 릴레이를 Container로 옮기고 VPS를 없앱니다(`hub/worker/wrangler.toml`에 주석으로 둔 컨테이너 바인딩). 못 넘으면 (A)를 유지합니다. 사용자 확인 전이라 `Draft`입니다.
-- 입장 정책: 릴레이 핸드셰이크가 증명한 엔드포인트 ID와 클라이언트가 낸 인증 토큰(있으면)을 릴레이 호스트가 `POST https://darkpyonix.dev/internal/v1/relay/admit`로 묻습니다(공유 비밀 `RELAY_SHARED_SECRET`). 폐기되지 않은 등록 기기면 허용(`cache_secs` 60초 동안 새 연결에 재사용 가능), 유효한 손님 통행권(FR-H4가 발급, 그 공유가 아직 게시 중)이 있으면 허용(캐시 안 함), 그 밖에는 거절입니다. 릴레이 호스트는 엔드포인트의 첫 연결이 열리고 마지막 연결이 닫힐 때 `POST /internal/v1/relay/presence`로 알려 기기 목록의 `online`을 갱신합니다. 기기를 지우면 Worker가 `POST https://relay.darkpyonix.dev/admin/v1/disconnect`로 끊습니다.
+- 입장 정책: 릴레이 핸드셰이크가 증명한 엔드포인트 ID와 클라이언트가 낸 인증 토큰(있으면)을 릴레이 호스트가 `POST https://api.darkpyonix.dev/internal/v1/relay/admit`(D15 개정 전에는 apex)로 묻습니다(공유 비밀 `RELAY_SHARED_SECRET`). 폐기되지 않은 등록 기기면 허용(`cache_secs` 60초 동안 새 연결에 재사용 가능), 유효한 손님 통행권(FR-H4가 발급, 그 공유가 아직 게시 중)이 있으면 허용(캐시 안 함), 그 밖에는 거절입니다. 릴레이 호스트는 엔드포인트의 첫 연결이 열리고 마지막 연결이 닫힐 때 `POST /internal/v1/relay/presence`로 알려 기기 목록의 `online`을 갱신합니다. 기기를 지우면 Worker가 `POST https://relay.darkpyonix.dev/admin/v1/disconnect`로 끊습니다.
 - 릴레이 호스트 상태: `hub/server`는 지금 D15 이전 구현(API·SQLite 포함)이고, 릴레이 전용으로 줄이는 작업(위 입장 API 사용, `/admin/v1/disconnect` 추가, API·DB 제거)은 빌드가 필요한 별도 변경입니다(`hub/server/src/lib.rs` 머리 주석).
 - 수용 기준: 두 등록 기기가 IP 전송을 끈 릴레이 전용 모드로 우리 릴레이를 거쳐 연결하고 데이터를 주고받습니다(선택된 경로가 릴레이). 같은 두 기기가 루프백에서 직접 경로로도 연결합니다. 등록되지 않은 엔드포인트는 릴레이가 거절해 연결하지 못하고, 지운 기기의 연결은 끊깁니다. Worker 쪽: 등록 기기는 허용, 지운 기기와 통행권 없는 엔드포인트는 거절, 비밀이 틀리면 401, presence가 `online`을 바꿉니다. 루프백 처리량과 왕복 지연, NFR-N1의 QAD 켬/끔 직접 연결 비율을 측정해 여기에 적습니다.
 - 테스트: Worker `test_fr_h3_relay_admits_registered_and_refuses_removed_devices`, `test_fr_h3_relay_callbacks_need_the_shared_secret`, `test_fr_h3_presence_marks_devices_online`(`hub/worker/test/shares.test.ts`). 릴레이 호스트 `test_fr_h3_relay_only_connection_through_hub`, `test_fr_h3_direct_connection_on_loopback`, `test_fr_h3_relay_rejects_unregistered_endpoint`, `test_fr_h3_relay_throughput_and_latency`(지금은 D15 이전 구현 기준, 릴레이 축소 때 스텁 입장 API로 바꿈)
 - 측정 기록: (구현 후 기입)
 
 ### FR-H4 ash 호스팅과 공유 링크 — `Agreed`
-`https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 Workers 정적 자산으로 호스팅하고(`hub/worker/public/ash/`에 darkpyonix-ash 빌드 결과를 넣어 배포), 공유 링크 `https://darkpyonix.dev/s/<share_id>#<token>`을 그 공유를 연 기기로 이어 줍니다. 공유 토큰은 URL 조각(`#` 뒤)에 있어서 허브로 가지 않습니다. 권한 검사는 끝단의 전용 매니저가 합니다(FR-A3).
+**개정(제안, 2026-10-03, D15 개정).** ash는 더는 이 Worker의 정적 자산(`/ash/`)이 아니라 루트 프런트(FR-H12)입니다. 공유 링크의 모양 `https://darkpyonix.dev/s/<share_id>#<token>`은 그대로이고, 그 페이지는 프런트가 냅니다. API(`POST /v1/shares`, `GET`/`DELETE /v1/shares/{share_id}`)는 `api.darkpyonix.dev`로 옮기고, Worker의 HTML 연산 `GET /s/{share_id}`와 `GET /ash/`는 계약에서 뺍니다. 프런트는 공유 페이지에서 `GET https://api.darkpyonix.dev/v1/shares/{share_id}`(인증 없음, CORS)를 부르고, 없는 공유는 화면에서 "없는 공유"로 보여 줍니다. 아래 본문의 `/ash/`·`/s/` HTML 부분과 `test_fr_h4_viewer_pages_are_served`는 이 개정이 승인되면 프런트 쪽 시험으로 옮깁니다.
+
+(개정 전 본문) `https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 Workers 정적 자산으로 호스팅하고(`hub/worker/public/ash/`에 darkpyonix-ash 빌드 결과를 넣어 배포), 공유 링크 `https://darkpyonix.dev/s/<share_id>#<token>`을 그 공유를 연 기기로 이어 줍니다. 공유 토큰은 URL 조각(`#` 뒤)에 있어서 허브로 가지 않습니다. 권한 검사는 끝단의 전용 매니저가 합니다(FR-A3).
 - 기기는 `POST /v1/shares`로 자기 공유를 게시하고, 누구나 `GET /v1/shares/{share_id}`로 그 공유를 연 기기의 엔드포인트 ID와 릴레이 URL(기기가 올린 홈 릴레이, 없으면 `https://relay.darkpyonix.dev/`), 10분짜리 손님 릴레이 통행권을 받습니다. ash(브라우저 iroh, 릴레이 전용)는 그 통행권으로 릴레이에 붙어 기기에 연결합니다. `GET /s/{share_id}`는 ash 뷰어 페이지를 냅니다(뷰어가 배포되기 전까지는 자리표시 페이지). 공유를 내리면 그 공유의 통행권도 더는 통하지 않습니다.
 - 수용 기준: 게시한 공유가 기기 ID와 통행권으로 풀리고, 기기가 주소를 올린 뒤에는 그 홈 릴레이 URL로 풀립니다. 다른 기기가 같은 공유 ID를 게시하면 409입니다. 그 통행권으로 미등록 엔드포인트의 릴레이 입장이 허용되고, 통행권이 없거나 위조이거나 공유를 내린 뒤면 거절됩니다. 게시를 지우면 404입니다. `/s/{share_id}`와 `/ash/`가 HTML을 냅니다. 브라우저 ash가 실제로 릴레이를 거쳐 기기에 붙는 것은 릴레이 호스트 연동 시험으로 확인합니다.
 - 테스트(`hub/worker/test/shares.test.ts`): `test_fr_h4_share_resolves_to_hosting_device`, `test_fr_h4_share_ids_belong_to_one_device`, `test_fr_h4_guest_pass_admits_an_unregistered_endpoint_at_the_relay`, `test_fr_h4_viewer_pages_are_served`
@@ -397,13 +415,14 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
   - (A) **ACME DNS-01을 허브가 대신 게시.** 메인 서버가 자기 개인 키로 인증서를 받고, 허브는 `_acme-challenge.<name>.darkpyonix.dev` TXT만 게시합니다. TLS가 메인 서버에서 끝나므로 허브는 평문을 보지 않습니다(NFR-H1 유지). 대신 공인 IP가 없는 기기에 브라우저가 직접 닿지 못하므로, ember 앱이 루프백 포워더(127.0.0.1 → iroh)로 그 이름을 열어야 합니다.
   - (B) **허브가 TLS를 끝내는 HTTPS 엣지.** 아무 브라우저나 닿지만 허브가 평문을 봅니다. NFR-H1을 깨므로 쓰지 않습니다.
   - (C) **SNI 패스스루 엣지.** 허브가 ClientHello의 SNI만 읽고 TLS 바이트를 그대로 iroh로 기기에 넘깁니다. 앱 없는 브라우저에서도 닿지만 공개 트래픽 대역폭이 허브에 걸리고, Workers로는 할 수 없어(TCP 패스스루) 릴레이 호스트나 Spectrum이 필요합니다.
-- 결정: (A)를 씁니다. (C)는 앱 없는 브라우저 접근이 필요해지면 따로 다룹니다. (B)는 쓰지 않습니다. 허브는 이름을 메인 서버 기기에 예약하고(`PUT /v1/names/{name}`), 그 기기가 요청한 TXT 값을 **Cloudflare DNS API**로 게시합니다(`PUT /v1/names/{name}/acme-challenge`). 기존 값 삭제와 새 값 생성은 `POST /zones/{zone_id}/dns_records/batch` 한 번이라 원자적이고, TTL은 60초입니다. API 토큰은 darkpyonix.dev 존 하나의 `Zone → DNS → Edit`만 가집니다. DNS 공급자는 `DnsProvider` 인터페이스 뒤에 있습니다. 이름을 놓거나 기기를 지우면 그 TXT도 지웁니다. 메인 서버를 바꾸면(FR-H1) 옛 메인 서버의 이름은 지우지 않고 새 메인 서버로 옮겨 가며, TXT만 지웁니다(사용자의 주소가 기계를 바꿔도 그대로 통하도록). 예약어(`www`, `api`, `relay`, `ash`, `hub`, `dns`, `ns1`, `ns2`, `mail`, `admin`, `docs`, `status`, `auth`, `link`, `qad`)는 받지 않습니다.
+- 결정: (A)를 씁니다. (C)는 앱 없는 브라우저 접근이 필요해지면 따로 다룹니다. (B)는 쓰지 않습니다. 허브는 이름을 메인 서버 기기에 예약하고(`PUT /v1/names/{name}`), 그 기기가 요청한 TXT 값을 **Cloudflare DNS API**로 게시합니다(`PUT /v1/names/{name}/acme-challenge`). 기존 값 삭제와 새 값 생성은 `POST /zones/{zone_id}/dns_records/batch` 한 번이라 원자적이고, TTL은 60초입니다. API 토큰은 darkpyonix.dev 존 하나의 `Zone → DNS → Edit`만 가집니다. DNS 공급자는 `DnsProvider` 인터페이스 뒤에 있습니다. 이름을 놓거나 기기를 지우면 그 TXT도 지웁니다. 메인 서버를 바꾸면(FR-H1) 옛 메인 서버의 이름은 지우지 않고 새 메인 서버로 옮겨 가며, TXT만 지웁니다(사용자의 주소가 기계를 바꿔도 그대로 통하도록). 예약어(`www`, `api`, `relay`, `ash`, `hub`, `dns`, `ns1`, `ns2`, `mail`, `admin`, `docs`, `status`, `auth`, `link`, `qad`, 그리고 D15 개정으로 더하는 `nb`, `app`, `static`, `cdn`, `sandbox`, `usercontent`, `guide`, `blog`)는 받지 않습니다.
 - 수용 기준: 메인 서버가 이름을 예약하면 201, 같은 기기가 다시 하면 200, 다른 기기는 409, `computer`는 403, 형식이 틀리거나 예약어면 400입니다. TXT 값 1~4개(각 43자 base64url)를 게시하고 지울 수 있고, 다른 값은 400, 공급자가 거절하면 502입니다. 메인 서버를 바꾸면 이름 목록의 그 이름이 새 메인 서버를 가리키고, 새 메인 서버는 그 이름의 TXT를 게시하며 옛 메인 서버는 401입니다. Cloudflare 클라이언트는 기존 레코드를 조회한 뒤 삭제와 생성을 한 batch로 보냅니다. 실제 존에서 Let's Encrypt 스테이징 인증서를 받는 것은 배포 후 확인합니다.
 - 테스트(`hub/worker/test/names.test.ts`): `test_fr_h5_name_reservation_and_acme_txt`, `test_fr_h5_only_main_servers_hold_names_and_names_are_unique`, `test_fr_h5_bad_values_and_provider_failures`, `test_fr_h5_release_and_device_removal_clear_records`, `test_fr_h5_cloudflare_replaces_txt_in_one_batch`, `test_fr_h5_cloudflare_clear_and_errors`
 
 ### FR-H6 GitHub 로그인 — `Agreed`
 허브 계정은 GitHub 로그인으로 만듭니다(사용자 결정, 2026-10-03: "OpenAI 로그인은 엠버 서버에서 사용자가 자체적으로 하는걸로 하고 허브는 깃허브 로그인으로 하자."). 계정의 정체는 GitHub 사용자의 숫자 ID(바뀌지 않고 재사용되지 않음)이고, 로그인 이름은 표시용으로만 저장합니다.
 - 흐름: GitHub OAuth App, 인가 코드 + PKCE(S256) + state. `GET /auth/login`이 무작위 `state`와 PKCE 검증자를 D1에 10분짜리 일회용 거래로 남기고, `state`를 `__Host-dp_oauth` 쿠키에도 묶은 뒤 `https://github.com/login/oauth/authorize`로 보냅니다. 범위(scope)는 요청하지 않습니다(공개 프로필만 읽음). `GET /auth/callback`은 쿠키의 `state`와 같고 아직 쓰지 않은 거래인지 확인하고, 코드를 검증자와 함께 `https://github.com/login/oauth/access_token`에서 바꾸고, `GET https://api.github.com/user`로 `id`와 `login`을 읽은 뒤 그 GitHub 토큰을 폐기합니다. 그 GitHub ID의 계정을 찾거나 만들고, 30일짜리 세션 쿠키(`__Host-dp_session`, HttpOnly, Secure, SameSite=Lax)를 줍니다. `return_to`는 같은 출처의 경로만 받습니다.
+- **개정(제안, 2026-10-03, D15 개정·FR-H13).** 로그인과 콜백은 `https://api.darkpyonix.dev/auth/login`, `/auth/callback`이고, GitHub OAuth App의 콜백 URL도 그 주소로 바꿉니다. 두 쿠키(`__Host-dp_oauth`, `__Host-dp_session`)는 API 호스트 전용입니다. `return_to`는 **프런트(`FRONT_URL`)의 경로**만 받고, 콜백은 `https://darkpyonix.dev<return_to>`로 보냅니다(그 밖은 `https://darkpyonix.dev/`). 로그아웃(`POST /auth/logout`)은 프런트가 CORS로 부릅니다.
 - 운영자 선택 사항: `GITHUB_ALLOWED_IDS`(쉼표로 구분한 GitHub 사용자 ID)를 두면 그 사람들만 새 계정을 만들 수 있습니다(비우면 누구나).
 - OpenAI / Sign in with ChatGPT는 허브에 넣지 않습니다. 사용자의 ChatGPT 플랜 사용은 사용자가 직접 띄운 ember server가 맡습니다(PROJECT Q2).
 - 수용 기준: 로그인 시작이 `client_id`, 콜백 URL, `state`, S256 `code_challenge`를 담아 GitHub로 보내고 같은 `state`를 쿠키로 둡니다. 같은 GitHub ID로 두 번 로그인하면 같은 계정이고 로그인 이름만 갱신되며, 다른 ID는 다른 계정입니다. GitHub 토큰은 폐기되고 저장되지 않습니다. 다른 브라우저의 `state`, 다시 쓴 `state`, 틀린 PKCE 검증자는 400입니다. 허용 목록 밖의 새 사용자는 403입니다. 밖으로 나가는 `return_to`는 `/`가 됩니다. 로그아웃 뒤 세션은 401입니다. 다른 출처의 쿠키 쓰기는 403입니다. 실제 GitHub OAuth App으로 로그인되는 것은 배포 후 확인합니다.
@@ -411,13 +430,15 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
 
 ### FR-H7 Flathub 앱 검증 — `Agreed`
 Flathub의 앱 ID `dev.darkpyonix.Ember`는 도메인 darkpyonix.dev로 검증합니다. Flathub가 주는 토큰을 `https://darkpyonix.dev/.well-known/org.flathub.VerifiedApps.txt`에 평문으로 둡니다. 내용은 Worker 변수 또는 비밀값 `FLATHUB_VERIFICATION_TOKEN`에서 오므로 저장소에 토큰을 넣지 않습니다. 비어 있거나 없으면 404입니다.
+- **개정(제안, 2026-10-03, D15 개정).** Flathub는 도메인 `darkpyonix.dev` 자체를 보므로 이 파일은 apex에 남아야 하고, apex는 이제 정적 프런트입니다. 그래서 이 파일은 프런트가 정적 파일로 내고, 내용은 프런트 배포 때 CI 비밀값 `FLATHUB_VERIFICATION_TOKEN`에서 넣습니다(저장소에는 여전히 없음). API Worker의 같은 연산은 계약에서 뺍니다.
 - 수용 기준: 토큰이 있으면 200 `text/plain`이고 본문은 앞뒤 공백을 뺀 토큰입니다. 없거나 공백뿐이면 404입니다. 실제 Flathub 검증은 배포 후 확인합니다.
 - 테스트(`hub/worker/test/flathub.test.ts`): `test_fr_h7_verified_apps_file_serves_the_configured_token`, `test_fr_h7_verified_apps_file_is_absent_without_a_token`
 
 ### FR-H8 허브 설정 발견 — `Agreed`
 클라이언트(ember, ash)가 릴레이 주소나 pkarr URL을 코드에 박아 두지 않도록, 허브가 자기 설정을 공개합니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - `GET /v1/config`(인증 없음, `Cache-Control: public, max-age=300`)는 `{api_version, hub_version, relay_urls, pkarr_url, link_url}`를 냅니다. `api_version`은 정수이고 `/v1` 아래 계약을 깨는 변경이 있을 때만 올립니다(지금 1). `relay_urls`는 기기가 iroh `RelayMap`에 넣을 릴레이 목록(지금은 Worker 변수 `RELAY_URL` 하나), `pkarr_url`은 iroh `PkarrPublisher`/`PkarrResolver`에 줄 기준 URL(`<PUBLIC_URL>/pkarr`, 조회할 때는 `?token=<조회 토큰>`을 붙임, NFR-H2), `link_url`은 기기 링크 승인 페이지입니다.
-- 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`)를 따릅니다.
+- **개정(제안, 2026-10-03, D15 개정).** `GET https://api.darkpyonix.dev/v1/config`에 `api_url`(`https://api.darkpyonix.dev`)과 `front_url`(`https://darkpyonix.dev`)을 더합니다. `pkarr_url`은 `<API_URL>/pkarr`, `link_url`은 `<FRONT_URL>/link`입니다. Worker 변수 `PUBLIC_URL`은 `API_URL`과 `FRONT_URL` 둘로 나눕니다. 필드 추가라 `api_version`은 1 그대로입니다.
+- 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`, 개정 뒤에는 `API_URL`, `FRONT_URL`, `RELAY_URL`)를 따릅니다.
 - 테스트(`hub/worker/test/config.test.ts`): `test_fr_h8_config_names_relays_and_pkarr_url`, `test_fr_h8_config_follows_the_worker_vars`
 
 ### FR-H9 기기 목록 변경 알림 — `Agreed` [provisional]
@@ -445,6 +466,87 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 설계 이유: 키가 새서 지운 경우를 생각하면 키 소유 증명만으로 돌아오게 할 수 없습니다. 그래서 두 번의 사람 확인(표시와 승인)을 세션에만 맡기고, 표시는 짧게(링크 수명과 같은 15분) 둡니다. 메인 서버 토큰을 빼는 이유는 FR-H1의 `main_server` 승인 제한과 같습니다(새어 나간 메인 서버 토큰으로 지운 기기를 되살리지 못하게). Ember의 실제 사용으로 확정할 때까지 `[provisional]`입니다.
 - 수용 기준: 지운 키의 링크 요청은 409, 세션이 다시 들이기를 표시한 뒤에는 201입니다. 메인 서버 토큰의 표시와 승인은 403입니다. 받은 뒤 기기가 목록에 다시 나오고 새 토큰이 통하며 옛 토큰은 401 `invalid_credentials`입니다. 15분이 지나면 다시 409입니다. 지우지 않은 기기의 표시는 409, 다른 계정의 기기는 404입니다. 다른 메인 서버가 있을 때 `main_server`로 돌아오는 링크의 승인은 `replace` 없이 409 `main_server_exists`이고, `replace`로 승인해 받으면 되살아난 기기가 유일한 메인 서버가 되고 바뀐 메인 서버의 토큰은 401 `device_removed`이며 이름이 옮겨 갑니다. 지운 기기 목록은 세션에 지운 기기를 최근 것부터 지울 때의 이름·역할·`removed_at`과 함께 보여 주고, 다시 들이기를 표시하면 `readmit_until`이 나오며, 되살아난 기기와 다른 계정의 기기는 나오지 않습니다. 기기 토큰은 403입니다.
 - 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h11_owner_readmits_a_removed_key`, `test_fr_h11_readmission_expires`, `test_fr_h11_readmit_needs_a_removed_device_of_the_account`, `test_fr_h11_owner_lists_removed_devices`, `test_fr_h11_only_a_session_lists_removed_devices`
+
+### FR-H12 호스트 역할 분담과 루트 프런트 — `Draft`
+INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도메인으로 해놓고, 루트 darkpyonix.dev가 그걸 띄우도록 할건데? 역할 분담을 좀 시켜야지. ... 루트 darkpyonix.dev는 가이드가 아니야." 호스트는 §10 머리의 표대로 나눕니다.
+- **루트(`darkpyonix.dev`)는 정적 프런트입니다.** darkpyonix-ash 웹 빌드와 랜딩을 Cloudflare Workers 정적 자산(스크립트 없는 정적 전용 Worker, apex custom domain)으로 냅니다. 서버 코드, 쿠키, 비밀값이 없고, 동적인 일은 모두 `api.darkpyonix.dev`와 `relay.darkpyonix.dev`를 부릅니다. 빌드와 배포는 darkpyonix-ash 저장소가 맡는 것을 제안합니다 [provisional]. 이 저장소는 프런트가 지켜야 할 경로·헤더 계약과 API만 가집니다.
+- **프런트 경로.** `/`(랜딩, 로그인했으면 내 노트북), `/n/<notebook_id>`와 `/n/<notebook_id>/v/<version>`(FR-H16, FR-H17), `/s/<share_id>`(FR-H4, 토큰은 `#` 뒤), `/link`(기기 승인, FR-H1), `/new`(노트북 올리기). 이 경로는 모두 200과 같은 앱 HTML을 냅니다(SPA 처리, `not_found_handling = "single-page-application"`). 없는 노트북이나 공유는 앱이 API 응답을 보고 화면에 표시합니다.
+- **헤더(`_headers`).** 모든 HTML에 `Content-Security-Policy`(`default-src 'self'`, `connect-src 'self' https://api.darkpyonix.dev https://relay.darkpyonix.dev wss://relay.darkpyonix.dev`와 ash 런타임이 받는 CDN, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. `/link`는 클릭재킹을 막기 위해 `frame-ancestors 'none'`이 꼭 있어야 합니다. Pyodide가 `SharedArrayBuffer`를 요구하게 되면 그 경로에만 COOP/COEP를 더합니다 [provisional].
+- **가이드는 `docs.darkpyonix.dev`입니다.** 조직 Pages 사이트(`DarkPyonix.github.io`)의 custom domain을 `docs.darkpyonix.dev`로 바꾸면 프로젝트 가이드가 `docs.darkpyonix.dev/<저장소>/`로 옮겨 갑니다. 프런트는 옛 주소 `darkpyonix.dev/<저장소>/*`를 `https://docs.darkpyonix.dev/<저장소>/*`로 301 이동합니다(`_redirects`에 Pages가 있는 저장소를 나열, 지금은 `dioxus-compose`).
+- **API 호스트는 HTML 프런트를 내지 않습니다.** `api.darkpyonix.dev`가 내는 HTML은 없고, `/auth/*`는 리디렉트만 합니다. 반대로 apex는 API가 아닙니다(`https://darkpyonix.dev/v1/...`는 프런트의 SPA 응답일 뿐 API가 아님).
+- 수용 기준(배포 후 점검 스크립트): `https://darkpyonix.dev/`, `/n/n_<32 hex>`, `/s/s_<16 hex>`, `/link?code=BCDF-GHJK`가 200 `text/html`이고 위 헤더가 있습니다. `/dioxus-compose/`는 301로 `https://docs.darkpyonix.dev/dioxus-compose/`를 가리키고, 그 주소가 가이드를 냅니다. `/.well-known/org.flathub.VerifiedApps.txt`는 200 `text/plain`입니다(FR-H7). 응답에 `Set-Cookie`가 없습니다. `https://api.darkpyonix.dev/v1/config`는 200 JSON입니다.
+- 테스트: 배포 점검 `test_fr_h12_front_routes_serve_the_app_with_headers`, `test_fr_h12_old_guide_paths_move_to_docs`, `test_fr_h12_front_sets_no_cookies`(프런트 저장소 CI 또는 배포 후 스크립트)
+
+### FR-H13 브라우저에서 API 부르기(CORS, 쿠키, OAuth) — `Draft`
+프런트와 API가 다른 호스트이므로 브라우저 경로를 정합니다.
+- **CORS.** 허용 출처는 정확히 `FRONT_URL`(`https://darkpyonix.dev`) 하나이고, 운영자가 `CORS_DEV_ORIGINS`(쉼표 구분, 예: `http://localhost:5173`)를 두면 그것도 더합니다 [provisional]. 허용 출처의 요청에는 `Access-Control-Allow-Origin: <그 출처>`, `Access-Control-Allow-Credentials: true`, `Vary: Origin`, `Access-Control-Expose-Headers: ETag`를 붙입니다. 사전 요청(`OPTIONS`)은 204와 `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE`, `Access-Control-Allow-Headers: Authorization, Content-Type, If-None-Match`, `Access-Control-Max-Age: 600`입니다. 그 밖의 출처(사용자 이름 서브도메인 `<name>.darkpyonix.dev`, 출처 `null` 포함)에는 CORS 헤더를 붙이지 않습니다. 기기 토큰을 쓰는 기기(ember, CLI)는 브라우저가 아니라 CORS와 무관합니다.
+- **쿠키.** `__Host-dp_session`과 `__Host-dp_oauth`는 `api.darkpyonix.dev`가 `Domain` 없이(`__Host-` 접두어 규칙) `Path=/; Secure; HttpOnly; SameSite=Lax`로 둡니다. 프런트는 쿠키를 읽지 못하고, 로그인 여부는 `GET /v1/me`(401이면 로그아웃 상태)로 압니다. 프런트와 API는 같은 사이트(`darkpyonix.dev`)이므로 `SameSite=Lax` 쿠키가 `credentials: "include"` 요청에 실리고, 서드파티 쿠키 차단과 무관합니다.
+- **쿠키 쓰기의 출처 검사.** 쿠키로 인증한 쓰기 요청은 `Origin`이 `FRONT_URL`(또는 `CORS_DEV_ORIGINS`)이 아니면 403입니다(§10 인증 모델). 같은 사이트의 사용자 이름 서브도메인은 남의 서버이므로 여기서 막힙니다.
+- **OAuth.** FR-H6 개정대로 콜백은 `https://api.darkpyonix.dev/auth/callback`이고, 끝나면 프런트의 `return_to` 경로로 보냅니다.
+- 수용 기준: `Origin: https://darkpyonix.dev`의 사전 요청은 204와 위 헤더, 실제 요청은 그 출처를 그대로 돌려줍니다. `Origin: https://studio.darkpyonix.dev`나 `null`에는 `Access-Control-Allow-Origin`이 없고, 그 출처의 쿠키 쓰기는 403입니다. 로그인 콜백의 `Set-Cookie`에 `Domain`이 없고 이름이 `__Host-`로 시작합니다. 콜백은 `https://darkpyonix.dev/<return_to>`로 302하고, 바깥 `return_to`는 `https://darkpyonix.dev/`가 됩니다.
+- 테스트(`hub/worker/test/cors.test.ts`): `test_fr_h13_cors_allows_only_the_front`, `test_fr_h13_preflight_lists_methods_and_headers`, `test_fr_h13_session_cookie_is_host_only_on_the_api`, `test_fr_h13_callback_returns_to_the_front`, `test_fr_h13_cookie_writes_from_user_subdomains_are_refused`
+
+### FR-H14 노트북 보관과 판 — `Draft`
+사용자 결정(2026-10-03): 허브는 "ash 노트북 호스팅까지" 합니다. 허브는 노트북을 보관하고 보여 줄 뿐 실행하지 않습니다(INTENT D15 개정).
+- **노트북.** `notebook_id`는 `n_<32 hex>`(128비트 난수)입니다. `unlisted` 링크(FR-H15)는 ID를 아는 것이 곧 권한이므로 추측할 수 없어야 합니다. 노트북은 계정 하나의 것이고 `title`(1~120자), `visibility`(FR-H15), `share_id`(FR-H17, 없으면 `null`), `latest_version`, `created_at`, `updated_at`, 만든 기기(`created_by`: 세션이면 `null`)를 가집니다.
+- **판(version).** 판은 바꿀 수 없는 스냅숏이고 노트북마다 1부터 하나씩 올라갑니다(지운 번호는 다시 쓰지 않음). 판 하나는
+  - `source`(필수): 노트북 파일 하나(FORMAT의 `.py` 또는 `.pynb`) 그대로. 파일 이름은 `^[^/\\\x00]{1,128}\.(py|pynb)$`이고, 본문은 UTF-8이며 NUL이 없어야 합니다. 허브는 FORMAT §2.2의 셀 표식으로 셀 수만 세어 둡니다(검사용, 실행하지 않음).
+  - `run`(선택): 그 파일의 실행 기록 하나(`__runs__/<파일 이름>/<run_id>.ipynb`). JSON 객체이고 `nbformat`이 4, `cells`가 배열, 출력의 `output_type`이 `stream`·`display_data`·`execute_result`·`error` 중 하나여야 합니다. `run_id`(파일 이름에서)를 함께 저장합니다. 실행 기록과 소스가 맞는지는 검사하지 않습니다. 보여 줄 때 FR-R4 맵핑 규칙이 소스가 다른 셀을 `stale`로 표시합니다. FR-R5의 사이드카 로그(`.cell<n>.log`)는 올리지 않습니다.
+  - `message`(선택, 0~500자)와 각 부분의 `sha256`, 크기, `created_at`, 올린 주체.
+- **올리기.** `POST /v1/notebooks`로 노트북을 만들고, `POST /v1/notebooks/{notebook_id}/versions`(`multipart/form-data`, 부분 `source`·`run`·`message`)로 판을 더합니다. 새 판 번호는 D1 한 문장(`UPDATE notebooks SET latest_version = latest_version + 1 WHERE … RETURNING`)으로 정하므로 동시에 올려도 번호가 겹치지 않습니다. 본문을 R2에 먼저 쓰고 D1에 행을 넣습니다. D1이 실패해 남은 R2 객체는 Cron이 지웁니다.
+- **누가.** 만들기와 판 올리기: 로그인 세션, 또는 그 계정의 `main_server`·`computer` 기기 토큰(공유 게시와 같은 범위, `client`는 403). 제목·공개 범위·`share_id` 바꾸기와 지우기: 계정 권한(세션 또는 `main_server`) 또는 그 노트북을 만든 기기 [provisional]. 다른 계정에서는 비공개 노트북이 없는 것과 같습니다(404).
+- **저장소.** 목록·권한·판 메타데이터는 D1(`notebooks`, `notebook_versions`), 본문은 비공개 R2 버킷(`darkpyonix-notebooks`, 키 `nb/<account_id>/<notebook_id>/<version>/source|run`)입니다. D1의 행·값 상한(약 2 MB)과 DB 크기 상한 때문에 본문을 D1에 두지 않습니다. 본문은 Worker를 거쳐서만 나갑니다(R2 공개 버킷 없음).
+- **읽기.** `GET /v1/notebooks/{notebook_id}`(메타데이터와 판 목록), `GET /v1/notebooks/{notebook_id}/versions/{version}`(판 메타데이터), `…/source`, `…/run`(본문). `{version}`에는 `latest`를 쓸 수 있습니다. 본문 응답은 `source`가 `text/plain; charset=utf-8`, `run`이 `application/json`이고, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Content-Disposition: attachment; filename=…`, `ETag: "<sha256>"`를 붙입니다. 그래서 주소창으로 열어도 문서로 실행되지 않습니다(NFR-H3). 캐시는 `private, max-age=60` [provisional]: 판은 바뀌지 않지만 공개 범위는 바뀔 수 있어서 공유 캐시에 오래 두지 않습니다.
+- 수용 기준: 노트북을 만들면 201과 `n_<32 hex>`, 판을 둘 올리면 1과 2, 동시에 둘 올려도 서로 다른 연속 번호입니다. 받은 `source`·`run`이 올린 바이트와 같고(`sha256`), `latest`가 가장 높은 판입니다. UTF-8이 아니거나 NUL이 있는 소스, 확장자가 틀린 이름, `nbformat`이 4가 아니거나 출력 형식이 틀린 실행 기록은 400입니다. `client` 기기 토큰은 403, 다른 계정은 404입니다. 본문 응답에 위 헤더가 있습니다.
+- 테스트(`hub/worker/test/notebooks.test.ts`): `test_fr_h14_create_and_push_versions`, `test_fr_h14_versions_are_numbered_once_under_concurrency`, `test_fr_h14_content_round_trips_with_sha256`, `test_fr_h14_rejects_malformed_source_and_run`, `test_fr_h14_client_devices_cannot_publish`, `test_fr_h14_content_responses_cannot_render_as_documents`
+
+### FR-H15 공개 범위 — `Draft`
+노트북의 `visibility`는 셋입니다. 기본은 가장 좁은 `private`입니다.
+
+| 값 | 누가 읽나 | 목록에 나오나 | 검색 엔진 |
+|---|---|---|---|
+| `private` | 그 계정(세션, 그 계정의 기기 토큰) | 자기 목록(`GET /v1/notebooks`)에만 | 아님 |
+| `unlisted` | 링크(ID)를 아는 누구나, 인증 없이 | 자기 목록에만 | `X-Robots-Tag: noindex` |
+| `public` | 누구나, 인증 없이 | 자기 목록과 `GET /v1/users/{github_login}/notebooks` | 허용 [provisional] |
+
+- 읽기 권한이 없으면 403이 아니라 404입니다(있는지도 드러내지 않음). `private`으로 바꾸면 그 순간부터 남의 API 읽기는 404입니다. 이미 받아 간 사본과 60초 캐시(FR-H14)는 회수할 수 없습니다.
+- 공개 범위는 노트북 단위이고 모든 판에 같이 걸립니다. 판마다 다르게 두지 않습니다(판을 숨기려면 그 판을 지움, FR-H18).
+- 수용 기준: `private` 노트북은 인증 없이 404, 같은 계정의 세션·기기 토큰으로 200입니다. `unlisted`는 인증 없이 200이고 `X-Robots-Tag: noindex`가 붙으며 사용자 공개 목록에 나오지 않습니다. `public`은 인증 없이 200이고 사용자 공개 목록에 나옵니다. `public`을 `private`으로 바꾸면 인증 없는 읽기가 바로 404입니다.
+- 테스트(`hub/worker/test/notebooks.test.ts`): `test_fr_h15_private_notebooks_are_hidden`, `test_fr_h15_unlisted_notebooks_open_by_link_only`, `test_fr_h15_public_notebooks_are_listed`, `test_fr_h15_going_private_takes_effect_at_once`
+
+### FR-H16 커널 없이 읽기 전용으로 보기 — `Draft`
+프런트의 `/n/<notebook_id>`(최신 판)와 `/n/<notebook_id>/v/<version>`은 저장된 판을 **커널, 릴레이, 기기 없이** 보여 줍니다.
+- 프런트는 API에서 판 메타데이터와 `source`·`run`을 받아, FORMAT의 규칙으로 셀을 나누고(FR-F1과 같은 결과), FR-R4의 맵핑 순서(`id` → `source_sha256` → `index`)로 실행 기록의 출력을 셀에 붙이며, 소스가 다른 셀은 `stale`로 표시합니다. 마크다운 셀(`darkpyonix.markdown`)은 마크다운으로, 출력은 nbformat MIME 우선순위대로 그립니다.
+- `text/html`, `application/javascript`, `image/svg+xml`, 위젯 MIME처럼 스크립트가 돌 수 있는 출력과 마크다운 안의 HTML은 NFR-H3의 샌드박스에서만 그립니다. `text/plain`, `image/png`, `image/jpeg`, `error`, `stream`은 프런트가 텍스트·이미지로 그립니다.
+- 판 고르기, 소스와 실행 기록 내려받기, "라이브로 열기"(FR-H17, 공유가 걸려 있을 때)를 둡니다.
+- 수용 기준: 주인의 기기가 꺼져 있고 릴레이에 닿지 못해도 `public` 노트북의 모든 셀과 출력이 그려집니다. 실행 기록 뒤에 고친 셀은 `stale`로 표시되고 출력은 남습니다. 실행 기록이 없는 판은 코드와 마크다운만 그려집니다. `text/html` 출력 안의 스크립트는 프런트의 DOM, 저장소, API 쿠키에 닿지 못합니다(NFR-H3).
+- 테스트: 프런트 저장소 `test_fr_h16_renders_stored_outputs_without_a_kernel`, `test_fr_h16_marks_stale_cells`, `test_fr_h16_cell_split_matches_the_kernel_parser`(FORMAT 예시 파일로 FR-F1 파서와 같은 셀 목록인지 확인)
+
+### FR-H17 라이브 커널로 열기 — `Draft`
+호스팅한 노트북을 주인의 살아 있는 커널에 붙여 엽니다. 실행은 언제나 주인의 기기에서 일어나고, 허브는 실행하지 않습니다.
+- 주인은 `PATCH /v1/notebooks/{notebook_id} {"share_id": "s_…"}`로 공유(FR-H4)를 겁니다. 그 공유는 같은 계정의 기기가 게시한 것이어야 합니다(아니면 409 `share_not_in_account`, 게시되지 않았으면 404). `{"share_id": null}`로 뗍니다. 노트북을 읽을 수 있는 사람에게 `share_id`가 보입니다. `share_id`만으로는 커널에 접근할 수 없습니다(토큰은 매니저가 검사, FR-A3).
+- 링크는 `https://darkpyonix.dev/n/<notebook_id>#<공유 토큰>`입니다. 토큰은 URL 조각이라 허브로 가지 않습니다. 프런트는 조각에 토큰이 있고 노트북에 `share_id`가 있으면 `GET /v1/shares/{share_id}`(FR-H4)로 기기와 손님 릴레이 통행권을 받고, 브라우저 iroh로 그 기기의 전용 매니저에 붙습니다. 무엇을 할 수 있는지는 매니저가 토큰의 권한(`viewer1`~`admin`, FR-A3)으로 정합니다. 그냥 공유 링크 `https://darkpyonix.dev/s/<share_id>#<토큰>`도 그대로 씁니다.
+- 라이브 화면은 호스팅한 판이 아니라 주인 기기의 파일(매니저의 `GET /kernels/{id}/document`)을 보여 줍니다. 호스팅한 판의 소스 해시와 다르면 프런트가 그 사실을 표시합니다.
+- 토큰이 없거나, 공유가 내려갔거나, 기기에 닿지 못하면 프런트는 읽기 전용 보기(FR-H16)로 남고 이유를 보여 줍니다.
+- 수용 기준: 같은 계정의 공유는 걸리고, 다른 계정의 공유는 409, 없는 공유는 404입니다. 노트북 메타데이터에 `share_id`가 나옵니다. 공유가 내려가면(FR-H4) 노트북의 `share_id`는 `null`이 됩니다. 브라우저에서 토큰이 있는 노트북 링크가 기기의 매니저에 붙어 실행하는 것(`viewer3`)과 토큰 없이 읽기 전용으로 남는 것은 릴레이 호스트 연동 시험으로 확인합니다.
+- 테스트(`hub/worker/test/notebooks.test.ts`): `test_fr_h17_attach_a_share_of_the_same_account`, `test_fr_h17_unpublished_share_detaches`. 연동: `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`
+
+### FR-H18 지우기 — `Draft`
+- `DELETE /v1/notebooks/{notebook_id}`는 노트북과 모든 판을 지웁니다(204). 그 뒤 모든 읽기는 404이고, R2 본문은 같은 요청에서 지우되 실패한 것은 Cron이 24시간 안에 지웁니다.
+- `DELETE /v1/notebooks/{notebook_id}/versions/{version}`은 판 하나를 지웁니다(204). 번호는 다시 쓰지 않고, `latest`는 남은 판 중 가장 높은 것을 가리킵니다. 남은 판이 없으면 `latest_version`은 `null`이고 `latest` 읽기는 404입니다.
+- 권한은 FR-H14의 "지우기"와 같습니다. 기기를 지워도(FR-H1) 그 기기가 만든 노트북은 계정에 남고, 그 기기의 공유가 지워지므로 그 공유를 건 노트북의 `share_id`는 `null`이 됩니다.
+- 계정 삭제는 지금 허브 연산이 없습니다. 생기면 그 계정의 노트북과 R2 본문을 모두 지우는 것을 그 요구사항의 수용 기준에 넣습니다.
+- 수용 기준: 지운 노트북과 판은 주인에게도 404이고 R2에 본문이 남지 않습니다(Cron 뒤). 판을 지우면 `latest`가 내려가고, 새로 올린 판은 지운 번호 다음 번호입니다. 다른 계정이나 `client`의 삭제는 404/403입니다. 기기를 지우면 그 기기의 공유를 건 노트북의 `share_id`가 `null`이 됩니다.
+- 테스트(`hub/worker/test/notebooks.test.ts`): `test_fr_h18_delete_notebook_removes_every_version`, `test_fr_h18_delete_version_keeps_numbers`, `test_fr_h18_device_removal_detaches_shares`, `test_fr_h18_cron_purges_orphaned_blobs`
+
+### FR-H19 크기·할당량·남용 제한 — `Draft` [provisional]
+값은 모두 실제 사용을 보고 바꿀 수 있는 처음 값입니다.
+- **크기.** `source` 1 MiB, `run` 16 MiB(Worker 메모리 128 MB 안에서 JSON을 검사할 수 있는 크기이고, FR-R5가 셀 하나의 스트림을 16 MiB로 자르는 것과 맞춤), 요청 전체 18 MiB. 넘으면 413입니다.
+- **할당량(계정당).** 노트북 200개, 노트북당 판 100개, 저장 합계 512 MiB. 넘으면 409 `quota_exceeded`이고, 오래된 판을 저절로 지우지 않습니다.
+- **빈도.** 판 올리기는 계정당 분당 10번(Workers Rate Limiting), 노트북 만들기는 계정당 분당 10번입니다. 인증 없는 노트북 읽기는 IP당 분당 300번입니다. 넘으면 429입니다.
+- **신고와 내리기.** 누구나 `POST /v1/notebooks/{notebook_id}/report {"reason": …}`로 `public`·`unlisted` 노트북을 신고할 수 있습니다(IP당 시간당 10번). 운영자는 `POST /admin/v1/notebooks/{notebook_id}/takedown`(`OPERATOR_SECRET`)으로 노트북을 내립니다. 내린 노트북은 주인 아닌 사람에게 404이고, 주인에게는 `taken_down: true`로 보이며 공개 범위를 넓힐 수 없습니다(409). 가입 허용 목록(`GITHUB_ALLOWED_IDS`, FR-H6)은 그대로 첫 방어선입니다.
+- 수용 기준: 각 크기 한계를 1바이트 넘기면 413, 할당량을 넘기면 409 `quota_exceeded`, 빈도를 넘기면 429입니다. 내린 노트북은 인증 없이 404, 주인에게 `taken_down: true`이고, 운영자 비밀이 틀리면 401입니다.
+- 테스트(`hub/worker/test/notebooks.test.ts`): `test_fr_h19_size_limits`, `test_fr_h19_quotas`, `test_fr_h19_rate_limits`, `test_fr_h19_report_and_takedown`
 
 ## 11. 비기능 요구사항
 
@@ -493,6 +595,14 @@ iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{ke
 - **로그.** Worker 코드는 요청 URL, 쿼리, `Authorization` 헤더를 로그로 남기지 않습니다(예외 처리기는 예외만 남김). `wrangler.toml`은 Workers Logs의 호출 로그(요청 URL을 기록함)를 끄고(`[observability.logs] invocation_logs = false`), `console` 로그만 남깁니다. 운영자는 이 Worker에 요청 URL 필드를 담는 Logpush를 켜지 않습니다.
 - 수용 기준: 링크로 받은 조회 토큰으로 `?token=` 조회가 200이고, 같은 조회 토큰으로 `GET /v1/devices`·`GET /v1/me`는 401입니다. 쿼리의 기기 토큰은 401 `invalid_credentials`입니다. 조회 토큰을 교체하면 이전 것은 401이고 새 것은 200입니다. 지운 기기의 조회 토큰은 401 `device_removed`입니다. 조회 요청(성공, 401, 404, 처리되지 않은 예외)을 처리하는 동안 Worker가 쓰는 `console` 출력에 토큰이 나타나지 않습니다. `wrangler.toml`의 호출 로그 설정이 꺼져 있습니다.
 - 테스트(`hub/worker/test/tokens.test.ts`): `test_nfr_h2_resolve_token_reads_records_and_nothing_else`, `test_nfr_h2_query_refuses_device_tokens`, `test_nfr_h2_resolve_token_rotates`, `test_nfr_h2_removed_device_resolve_token_is_device_removed`, `test_nfr_h2_worker_never_logs_the_query`, `test_nfr_h2_invocation_logs_are_off`
+
+### NFR-H3 남의 노트북 내용 격리 — `Draft`
+호스팅한 노트북의 출력, 라이브 커널의 출력, 마크다운 안의 HTML, ash가 브라우저에서 돌리는 코드(Pyodide 등)는 모두 남이 쓴 것입니다. 프런트 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로(FR-H13), 이것들은 프런트 출처에서 돌지 않습니다(INTENT D15 개정).
+- 스크립트가 돌 수 있는 내용은 `sandbox="allow-scripts"`(그 밖의 허용은 필요한 것만, **`allow-same-origin`은 절대 없음**) iframe 안에서만 돌립니다. 그 iframe의 출처는 opaque(`null`)이므로 프런트의 DOM·저장소·쿠키에 닿지 못하고, 그 iframe의 요청에는 교차 사이트 규칙이 걸려 `SameSite=Lax` 세션 쿠키가 실리지 않으며, API는 `null` 출처에 CORS를 열지 않습니다(FR-H13).
+- API의 노트북 본문 응답은 문서로 실행되지 않는 헤더를 붙입니다(FR-H14). 별도 콘텐츠 호스트나 R2 공개 버킷으로 본문을 내지 않습니다.
+- 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트의 남의 서버입니다. 세션 쿠키는 `__Host-`라 그 서브도메인이 덮어쓸 수 없고, 출처 검사가 그 서브도메인의 쿠키 쓰기를 막습니다(FR-H13).
+- 수용 기준: `text/html` 출력으로 `<script>`가 `document.cookie`, `parent.document`, `localStorage`를 읽고 `fetch("https://api.darkpyonix.dev/v1/me", {credentials: "include"})`를 부르는 노트북을 열었을 때, 앞의 셋은 예외나 빈 값이고, API 요청은 쿠키 없이 `Origin: null`로 도착해 401이며 응답을 읽지 못합니다. 같은 내용을 API 본문 주소로 직접 열면 내려받기가 되고 실행되지 않습니다.
+- 테스트: 프런트 저장소 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`, Worker `test_nfr_h3_null_origin_gets_no_cors`
 
 ## 12. 프로토콜 요구사항
 
