@@ -203,6 +203,14 @@ async fn fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait() {
     }
     // Warm the runtime extraction so that only ensure()'s own path is measured.
     be.runtime_root().unwrap();
+    // macOS scans a newly written executable on its first exec (~170 ms); run the wrapper
+    // once so that cost is not counted as ensure()'s.
+    let warm = std::process::Command::new(&wrapper)
+        .args(["-c", "pass"])
+        .status()
+        .unwrap();
+    assert!(warm.success());
+    std::fs::remove_file(&mark).unwrap();
 
     let t = Instant::now();
     let watch = {
