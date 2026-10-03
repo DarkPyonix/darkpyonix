@@ -13,8 +13,9 @@ import time
 import pytest
 
 from conftest import KERNEL_ROOT
+from kernel_procs import connect, kill, wait_pid_gone, write_notebook
 from darkpyonix import format as dpformat
-from darkpyonix.kernel import document, runs
+from darkpyonix.kernel import document, launcher, runs
 from darkpyonix.kernel.model import CellRecord, Run, RunRequest
 from darkpyonix.kernel.protocol import DKPError, kernel_id_for, new_run_id, now_iso
 
@@ -180,6 +181,95 @@ def test_fr_r2_log_survives_kernel_kill(scratch, python):
     assert store.recover_crashed() == []
 
 
+_KILL_NB = r"""
+import time
+# %% [code]
+ticks = open(TICKS, "a")
+print("start", flush=True)
+while True:
+    t = "%.6f" % time.time()
+    ticks.write(t + "\n")
+    ticks.flush()
+    print("t=" + t, flush=True)
+    time.sleep(0.02)
+"""
+
+
+def test_fr_r2_real_kernel_killed_mid_run_is_recovered_as_crashed(scratch, dp_home, python):
+    """SIGKILL a real kernel mid-run: the log keeps everything printed up to 1 s before the
+    kill, stays ``running``, and the next kernel for the file marks it ``crashed``."""
+    ticks_path = os.path.join(scratch, "ticks.txt")
+    path = write_notebook(scratch, "crash.py", _KILL_NB.replace("TICKS", repr(ticks_path)))
+    kid = kernel_id_for(path)
+    pid = launcher.launch(path, python=python)
+    second = None
+    try:
+        info = launcher.wait_for_announce(kid, pid=pid, timeout=15)
+        assert info is not None
+        c = connect(info)
+        run_id = c.request("run", {"mode": "all"})["run_id"]
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            ev = c.next_event(timeout=0.5)
+            if ev and ev["type"] == "output" and "start" in ev["data"]["output"].get("text", ""):
+                break
+        else:
+            raise AssertionError("cell did not start")
+        # Kill at the worst moment: just before the next periodic rewrite is due, so the
+        # newest output on disk is as old as the rewrite schedule allows.
+        log = os.path.join(runs.runs_dir_for(path), run_id + ".ipynb")
+        changes, last_sig = [], None
+        while True:
+            st = os.stat(log)
+            sig = (st.st_ino, st.st_mtime_ns, st.st_size)
+            now = time.time()
+            if sig != last_sig:
+                changes.append(now)
+                last_sig = sig
+            elif len(changes) >= 4:
+                period = (changes[-1] - changes[-3]) / 2
+                if now - changes[-1] >= period - 0.01:
+                    break
+            assert now < deadline + 30, "the log is not being rewritten"
+            time.sleep(0.002)
+        killed_at = time.time()
+        os.kill(pid, signal.SIGKILL)
+        assert wait_pid_gone(pid)
+        c.close()
+
+        with open(log, encoding="utf-8") as f:
+            nb = json.load(f)                                  # valid JSON after SIGKILL
+        assert nb["metadata"]["darkpyonix"]["status"] == "running"
+        logged = set(line[2:] for o in nb["cells"][1]["outputs"] if o["output_type"] == "stream"
+                     for line in o["text"].splitlines() if line.startswith("t="))
+        with open(ticks_path, encoding="utf-8") as f:
+            printed = [line.strip() for line in f if line.strip()]
+        assert logged and set(printed) >= logged
+        missing = [float(t) for t in printed if t not in logged]
+        lag = killed_at - min(missing) if missing else 0.0
+        print("FR-R2 oldest output missing from the log: %.3f s before the kill" % lag)
+        assert lag <= 1.0, "output printed %.3f s before the kill is not in the log" % lag
+
+        second = launcher.launch(path, python=python)
+        info = launcher.wait_for_announce(kid, pid=second, timeout=15)
+        assert info is not None
+        c = connect(info)
+        try:
+            got = c.request("runs.get", {"run_id": run_id})["metadata"]["darkpyonix"]
+            listed = c.request("runs.list", {"limit": 5})["runs"]
+        finally:
+            c.close()
+        assert got["status"] == "crashed" and got["ended_at"]
+        assert [r["status"] for r in listed if r["run_id"] == run_id] == ["crashed"]
+        assert not [n for n in os.listdir(runs.runs_dir_for(path)) if n.endswith(".tmp")]
+    finally:
+        for p in (pid, second):
+            if p is not None:
+                kill(p, signal.SIGTERM)
+                if not wait_pid_gone(p):
+                    kill(p, signal.SIGKILL)
+                    wait_pid_gone(p)
+
 def test_fr_r2_recover_leaves_this_processes_current_run_alone(scratch):
     path = notebook_file(scratch)
     store = runs.RunStore(path, kernel_id_for(path))
@@ -227,9 +317,10 @@ def test_fr_r2_update_is_throttled(scratch):
     t.join()
     writes = len(seen) - 1          # the first sample is the file written by begin()
     assert n > 500
-    assert 2 <= writes <= 5, writes  # ~3 s of updates → ~3 rewrites, never one per update
+    # ~3 s of updates → one rewrite per WRITE_INTERVAL (< 1 s), never one per update
+    assert 2 <= writes <= 5, writes
     gaps = [b - a for a, b in zip(seen[1:], seen[2:])]
-    assert all(g > 0.9 for g in gaps), gaps
+    assert all(runs.WRITE_INTERVAL - 0.05 < g < 1.0 for g in gaps), gaps
     with open(log, encoding="utf-8") as f:
         assert len(json.load(f)["cells"][0]["outputs"]) == n   # the last update was written
 
@@ -287,6 +378,112 @@ def test_fr_r3_runs_magic_exposes_logs_as_json(scratch):
     finish(store, second)
     assert magic.current is None
     assert magic.latest["metadata"]["darkpyonix"]["run_id"] == second.run_id
+
+
+R3_NB = """\
+import sys
+
+# %% greet
+# @id: "c-greet"
+x = 21
+print("hello", x)
+print("oops", file=sys.stderr)
+print("again")
+
+# %% answer
+x * 2
+
+# %% check
+import json
+r = __runs__.latest
+c = __runs__.current
+out = {
+    "is_dict": isinstance(r, dict) and isinstance(r.cells[1], dict),
+    "latest_id": r.run_id, "status": r.status, "params": r.params,
+    "positions": [cell.index for cell in r.cells],
+    "text": r.cells[1].text, "stderr": r.cells[1].stderr,
+    "preamble_text": r.cells[0].text, "result": r.cells[2].result,
+    "no_result": r.cells[1].result, "stream_name": r.cells[1].outputs[0].name,
+    "by_title": r.cell("greet").index, "by_index": r.cell(2).title,
+    "by_id": r.cell("c-greet").title,
+    "path": r.path, "file_equals_notebook": json.load(open(r.path)) == r.notebook,
+    "notebook_is_plain": type(r.notebook) is dict and type(r.notebook["cells"][0]) is dict,
+    "dumps_roundtrip": json.loads(json.dumps(r)) == r.notebook,
+    "current_id": c.run_id, "current_path": c.path,
+    "by_id_id": __runs__[r.run_id].run_id, "last_id": __runs__[-1].run_id,
+    "list_ids": [s.run_id for s in __runs__.list()], "list_path": __runs__.list()[1].path,
+}
+try:
+    r.cell("nope")
+    out["missing_cell"] = "no error"
+except KeyError:
+    out["missing_cell"] = "KeyError"
+try:
+    r.no_such_field
+    out["missing_attr"] = "no error"
+except AttributeError:
+    out["missing_attr"] = "AttributeError"
+print(json.dumps(out))
+"""
+
+
+def test_fr_r3_runs_magic_attribute_access_in_kernel_cell(scratch, dp_home, python):
+    from darkpyonix.kernel import launcher
+    from darkpyonix.kernel.client import KernelClient
+
+    path = os.path.join(scratch, "train.py")
+    with open(path, "w") as f:
+        f.write(R3_NB)
+    pid = launcher.launch(path, python=python)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=15.0)
+        assert info is not None, "kernel did not announce"
+        c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+        c.connect()
+        c.subscribe()
+
+        def run(cells):
+            acc = c.request("run", {"mode": "cells", "cells": cells})
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                ev = c.next_event(timeout=0.5)
+                if ev and ev["type"] == "run.finished" and ev["data"]["run_id"] == acc["run_id"]:
+                    if ev["data"]["status"] != "ok":
+                        log = c.request("runs.get", {"run_id": acc["run_id"]})
+                        raise AssertionError([o for cell in log["cells"] for o in cell["outputs"]])
+                    return acc["run_id"]
+            raise AssertionError("run %s did not finish" % acc["run_id"])
+
+        first = run([1, 2])
+        second = run([3])
+        nb = c.request("runs.get", {"run_id": second})
+        outs = [o for cell in nb["cells"] for o in cell["outputs"]]
+        text = "".join(o["text"] for o in outs if o["output_type"] == "stream" and o["name"] == "stdout")
+        assert text and not [o for o in outs if o["output_type"] == "error"], nb
+        got = json.loads(text)
+        c.close()
+    finally:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    log_dir = runs.runs_dir_for(path)
+    assert got == {
+        "is_dict": True,
+        "latest_id": first, "status": "ok", "params": {},
+        "positions": [0, 1, 2],
+        "text": "hello 21\nagain\n", "stderr": "oops\n",
+        "preamble_text": "", "result": "42",
+        "no_result": None, "stream_name": "stdout",
+        "by_title": 1, "by_index": "answer", "by_id": "greet",
+        "path": os.path.join(log_dir, first + ".ipynb"), "file_equals_notebook": True,
+        "notebook_is_plain": True, "dumps_roundtrip": True,
+        "current_id": second, "current_path": os.path.join(log_dir, second + ".ipynb"),
+        "by_id_id": first, "last_id": first,
+        "list_ids": [second, first], "list_path": os.path.join(log_dir, first + ".ipynb"),
+        "missing_cell": "KeyError", "missing_attr": "AttributeError",
+    }
 
 
 def test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt(scratch):

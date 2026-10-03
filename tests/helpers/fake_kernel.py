@@ -118,7 +118,9 @@ class FakeKernel:
         return box.get("v")
 
     def announce(self) -> Dict[str, Any]:
-        return {"dkp": 1, "op": "announce", "kernel_id": self.kernel_id, "path": self.path,
+        from darkpyonix import _home
+        return {"dkp": 1, "op": "announce", "user_tag": _home.user_tag(self.key),
+                "kernel_id": self.kernel_id, "path": self.path,
                 "pid": self.pid, "port": self.port, "status": self.status, "run_id": self.run_id,
                 "python": {"version": "3.11.9", "implementation": "CPython", "executable": sys.executable},
                 "dkp_kernel_version": protocol.KERNEL_VERSION, "started_at": self.started_at, "host": "fake"}

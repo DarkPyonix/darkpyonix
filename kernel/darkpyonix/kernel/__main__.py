@@ -1,7 +1,8 @@
 """The DarkPyonix kernel process (INTENT D1–D3, D12; PROTOCOL §2–§3).
 
-Started by ``launcher.bootstrap_command``. Owns the per-file lock, the run store, the
-executor (user code on the main thread), the DKP/1 control server and discovery. Standard
+Started by ``launcher.bootstrap_command``. Owns the per-file lock, the shared document
+(SPEC §10a, ``collab.DocumentState``), the run store, the executor (user code on the main
+thread), the DKP/1 control server and discovery. Standard
 library only; Python 3.8+.
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from darkpyonix import _home
 from darkpyonix.kernel import lock, registry
+from darkpyonix.kernel.collab import DocumentState
 from darkpyonix.kernel.discovery import DiscoveryResponder
 from darkpyonix.kernel.events import EventLog
 from darkpyonix.kernel.executor import Executor
@@ -47,6 +49,7 @@ class Kernel(object):
         self.user_tag = _home.user_tag(self.key)
         self.lock = lock.FileLock(lock.lock_path(self.kernel_id))
         self.events = EventLog()
+        self.collab = None  # type: Optional[DocumentState]
         self.store = None  # type: Optional[RunStore]
         self.executor = None  # type: Optional[Executor]
         self.server = None
@@ -133,6 +136,25 @@ class Kernel(object):
             return {"run_id": ref, "status": "queued"}
         return None
 
+    def _run(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """PROTOCOL §3.3 ``run``; ``cell_ids`` (FR-S6) name cells of the shared document."""
+        params = dict(params or {}) if isinstance(params, dict) else params
+        if isinstance(params, dict) and params.get("cell_ids") is not None:
+            ids = params.pop("cell_ids")
+            if not isinstance(ids, list) or not ids or not all(isinstance(c, str) for c in ids):
+                raise DKPError("bad_request", "cell_ids must be a non-empty list of strings")
+            if params.get("cells") is not None:
+                raise DKPError("bad_request", "give cells or cell_ids, not both")
+            params["cells"] = self.collab.indices_for(ids)
+            params["mode"] = "cells"
+        self.collab.flush()  # debounced edits reach the file before the run reads it
+        return self.executor.submit(params)
+
+    def _before_load(self) -> List[str]:
+        """Executor hook, right before a (possibly queued) run reads the file."""
+        self.collab.flush()
+        return self.collab.cell_ids()
+
     def _shutdown(self, params: Dict[str, Any]) -> Dict[str, Any]:
         self.request_shutdown()
         return {"shutting_down": True}
@@ -141,9 +163,9 @@ class Kernel(object):
         ex = self.executor
         h = {
             "status": self._status,
-            "run": ex.submit,
+            "run": self._run,
             "cancel": lambda p: ex.cancel(p.get("run_id")),
-            "interrupt": lambda p: ex.interrupt(),
+            "interrupt": lambda p: ex.interrupt(p.get("client")),
             "restart": lambda p: ex.restart(bool(p.get("hard", False))),
             "shutdown": self._shutdown,
             "namespace": lambda p: ex.namespace(int(p.get("limit", 200))),
@@ -169,16 +191,21 @@ class Kernel(object):
             sys.stderr.flush()
             return EXIT_ALREADY_RUNNING
         try:
+            self.collab = DocumentState(self.path, self.events.append,
+                                        seq_provider=lambda: self.events.seq)
+            self.extra_handlers.update(self.collab.handlers())
             self.store = RunStore(self.path, self.kernel_id)
             crashed = self.store.recover_crashed()
             if crashed:
                 _log(self.diag, "marked crashed runs: %s" % ", ".join(crashed))
             self.executor = Executor(self.path, self.kernel_id, self.emit, self.store,
                                      self.python, self.host)
+            self.executor.before_load = self._before_load
             self.diag = getattr(self.executor, "original_stderr", sys.stderr)
 
             from darkpyonix.kernel.server import ControlServer
             self.server = ControlServer(self.kernel_id, self.key, self.events, self.handlers())
+            self.collab.start()
             self.server.start()
             self.discovery = DiscoveryResponder(self.info, self.user_tag)
             self.discovery.start()
@@ -204,6 +231,7 @@ class Kernel(object):
             lambda: self.discovery.stop(bye=True) if self.discovery is not None else None,
             lambda: registry.remove(self.kernel_id),
             lambda: self.server.stop() if self.server is not None else None,
+            lambda: self.collab.stop() if self.collab is not None else None,
             lambda: self.lock.release(),
         ):
             try:
