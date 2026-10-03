@@ -75,6 +75,7 @@ flowchart TB
   M1["manager (ephemeral)<br/>127.0.0.1:임의 포트"]
   M2["manager (dedicated)<br/>외부 접속용"]
   M1 -->|DKP/1 + HMAC| K["kernel: train.py<br/>127.0.0.1:임의 포트"]
+  M1 -.->|스트림 소켓 넘김<br/>SCM_RIGHTS / WSADuplicateSocketW| K
   M2 -->|DKP/1 + HMAC| K
   M1 <-->|멀티캐스트 질의/공지| MC(("239.255.68.80:46880<br/>루프백"))
   K <--> MC
@@ -109,6 +110,38 @@ flowchart LR
 
 사용자 코드는 메인 스레드에서만 돕니다(INTENT D12). 출력은 큐에 넣고 바로 돌아오므로 느린 클라이언트나 디스크가 학습 루프를 붙잡지 않습니다. 인터럽트는 control 스레드가 `_thread.interrupt_main()`으로 메인 스레드에 `KeyboardInterrupt`를 일으킵니다. POSIX와 Windows가 같은 경로를 씁니다.
 
+### 2.2 스트림 넘김
+
+사용자 설계(2025)를 따릅니다. 매니저가 인증과 권한 검사를 하고, 오래 열린 스트림만 소켓째 커널에 넘깁니다(INTENT D6, SPEC FR-M6, PROTOCOL §3.7). 짧은 REST 호출은 매니저가 DKP/1 요청으로 처리합니다. 구현 대기(#47).
+
+```mermaid
+sequenceDiagram
+  participant C as 클라이언트 (IDE, ash, Ember)
+  participant M as manager
+  participant K as kernel
+
+  C->>M: GET /api/kernels/{id}/events (토큰)
+  M->>M: 토큰 확인, 권한 검사
+  alt 실패
+    M-->>C: 401 / 403 / 404
+  else 통과
+    M->>K: adopt {kind, request 바이트, label{permission, client_id, user, nickname, share_id}}
+    M->>K: FD (POSIX SCM_RIGHTS) 또는 share 바이트 (Windows)
+    K-->>M: response {stream_id}
+    Note over M: 매니저는 자기 FD를 닫고 연결에서 빠짐
+    K-->>C: HTTP/1.1 200 text/event-stream, 이벤트
+  end
+  Note over M,K: 매니저가 죽어도 C와 K 사이 연결은 이어짐
+  M->>K: (공유를 지울 때) streams.close {share_id}
+```
+
+| 연결 | 넘기는 방법 | 매니저가 죽으면 |
+|---|---|---|
+| 루프백·LAN 평문 HTTP | 날 소켓(POSIX `SCM_RIGHTS`, Windows `WSADuplicateSocketW` → `socket.fromshare`) | 이어짐 |
+| TLS(전용 모드), HTTP/2, P2P 터널 | 소켓 쌍의 한쪽을 넘기고 매니저가 바이트를 퍼 나름(내용 변환 없음) | 함께 끝남 |
+
+커널은 넘겨받은 연결에서 토큰을 보지 않습니다. 매니저가 붙인 권한 라벨로 보낼 내용만 거릅니다(SPEC FR-K9).
+
 ## 3. 커널 수명
 
 ```mermaid
@@ -132,8 +165,9 @@ sequenceDiagram
   M-->>A: 200 Kernel
   A->>M: POST /kernels/{id}/runs {mode: all}
   M->>K: request run
-  K-->>M: event run.started, cell.*, output…
-  M-->>A: SSE 스트림
+  A->>M: GET /kernels/{id}/events
+  M->>K: adopt (소켓 넘김, §2.2)
+  K-->>A: SSE 스트림 (run.started, cell.*, output…)
   Note over M: 클라이언트가 모두 떠나고 유휴 시간이 지나면<br/>임시 매니저는 끝남. 커널은 계속 실행
   A->>M: (나중에, 새 매니저) GET /kernels/{id}/runs/latest
 ```

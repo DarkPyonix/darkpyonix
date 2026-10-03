@@ -38,6 +38,19 @@ info:
     resume without loss while the kernel''s replay buffer still holds the events.
 
 
+    **Handed-off streams.** Operations marked `x-darkpyonix-handoff: kernel` are long-lived
+
+    streams. The manager authenticates and authorizes the request, then passes the connection
+
+    itself to the kernel (POSIX `SCM_RIGHTS`, Windows `WSADuplicateSocketW`; TLS, HTTP/2 and
+
+    tunnel connections through a socketpair the manager pumps). The kernel writes the response.
+
+    A stream handed off as a raw socket survives the manager (INTENT D6, SPEC FR-M6,
+
+    PROTOCOL §3.7). Status: planned, issue #47.
+
+
     **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
 
     grows: fields, optional request fields, paths and error codes are added, never renamed,
@@ -631,13 +644,15 @@ paths:
       tags:
       - Events
       operationId: streamEvents
+      x-darkpyonix-handoff: kernel
       summary: Live kernel events (Server-Sent Events)
       description: "Each SSE message has `id: <seq>`, `event: <type>` and `data: <JSON>` where type and data\nare\
         \ those of `docs/PROTOCOL.md` §3.4. Because `EventSource` cannot set headers, this\nendpoint also accepts\
         \ `?token=`. Output events are omitted for `viewer1`.\n A `replay_truncated` message carries no SSE `id`,\
         \ so it does not move the client's `Last-Event-ID`. With `client_id` the stream also makes the client present;\
         \ it leaves 30 s after the stream closes. Document events `doc.*` and `presence.*` (PROTOCOL §4) are delivered\
-        \ here too."
+        \ here too. Handed off: after authentication the manager passes this connection to the kernel, which writes\
+        \ the response (SPEC FR-M6, PROTOCOL §3.7)."
       security:
       - bearerAuth: []
       - tokenQuery: []
@@ -1107,9 +1122,11 @@ paths:
       tags:
       - Runs
       operationId: waitRun
+      x-darkpyonix-handoff: kernel
       summary: Long-poll until a run finishes (alarm)
       description: 'Returns as soon as the run finishes, or after `timeout` seconds with `status: running` and a
-        `next` URL (SPEC FR-S7, the 2025 alarm long-poll).'
+        `next` URL (SPEC FR-S7, the 2025 alarm long-poll). Handed off: after authentication the manager passes
+        this connection to the kernel, which writes the response (SPEC FR-M6, PROTOCOL §3.7).'
       parameters:
       - name: timeout
         in: query

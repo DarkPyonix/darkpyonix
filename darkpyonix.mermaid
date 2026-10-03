@@ -231,6 +231,29 @@ classDiagram
             +append(type str, data dict) Event
             +since(seq int) list~Event~
         }
+        class HandoffServer {
+            <<POSIX unix socket>>
+            +path str
+            +serve_forever() None
+            -receive_fd(session ClientSession) int
+        }
+        class AdoptedStream {
+            <<handed-off connection>>
+            +stream_id str
+            +kind str
+            +label StreamLabel
+            +sock socket
+            +send(event Event) None
+            +close() None
+        }
+        class StreamLabel {
+            +permission Permission
+            +client_id str|None
+            +user str|None
+            +nickname str|None
+            +share_id str|None
+            +allows(event Event) bool
+        }
         class DiscoveryResponder {
             <<discovery thread>>
             +group str
@@ -273,6 +296,11 @@ classDiagram
     RunLog *-- CellLog : cells
     Executor ..> RunsMagic : injects as __runs__
     ControlServer *-- ClientSession
+    ControlServer *-- AdoptedStream : adopt
+    HandoffServer ..> ControlServer : same DKP/1 frames + SCM_RIGHTS
+    Kernel *-- HandoffServer
+    AdoptedStream *-- StreamLabel
+    AdoptedStream ..> EventLog : replay and live events
     ControlServer ..> EventLog : replay
     ClientSession ..> Executor : run / interrupt / restart
     DiscoveryResponder ..> Registry : mirrors announce
@@ -358,6 +386,11 @@ classDiagram
             +token_hash str
             +expires_at datetime|None
         }
+        class StreamHandoff {
+            +handoff(conn Connection, kernel KernelInfo, label StreamLabel) None
+            +pump(conn Connection, kernel KernelInfo, label StreamLabel) None
+            +close_share(share_id str) None
+        }
         class LifecycleWatchdog {
             +idle_timeout int
             +touch() None
@@ -379,6 +412,9 @@ classDiagram
     ManagerApp *-- AuthService
     ManagerApp *-- EventBroker
     ManagerApp *-- LifecycleWatchdog
+    ManagerApp *-- StreamHandoff
+    StreamHandoff ..> KernelClient : adopt / streams.close
+    AuthService ..> StreamHandoff : revoke closes streams
     ManagerApp ..> ManagerRegistry : ephemeral only
     KernelDirectory *-- DiscoveryClient
     KernelDirectory *-- KernelLauncher
@@ -394,6 +430,7 @@ classDiagram
 
     %% ───────────── Wire boundaries ─────────────
     KernelClient ..> ControlServer : DKP/1 over loopback TCP (HMAC handshake)
+    StreamHandoff ..> HandoffServer : POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
     DiscoveryClient ..> DiscoveryResponder : UDP multicast 239.255.68.80 port 46880
     KernelLauncher ..> Kernel : spawns detached
 

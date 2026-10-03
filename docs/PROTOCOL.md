@@ -15,6 +15,7 @@
 | `kernels/<kernel_id>.json` | 0644 | 발견 보조 등록. §2.4의 announce 본문과 같고 비밀값이 없습니다 |
 | `kernels/<kernel_id>.log` | 0600 | 커널 자신의 진단 로그(사용자 출력이 아님) |
 | `locks/<kernel_id>.lock` | 0600 | 파일당 커널 하나를 보장하는 OS 잠금 |
+| `sockets/<kernel_id>.sock` | 0600 (폴더 0700) | POSIX 전용. 스트림 넘김(§3.7)을 받는 유닉스 도메인 소켓. 발견에는 쓰지 않습니다. 경로는 announce의 `handoff`로 알립니다 |
 | `managers/<pid>.json` | 0600 | 매니저의 `url`, `token`, `mode`, `pid`, `started_at` |
 
 ## 2. 발견 (UDP 멀티캐스트)
@@ -46,9 +47,12 @@
   "pid": 41234, "port": 53122, "status": "busy",
   "run_id": "20261003-142233-a1f0",
   "python": {"version": "3.11.9", "implementation": "CPython", "executable": "/usr/bin/python3.11"},
-  "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
+  "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py", "started_at": "2026-10-03T05:22:33Z", "host": "macmini",
+  "handoff": "/home/u/.darkpyonix/sockets/k_3f9a0c1b2d4e5f607182.sock"
 }
 ```
+
+`handoff`는 스트림 넘김용 유닉스 도메인 소켓 경로입니다(§3.7). Windows에서는 `null`입니다. 경로가 OS 한도(macOS 104바이트, Linux 108바이트)를 넘으면 커널은 `null`을 알리고, 그 커널로 가는 스트림은 매니저가 소켓 쌍으로 퍼 나릅니다(§3.7.3). 구현 대기(#47).
 
 커널은 다음 때 announce를 보냅니다.
 - query에 응답할 때(`nonce`를 그대로 돌려줌)
@@ -74,7 +78,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 같은 파일을 가리키는 심볼릭 링크와 상대 경로는 같은 ID가 됩니다.
 
-## 3. 제어 채널 (TCP, 루프백)
+## 3. 제어 채널 (루프백 TCP, POSIX는 유닉스 도메인 소켓도)
 
 ### 3.1 프레임
 
@@ -85,7 +89,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 ```
 
 - `length`는 payload 바이트 수이고 최대 64 MiB입니다. 넘으면 받는 쪽이 `error {code: "frame_too_large"}`를 보내고 연결을 닫습니다.
-- 커널은 `127.0.0.1`에만 리슨합니다.
+- 커널은 `127.0.0.1`에만 리슨합니다. POSIX 커널은 스트림 넘김용으로 `sockets/<kernel_id>.sock`(0600)에서도 같은 프레임을 받습니다(§3.7.2).
 
 ### 3.2 핸드셰이크
 
@@ -120,6 +124,8 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 | `runs.get` | `run_id: str \| "latest" \| "current"` | nbformat 4 노트북 | |
 | `subscribe` | `since: int?` | `{seq: int, replayed: int}` | `since` 이후의 이벤트를 다시 보내고 이어서 실시간 전송 |
 | `unsubscribe` | `{}` | `{}` | |
+| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. 구현 대기(#47) |
+| `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현 대기(#47) |
 
 오류 코드: `auth_failed`, `bad_request`, `unknown_method`, `busy`, `not_found`, `frame_too_large`, `shutting_down`, `internal`.
 
@@ -165,6 +171,69 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 ```
 
 커널은 `repr`를 `reprlib`로 200자까지만 만듭니다. `shape`·`dtype`·`len`은 읽을 수 있을 때만 채웁니다. 이 값들을 만들면 사용자 코드(`__repr__`, 프로퍼티)가 실행되므로, 셀이 실행 중일 때는 다른 스레드에서 부르지 않도록 `name`과 `type`만 채우고 나머지는 `null`로 둡니다. `_`로 시작하는 이름, 모듈, 커널이 넣은 이름(`__runs__`, `darkpyonix`)은 뺍니다.
+
+### 3.7 스트림 넘김 (`adopt`)
+
+INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오래 열린 스트림이면 그 연결을 커널에 넘깁니다. 넘기는 연결은 셋입니다.
+
+| `kind` | HTTP 경로 | 커널이 쓰는 응답 |
+|---|---|---|
+| `events` | `GET /api/kernels/{kernel_id}/events` | `200 text/event-stream`, §3.4·§4의 이벤트 |
+| `ws` | `GET /api/ws/kernels/{kernel_id}` (Upgrade) | `101 Switching Protocols`, §5의 2025 WebSocket 동기화 |
+| `wait` | `GET /api/kernels/{kernel_id}/runs/{run_ref}/wait` | 실행이 끝나거나 `timeout`이 지나면 JSON 한 번(SPEC FR-S7) |
+
+짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. 구현 대기(#47).
+
+#### 3.7.1 `adopt` 요청
+
+```json
+{"dkp":1,"op":"request","id":9,"method":"adopt","params":{
+  "kind": "events",
+  "transport": "fd",
+  "request": "<base64: 매니저가 이미 읽은 요청 바이트 전체(요청 줄, 헤더, 읽은 본문)>",
+  "label": {"permission": "viewer2", "client_id": "dev_8f2c1a", "user": "alice",
+            "nickname": "alice-mbp", "share_id": "s_0123456789abcdef"},
+  "share": null
+}}
+```
+
+- `transport`: `fd`(POSIX, 날 소켓), `share`(Windows, 날 소켓), `pump`(소켓 쌍의 한쪽, §3.7.3).
+- `request`: 커널은 이 바이트를 소켓에서 읽은 것처럼 다룹니다. 매니저는 요청을 다시 쓰지 않습니다. 요청에 든 토큰(`Authorization`, `?token=`)은 커널이 보지 않습니다.
+- `label`: 매니저가 인증 결과로 채웁니다. `share_id`는 공유 토큰으로 들어온 연결에만 있고, 마스터·관리자 토큰이면 `null`입니다. 커널은 `permission`을 무엇을 보낼지 거르는 데만 씁니다(SPEC FR-K9). 인증이나 토큰 검사는 하지 않습니다.
+- `share`: Windows에서만 씁니다. 매니저가 `WSADuplicateSocketW(socket, kernel_pid, &info)`로 만든 `WSAPROTOCOL_INFOW`의 base64입니다. 커널은 `socket.fromshare(base64 디코드 값)`으로 엽니다. 파이썬 `socket.share`와 같은 형식입니다. 커널 `pid`는 announce에 있습니다.
+
+#### 3.7.2 POSIX: `SCM_RIGHTS`
+
+`SCM_RIGHTS`는 유닉스 도메인 소켓에서만 됩니다. 그래서 POSIX 커널은 루프백 TCP 제어 채널과 함께 `sockets/<kernel_id>.sock`(announce의 `handoff`)에서도 DKP/1 연결을 받습니다. 같은 핸드셰이크(§3.2)를 거칩니다.
+
+1. 매니저가 `handoff` 경로에 연결하고 핸드셰이크를 마칩니다.
+2. `adopt` 요청 프레임(`transport: "fd"`)을 보낸 직후, 1바이트 `b"F"`를 `sendmsg`의 보조 데이터 `(SOL_SOCKET, SCM_RIGHTS, fd)`와 함께 보냅니다.
+3. 커널은 프레임을 읽은 뒤 `socket.recvmsg(1, socket.CMSG_LEN(4))`로 FD를 받고 `socket.socket(fileno=fd)`로 엽니다. 3.8에는 `socket.recv_fds`가 없으므로 `recvmsg`를 직접 씁니다.
+4. 커널이 `response {stream_id}`를 보내면 매니저는 자기 쪽 FD를 닫습니다. 그 뒤 매니저는 그 연결과 무관합니다.
+
+`adopt`가 TCP 제어 채널로 `transport: "fd"`를 받으면 `bad_request`입니다. FD를 받지 못하면(보조 데이터 없음) `bad_request`이고, 매니저는 그 연결에 `502`를 쓰고 닫습니다.
+
+#### 3.7.3 소켓 쌍과 퍼 나르기 (`pump`)
+
+TLS, HTTP/2, P2P 터널 위의 연결, 그리고 `handoff`가 `null`인 POSIX 커널로 가는 연결에는 넘길 날 소켓이 없습니다. 매니저는 소켓 쌍(POSIX `socketpair(AF_UNIX, SOCK_STREAM)`, Windows는 루프백 TCP 쌍)을 만들어 한쪽을 §3.7.1·§3.7.2와 같이 넘기고(`transport: "pump"`, POSIX는 `fd`로, Windows는 `share`로), 다른 쪽과 클라이언트 연결 사이에서 바이트를 퍼 나릅니다.
+
+- 커널은 소켓 쌍 위에서도 HTTP/1.1로 응답합니다(상태 줄, 헤더, 본문. `ws`는 `101` 뒤 WebSocket 프레임).
+- 매니저는 본문 바이트를 바꾸지 않습니다. 매니저가 맡는 것은 바깥 운반뿐입니다. TLS 레코드의 암복호화, HTTP/2에서는 커널 응답 머리(상태 줄과 헤더)를 HEADERS 프레임으로 옮기고 본문을 DATA 프레임에 그대로 싣는 일, 터널에서는 터널 스트림에 싣는 일입니다.
+- 이런 스트림은 매니저와 함께 끝납니다. 매니저가 끝나면 소켓 쌍이 닫히고, 커널은 그 스트림을 닫힌 연결로 처리합니다.
+
+#### 3.7.4 공유 철회 (`streams.close`)
+
+```json
+{"dkp":1,"op":"request","id":12,"method":"streams.close","params":{"share_id":"s_0123456789abcdef"}}
+```
+
+매니저는 공유를 지우거나 그 타입의 공유 토큰을 다시 만들 때(SPEC FR-A4) 이 요청을 보냅니다. 커널은 `label.share_id`가 같은 넘겨받은 스트림을 모두 닫고 닫은 개수를 돌려줍니다. 커널은 넘겨받은 스트림의 라벨만 기억하고, 공유 목록이나 토큰은 모릅니다.
+
+#### 3.7.5 넘겨받은 스트림의 수명
+
+- 커널은 넘겨받은 스트림마다 `stream_id`와 라벨을 기억합니다. 클라이언트가 끊거나 쓰기가 실패하면 그 스트림을 버립니다. 클라이언트별 송신 버퍼가 64 MiB를 넘으면 그 클라이언트를 끊습니다(PR-3과 같은 규칙).
+- 날 소켓(`fd`, `share`)으로 넘긴 스트림은 매니저가 죽어도 이어집니다(INTENT D2).
+- `events`와 `ws` 스트림에 `client_id`가 있으면, 그 스트림이 열려 있는 동안 그 클라이언트는 접속자입니다. 스트림이 닫히고 30초 뒤 `presence.leave`가 됩니다(SPEC FR-S4).
 
 ## 4. 협업 문서 (SPEC §10a)
 
