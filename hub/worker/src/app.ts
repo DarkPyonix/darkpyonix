@@ -46,6 +46,24 @@ async function health(): Promise<Response> {
   return json(200, { status: "ok", version: VERSION });
 }
 
+/** Bumped only for a breaking change under `/v1` (FR-H8). */
+export const API_VERSION = 1;
+
+/** `GET /v1/config` (FR-H8): where the relays and the pkarr directory are. */
+function config(_request: Request, env: Env): Response {
+  return json(
+    200,
+    {
+      api_version: API_VERSION,
+      hub_version: VERSION,
+      relay_urls: [env.RELAY_URL],
+      pkarr_url: `${env.PUBLIC_URL}/pkarr`,
+      link_url: `${env.PUBLIC_URL}/link`,
+    },
+    { "cache-control": "public, max-age=300" },
+  );
+}
+
 /**
  * `GET /.well-known/org.flathub.VerifiedApps.txt` (FR-H7): Flathub's website verification file,
  * the token Flathub shows for dev.darkpyonix.Ember. A plain text file, as a static asset would be,
@@ -82,6 +100,7 @@ async function linkLanding(request: Request, env: Env, deps: Deps): Promise<Resp
 
 export const ROUTES: Route[] = [
   route("/health", { GET: health }),
+  route("/v1/config", { GET: config }),
   route("/.well-known/org.flathub.VerifiedApps.txt", { GET: flathubVerifiedApps }),
   // FR-H6 GitHub sign-in
   route("/auth/login", { GET: login }),
