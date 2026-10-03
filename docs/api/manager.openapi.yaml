@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: DarkPyonix Kernel Manager API
-  version: 1.0.0-draft.3
+  version: 1.0.0-draft.4
   summary: Discover, launch and drive file-bound DarkPyonix kernels.
   description: 'The HTTP API every DarkPyonix client uses: IDE extensions (VS Code, IntelliJ), the Ember
 
@@ -664,7 +664,7 @@ paths:
 
                 event: output
 
-                data: {"run_id":"20261003-142233-a1f0","index":3,"output":{"output_type":"stream","name":"stdout","text":"epoch
+                data: {"run_id":"20261003-142233-a1f0","index":3,"cell_id":"c_5e1f0a9b2c3d","output":{"output_type":"stream","name":"stdout","text":"epoch
                 1 loss 0.42\n"}}
 
                 '
@@ -787,12 +787,15 @@ paths:
       $ref: '#/components/parameters/ClientId'
     - &id003
       $ref: '#/components/parameters/Nickname'
+    - &id006
+      $ref: '#/components/parameters/RequestId'
     post:
       tags:
       - Documents
       operationId: createCell
       summary: Create a cell
-      description: Inserted after/before a cell or at the end; saved to the file within 300 ms and broadcast as
+      description: Inserted after `after` or before `before`; with neither it is appended at the end of the
+        document (giving both is `400`). Saved to the file within 300 ms and broadcast as
         `doc.cell.created` (SPEC FR-S2, FR-S5). `editor` or `admin`.
       requestBody:
         required: true
@@ -833,6 +836,7 @@ paths:
       $ref: '#/components/parameters/CellId'
     - *id002
     - *id003
+    - *id006
     patch:
       tags:
       - Documents
@@ -903,6 +907,7 @@ paths:
     - *id005
     - *id002
     - *id003
+    - *id006
     post:
       tags:
       - Documents
@@ -942,6 +947,7 @@ paths:
     - *id005
     - *id002
     - *id003
+    - *id006
     put:
       tags:
       - Documents
@@ -1007,6 +1013,7 @@ paths:
     - *id001
     - *id002
     - *id003
+    - *id006
     put:
       tags:
       - Documents
@@ -1162,6 +1169,21 @@ components:
       description: Device name shown to other clients (2025 `?nickname=`).
       schema:
         type: string
+        maxLength: 64
+    RequestId:
+      name: X-DarkPyonix-Request
+      in: header
+      required: false
+      description: 'Optional client-chosen id for this request. The manager passes it to the kernel as
+
+        `request_id`, and every event the request causes (`doc.*`, `presence.*`) carries it back as
+
+        `data.request_id`, so two windows sharing one client_id can recognise their own edits (PROTOCOL §4).
+
+        Events not caused by a request (idle unlock, external reload) have none.'
+      schema:
+        type: string
+        minLength: 1
         maxLength: 64
     CellId:
       name: cell_id
@@ -1642,12 +1664,24 @@ components:
           minimum: 0
         type:
           $ref: '#/components/schemas/CellType'
+        raw_type:
+          type:
+          - string
+          - 'null'
+          description: 'The type exactly as written between `[ ]` in the marker, or null when the marker has
+
+            none (and for the preamble). `type` is the canonical form (lower-cased, aliases resolved).'
         title:
           type:
           - string
           - 'null'
         source:
           type: string
+          description: 'Exactly the parser''s cell body (FORMAT §2.4): marker and metadata lines excluded,
+
+            line endings and the blank lines before the next marker kept. Sending it back unchanged leaves
+
+            the file bytes unchanged.'
         source_sha256:
           type: string
           pattern: ^[0-9a-f]{64}$
@@ -1720,10 +1754,16 @@ components:
         doc_version:
           type: integer
           minimum: 0
+          description: Grows by one on cell create/update/delete/move and on `doc.reloaded` only; lock, unlock,
+            conflict and presence events carry the current value without changing it (PROTOCOL §4).
         seq:
           type: integer
           minimum: 0
-          description: Subscribe to events from here to stay in sync (FR-S1).
+          description: 'The seq of the last event already reflected in this snapshot. Subscribe with
+
+            `since=seq` and apply only events with a greater seq; an edit racing the snapshot is then neither
+
+            lost nor applied twice (FR-S1).'
         presence:
           type: array
           items:
@@ -1907,8 +1947,15 @@ components:
       properties:
         type:
           type: string
+          description: Written into the marker as given; the cell's canonical `type` is derived from it.
+        title:
+          type:
+          - string
+          - 'null'
+          description: The marker title; `null` or `""` removes it. Not allowed on the preamble.
         source:
           type: string
+          description: The cell body exactly as `DocumentCell.source` (markers and metadata lines excluded).
         metadata:
           type: object
           additionalProperties: true

@@ -12,11 +12,11 @@ CELL_STATUSES = ("ok", "error", "interrupted")
 
 
 class RunRequest(object):
-    __slots__ = ("run_id", "mode", "cells", "source", "params", "on_busy")
+    __slots__ = ("run_id", "mode", "cells", "source", "params", "on_busy", "started_by")
 
     def __init__(self, run_id: str, mode: str = "all", cells: Optional[List[int]] = None,
                  source: Optional[str] = None, params: Optional[Dict[str, Any]] = None,
-                 on_busy: str = "reject") -> None:
+                 on_busy: str = "reject", started_by: Optional[Dict[str, Any]] = None) -> None:
         if mode not in ("all", "cells"):
             raise ValueError("mode must be 'all' or 'cells'")
         if on_busy not in ("reject", "queue"):
@@ -29,6 +29,7 @@ class RunRequest(object):
         self.source = source
         self.params = dict(params or {})
         self.on_busy = on_busy
+        self.started_by = started_by    # FR-S6 {client_id, user, nickname} or None
 
 
 class CellRecord(object):
@@ -54,7 +55,8 @@ class CellRecord(object):
 
 class Run(object):
     __slots__ = ("run_id", "kernel_id", "file", "file_sha256", "mode", "cell_indexes", "params",
-                 "status", "started_at", "ended_at", "python", "host", "cells")
+                 "status", "started_at", "ended_at", "python", "host", "cells", "started_by",
+                 "interrupted_by")
 
     def __init__(self, request: RunRequest, kernel_id: str, file: str, file_sha256: str,
                  python: Dict[str, Any], host: str) -> None:
@@ -71,6 +73,8 @@ class Run(object):
         self.python = python
         self.host = host
         self.cells = []                 # type: List[CellRecord]
+        self.started_by = request.started_by  # type: Optional[Dict[str, Any]]  FR-S6
+        self.interrupted_by = None      # type: Optional[Dict[str, Any]]  FR-S6
 
     def summary(self) -> Dict[str, Any]:
         """The ``RunSummary`` of manager.openapi.yaml (``path`` is added by the run store)."""
@@ -78,4 +82,5 @@ class Run(object):
             "run_id": self.run_id, "status": self.status, "mode": self.mode,
             "cells": list(self.cell_indexes), "params": dict(self.params),
             "started_at": self.started_at, "ended_at": self.ended_at,
+            "started_by": self.started_by, "interrupted_by": self.interrupted_by,
         }

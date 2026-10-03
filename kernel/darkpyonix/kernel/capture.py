@@ -117,14 +117,16 @@ class OutputRouter(object):
         self.flush_streams()
         self._push(("c", bool(wait)))
 
-    def begin_cell(self, run: Any, cell: Any) -> None:
-        self._push(("cell", run, cell))
+    def begin_cell(self, run: Any, cell: Any, doc_cell_id: Optional[str] = None) -> None:
+        """Route outputs to ``cell`` of ``run``; events name it by ``index`` and by the shared
+        document's ``doc_cell_id`` (PROTOCOL §3.4 ``cell_id``, ``None`` when unknown)."""
+        self._push(("cell", run, cell, doc_cell_id))
         self.active = True
 
     def end_cell(self, timeout: float = 5.0) -> None:
         self.flush_streams()
         self.active = False
-        self._push(("cell", None, None))
+        self._push(("cell", None, None, None))
         self.flush(timeout)
 
     def flush(self, timeout: float = 5.0) -> bool:
@@ -140,6 +142,7 @@ class OutputRouter(object):
     def _loop(self) -> None:
         q = self._q
         run = cell = None
+        cell_id = None              # type: Optional[str]  # the shared document's id of ``cell``
         clear_wait = False
         pend_name = None            # type: Optional[str]
         pend = []                   # type: list
@@ -173,7 +176,7 @@ class OutputRouter(object):
                 outputs.append({"output_type": "stream", "name": name, "text": text})
             dirty = True
             self._safe_emit("output", {
-                "run_id": run.run_id, "index": cell.index,
+                "run_id": run.run_id, "index": cell.index, "cell_id": cell_id,
                 "output": {"output_type": "stream", "name": name, "text": text},
             })
 
@@ -215,7 +218,7 @@ class OutputRouter(object):
                         cell.outputs.append(output)
                         dirty = True
                     self._safe_emit("output", {"run_id": run.run_id, "index": cell.index,
-                                               "output": output})
+                                               "cell_id": cell_id, "output": output})
                 elif tag == "c":
                     if cell is None:
                         continue
@@ -226,12 +229,12 @@ class OutputRouter(object):
                         clear_wait = False
                         dirty = True
                     self._safe_emit("output.clear", {"run_id": run.run_id, "index": cell.index,
-                                                     "wait": item[1]})
+                                                     "cell_id": cell_id, "wait": item[1]})
                 elif tag == "cell":
                     if dirty and run is not None:
                         self._update(run)
                         dirty = False
-                    run, cell = item[1], item[2]
+                    run, cell, cell_id = item[1], item[2], item[3]
                     clear_wait = False
                 elif tag == "b":
                     if dirty and run is not None:
