@@ -449,14 +449,16 @@ paths:
       tags: [Devices]
       operationId: removeDevice
       summary: Remove a device; revokes its token and key, its names, shares and record, and drops its relay connections
-      description: Account rights required.
+      description: |
+        Account rights, or the device's own device token (a device leaving its account by
+        itself).
       responses:
         "204":
           description: Removed.
         "401":
           description: No valid session or device token.
         "403":
-          description: A computer's device token, or a cross-origin cookie request.
+          description: Another device's token without account rights, or a cross-origin cookie request.
         "404":
           description: No such device in the account.
 
