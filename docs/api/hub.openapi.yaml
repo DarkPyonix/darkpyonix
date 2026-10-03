@@ -36,7 +36,9 @@ info:
 
     **Credentials.** `Authorization: Bearer <device token>`, or the `__Host-dp_session` cookie
     for a signed-in browser. Where a stock iroh client cannot set headers (`GET /pkarr/{key}`)
-    the device token may be the `token` query parameter. Cookie-authenticated writes must come
+    a **resolve token** (`dpr_...`, read-only: it reads same-account address records and
+    nothing else) goes in the `token` query parameter; device tokens are never accepted in
+    a query (SPEC NFR-H2). The Worker never logs request URLs. Cookie-authenticated writes must come
     from `https://darkpyonix.dev` (`Origin`), else 403. Tokens and session ids are stored
     hashed. "Account rights" means a signed-in session or the account's `main_server` device.
 
@@ -193,6 +195,32 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
+  /v1/me/resolve-token:
+    post:
+      tags: [Accounts]
+      operationId: rotateResolveToken
+      summary: Issue a new read-only resolve token for the calling device (NFR-H2)
+      description: |
+        Device token in the `Authorization` header only. The device's previous resolve token
+        stops working at once.
+      security:
+        - device: []
+      responses:
+        "201":
+          description: The new resolve token, shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resolve_token]
+                properties:
+                  resolve_token: {type: string}
+        "401":
+          description: No valid device token in the header.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
   # ------------------------------------------------------------------ devices (FR-H1)
 
   /link:
@@ -289,10 +317,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [device, device_token]
+                required: [device, device_token, resolve_token]
                 properties:
                   device: {$ref: "#/components/schemas/Device"}
-                  device_token: {type: string}
+                  device_token: {type: string, description: "`dpd_...`; headers only."}
+                  resolve_token: {type: string, description: "`dpr_...`; read-only, for `GET /pkarr/{key}?token=` (NFR-H2)."}
         "202":
           description: Not decided yet; poll again after `interval`.
           content:
@@ -491,13 +520,15 @@ paths:
       operationId: resolveAddressRecord
       summary: Fetch a device's signed pkarr packet (iroh pkarr relay protocol)
       description: |
-        Requires a device token or session of the same account. For iroh's stock
-        `PkarrResolver`, configure the URL as `https://darkpyonix.dev/pkarr?token=<device token>`
-        (iroh appends the key as a path segment and keeps the query).
+        Requires a resolve token, device token or session of the same account. For iroh's
+        stock `PkarrResolver`, configure the URL as
+        `https://darkpyonix.dev/pkarr?token=<resolve token>` (iroh appends the key as a path
+        segment and keeps the query). Only resolve tokens are accepted in the query (NFR-H2).
       parameters:
         - name: token
           in: query
           required: false
+          description: A resolve token (`dpr_...`). A device token here is refused (401 `invalid_credentials`).
           schema: {type: string}
       responses:
         "200":
@@ -508,7 +539,10 @@ paths:
         "400":
           description: Malformed key.
         "401":
-          description: No valid session or device token.
+          description: No valid resolve token, session or device token (a device token in the query counts as none); `code` is `device_removed` for a removed device's token.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
         "404":
           description: Unknown key, another account's device, or nothing published.
 
