@@ -118,7 +118,7 @@ darkpyonix run train.py --param lr=0.02   <span class="c"># 두 번째 실행: �
       <table>
         <thead><tr><th scope="col">경로</th><th scope="col">내용</th></tr></thead>
         <tbody>
-          <tr><td><code>user.key</code></td><td>같은 OS 사용자의 커널과 매니저가 인증에 쓰는 키입니다. 권한 0600, 처음 쓸 때 만듭니다.</td></tr>
+          <tr><td><code>user.key</code></td><td>같은 OS 사용자의 커널과 매니저가 인증에 쓰는 키입니다. 권한 0600, 처음 쓸 때 만듭니다. 없어지는 중입니다. 커널은 OS가 알려 주는 상대 계정이 같을 때만 받게 됩니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/55">#55</a></span></td></tr>
           <tr><td><code>locks/&lt;kernel_id&gt;.lock</code></td><td>파일당 커널 하나를 지키는 OS 잠금입니다. 커널이 죽으면 OS가 풀어 주므로 남은 파일 때문에 막히지 않습니다.</td></tr>
           <tr><td><code>runtime/</code></td><td>바이너리에서 풀어 낸 커널 소스입니다.</td></tr>
           <tr><td><code>kernels/&lt;kernel_id&gt;.json</code>, <code>managers/&lt;pid&gt;.json</code></td><td>발견과 CLI의 매니저 찾기에 쓰는 등록 파일입니다. 없애는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>.</td></tr>

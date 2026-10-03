@@ -71,7 +71,7 @@
           <tr><td><code>darkpyonix restart FILE [--hard]</code></td><td>soft 재시작은 네임스페이스를 비웁니다. <code>--hard</code>는 같은 인터프리터로 프로세스를 다시 실행하고, 커널 ID는 그대로입니다.</td></tr>
           <tr><td><code>darkpyonix shutdown FILE [--force]</code></td><td>인터럽트하고 실행 기록을 마저 쓴 뒤 정상 종료합니다. 프로세스를 죽이는 것은 <code>--force</code>뿐입니다.</td></tr>
           <tr><td><code>darkpyonix kernel FILE [--python PATH]</code></td><td>아무것도 실행하지 않고 커널만 띄웁니다.</td></tr>
-          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>그 파일 커널의 공유 토큰을 발급합니다. 전용 매니저가 필요합니다.</td></tr>
+          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>그 파일 커널의 공유 토큰을 발급합니다. 전용 매니저가 필요합니다. <code>--capabilities read,history,...</code>로 바뀝니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></td></tr>
           <tr><td><code>darkpyonix manager [--ephemeral|--dedicated] [--host H] [--port P] [--idle-timeout S]</code></td><td>매니저를 실행합니다. 기본은 임시 모드로, 루프백에만 열고 유휴 상태가 이어지면 끝납니다. 두 모드를 함께 주면 오류입니다.</td></tr>
         </tbody>
       </table>

@@ -87,7 +87,7 @@
       <p>협업은 커널에 넘긴 소켓 위의 2025 WebSocket 동기화로 옮기는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span> <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>.</p>
     </div>
 
-    <h2 id="permissions">공유 권한</h2>
+    <h2 id="permissions">공유 권한 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></h2>
     <p>전용 매니저는 <code>darkpyonix share FILE --permission ...</code>으로 커널마다 공유 토큰을 발급합니다.</p>
     <div class="tablewrap">
       <table>
@@ -101,8 +101,9 @@
       </table>
     </div>
 
-    <p>지금은 셀 편집용 <code>editor</code> 등급도 있습니다. 이 등급은 없애고 2025 설계의 요청 인자
-      <code>user_permission: "write"</code>로 바꾸는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
+    <p>위 등급과 지금 있는 셀 편집용 <code>editor</code> 등급은, 토큰이 순서 없는 집합으로 가지는 능력 다섯으로 바뀌는 중입니다.
+      <code>read</code>(코드 보기), <code>history</code>(실행 기록과 출력), <code>execute</code>(실행과 인터럽트),
+      <code>edit</code>(코드 수정, 셀 잠금), <code>manage</code>(공유 설정)입니다. 코드 실행과 코드 수정은 다른 능력이 됩니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
     <nav class="pagenav" aria-label="페이지 이동">
       <a class="prev" href="manager-api.html"><span>이전</span>&larr; 매니저 HTTP API</a>
       <a class="next" href="hub.html"><span>다음</span>darkpyonix.dev 허브 &rarr;</a>

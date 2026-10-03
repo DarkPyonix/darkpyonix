@@ -89,7 +89,7 @@
       <p>Collaboration is moving to the 2025 WebSocket sync over a socket handed to the kernel <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>.</p>
     </div>
 
-    <h2 id="permissions">Share permissions</h2>
+    <h2 id="permissions">Share permissions <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></h2>
     <p>A dedicated manager issues share tokens per kernel with <code>darkpyonix share FILE --permission ...</code>.</p>
     <div class="tablewrap">
       <table>
@@ -103,8 +103,10 @@
       </table>
     </div>
 
-    <p>Today there is also an <code>editor</code> tier for cell editing. It is being removed in favor of the 2025
-      request argument <code>user_permission: "write"</code> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
+    <p>These tiers, and today's <code>editor</code> tier for cell editing, are being replaced by five capabilities
+      that a token carries as a set, with no order: <code>read</code> (view code), <code>history</code> (run logs and outputs),
+      <code>execute</code> (run and interrupt), <code>edit</code> (edit code, lock cells) and <code>manage</code> (share settings).
+      Running code and editing code become separate capabilities <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
     <nav class="pagenav" aria-label="Pagination">
       <a class="prev" href="manager-api.html"><span>Previous</span>&larr; Manager HTTP API</a>
       <a class="next" href="hub.html"><span>Next</span>darkpyonix.dev hub &rarr;</a>
