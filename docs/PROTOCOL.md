@@ -341,3 +341,29 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 - `viewer1` 라벨에는 `execution_output`을 보내지 않고, `final_outputs`, `partial_outputs`, `error.traceback`, `outputs`를 빈 값으로 보냅니다(2025: "viewer1: 코드만 적혀있고 History 없음").
 - 편집, 잠금 해제, 실행, 인터럽트는 REST(매니저)로 보내고, 그 결과가 위 메시지로 퍼집니다. 2025 명세도 같았습니다.
 
+## 6. 커널 접근 토큰 저장소
+
+SPEC FR-A5, FR-A6, INTENT D17. 커널 접근 토큰(초기, 로그인, 공유)은 커널에 묶이고, 어느 매니저로 들어와도 통해야 합니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아." 그래서 토큰은 한 매니저의 `manager.db`가 아니라 런타임 홈의 파일에 둡니다. 위치는 리더 결정, 사용자 확인 대기입니다(PROJECT Q16). 구현 대기(#48).
+
+```json
+{
+  "kernel_id": "k_3f9a0c1b2d4e5f607182",
+  "path": "/home/u/exp/train.py",
+  "tokens": [
+    {"token_sha256": "<hex>", "kind": "initial", "permission": "admin",
+     "share_id": null, "label": null, "created_at": "2026-10-04T01:02:03Z",
+     "expires_at": null, "revoked_at": null},
+    {"token_sha256": "<hex>", "kind": "share", "permission": "viewer2",
+     "share_id": "s_0123456789abcdef", "label": "lab", "created_at": "…",
+     "expires_at": null, "revoked_at": "2026-10-05T09:00:00Z"}
+  ]
+}
+```
+
+- **토큰 값은 두지 않습니다.** 토큰은 32바이트 무작위 값이라 소금 없는 SHA-256으로 충분합니다. 매니저는 받은 토큰의 SHA-256을 `hmac.compare_digest`로 비교합니다.
+- **`kind`:** `initial`(SPEC FR-A6 초기 토큰), `login`(커널 로그인), `share`(공유 토큰).
+- **거둔 토큰은 남깁니다.** `revoked_at`이 있는 토큰은 `401 token_revoked`(2025 `TOKEN_BLACKLISTED`)이고, 확인 응답의 `blacklisted`가 `true`입니다. 파일이 지워질 때 함께 지워집니다.
+- **고치는 방법.** 고치는 쪽(매니저, 또는 파일 삭제를 본 커널)은 `tokens/<kernel_id>.lock`에 OS 잠금(POSIX `fcntl.flock`, Windows `msvcrt.locking`)을 걸고, 읽고, 바꾼 내용을 같은 폴더의 임시 파일에 쓴 뒤 `os.replace`로 바꿉니다. 읽는 쪽은 잠그지 않습니다. `os.replace`가 원자적이라 반쯤 쓴 파일을 읽지 않습니다.
+- **파일이 지워지면.** `path`에 파일이 없으면 저장소를 지웁니다. 매니저는 시작할 때 `tokens/` 전체를, 토큰을 검사할 때마다 그 저장소를 확인합니다. 커널은 자기 파일이 지워진 것을 알아채면(SPEC FR-S5) 지웁니다.
+- **누가 읽나.** 같은 OS 계정의 프로세스만 읽습니다(0600, 폴더 0700). 매니저와 커널 사이도 같은 계정만 통과하므로(§3.2) 이 범위가 같습니다.
+- **커널은 검사하지 않습니다.** 커널은 이 파일로 토큰을 검사하지 않고, 넘겨받은 요청의 토큰도 보지 않습니다(INTENT D5, SPEC FR-K9).

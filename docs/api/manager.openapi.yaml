@@ -1450,6 +1450,73 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/tokens/share:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Sharing
+      operationId: createShareToken
+      summary: Issue a share token for one kernel (2025 shape)
+      description: 'The 2025 `POST /kernels/{kernel_id}/tokens/share` (`get_sharing_settings`). The same operation as
+
+        `POST /api/kernels/{kernel_id}/shares` with the 2025 request and response fields. The token is bound
+
+        to this kernel and works through any manager (SPEC FR-A6). Dedicated manager only; an ephemeral
+
+        manager answers `403 forbidden`. 2025 `INSUFFICIENT_PERMISSION` "Only admin can enable sharing" is
+
+        `403 forbidden`.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - permission
+              properties:
+                permission:
+                  $ref: '#/components/schemas/SharePermission'
+                kernel_id:
+                  type: string
+                  pattern: ^k_[0-9a-f]{20}$
+                  description: The 2025 body field; must equal the path parameter when present.
+      responses:
+        '201':
+          description: The share token (shown once).
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - share_id
+                - share_token
+                - permission
+                - share_url
+                properties:
+                  share_id:
+                    type: string
+                    pattern: ^s_[0-9a-f]{16}$
+                  share_token:
+                    type: string
+                  permission:
+                    $ref: '#/components/schemas/SharePermission'
+                  share_url:
+                    type: string
+                    description: Same as `ShareWithToken.url`.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/kernels/{kernel_id}/tokens/{token}/verify:
     parameters:
     - $ref: '#/components/parameters/KernelId'
