@@ -51,6 +51,13 @@ info:
     PROTOCOL §3.7). Status: planned, issue #47.
 
 
+    **Planned operations.** Operations marked `x-darkpyonix-status: planned` are designed but not
+
+    served yet; `x-darkpyonix-issue` names the issue that builds them. A manager answers them `404`
+
+    until then. The mark is removed in the change that serves the operation (SPEC NFR-M3).
+
+
     **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
 
     grows: fields, optional request fields, paths and error codes are added, never renamed,
@@ -154,6 +161,8 @@ paths:
       tags:
       - Auth
       operationId: login
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Log in to the manager
       description: 'The 2025 "login" (`GET /auth`, "the password goes in the session"). The password of this
 
@@ -192,6 +201,8 @@ paths:
       tags:
       - Auth
       operationId: setPassword
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Set or reset the manager's password
       description: 'The 2025 "password reset" (`PUT /auth/password`): authenticate with a token, then register a
 
@@ -240,6 +251,8 @@ paths:
       tags:
       - Auth
       operationId: resetMasterToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Issue a new master token for the manager
       description: 'The 2025 "master token reset" (`PUT /auth/tokens/master`): authenticate with the password in
 
@@ -280,6 +293,8 @@ paths:
       tags:
       - Auth
       operationId: resetSharedToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Issue a new manager shared token of one type
       description: 'The 2025 "shared token reset" (`PUT /auth/tokens/shared/{token_type}`): authenticate with the
 
@@ -1368,6 +1383,8 @@ paths:
       tags:
       - Auth
       operationId: createInitialToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Issue the initial token of a kernel
       description: 'The 2025 "initial token" (`POST /kernels/{kernel_id}/tokens/initial`), unchanged. A client
 
@@ -1420,6 +1437,8 @@ paths:
       tags:
       - Auth
       operationId: kernelLogin
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Log in to one kernel with the manager's password
       description: 'The 2025 kernel login (`POST /kernels/{kernel_id}/tokens/auth`): the password in, an access
 
@@ -1476,6 +1495,8 @@ paths:
       tags:
       - Sharing
       operationId: createShareToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Issue a share token for one kernel (2025 shape)
       description: 'The 2025 `POST /kernels/{kernel_id}/tokens/share` (`get_sharing_settings`). The same operation as
 
@@ -1560,6 +1581,8 @@ paths:
       tags:
       - Auth
       operationId: verifyToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
       summary: Check a token against a file
       description: 'The 2025 `GET /kernels/{kernel_id}/tokens/{token}/verify`, sent with the same token as
 
@@ -1602,6 +1625,8 @@ paths:
       tags:
       - Events
       operationId: syncWebSocket
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 49
       x-darkpyonix-handoff: kernel
       summary: 2025 WebSocket synchronization (cells, history, locks, focus, execution)
       description: 'The 2025 `/ws/kernels/{kernel_id}?token={token}`, restored by user decision 2026-10-03
