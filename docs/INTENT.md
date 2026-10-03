@@ -98,6 +98,17 @@ DarkPyonix 전체는 **에이전트 대화가 먼저이고, 필요할 때 코딩
 
 Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, DarkPyonix는 그 위에 에이전트 간 통신, 컴퓨터 전환, 원격 브라우저만 덧붙입니다. 이 일은 ember가 맡습니다. Gemstone(thisisthepy)을 로컬 추론 엔진으로 붙이는 일은 하네스가 필요하므로 우리 스택 밖에 둡니다. Gemstone 쪽은 2026-10-03에 OpenAI 호환 API가 `tools` 요청에서 tool call을 실행하지 않고 `tool_calls`(스트리밍은 tool-call delta)로 돌려주는 pass-through 방식을 결정했습니다(LogitAI/Gemstone#61, PR #62). 다만 API 자체는 아직 계획 단계입니다. 그 API가 나오면, 그것을 프로바이더로 쓰는 하네스를 ember가 래핑합니다. 그 전까지 Gemstone 연결은 대기입니다.
 
+### D14. 허브 API는 Cloudflare Workers, 릴레이는 UDP가 되는 호스트, 계정은 GitHub 로그인
+
+사용자 결정(2026-10-03): "dns는 클라우드 플레어고 허브 운영은 허브가 가볍다면 클라우드 플레어 워커를 쓰고 싶어. 계정 생성은 내가 분명히 OpenAI 로그인으로 한다고 했을 텐데?" 이어서 같은 날: "OpenAI 로그인은 엠버 서버에서 사용자가 자체적으로 하는걸로 하고 허브는 깃허브 로그인으로 하자." 그래서 허브(SPEC §10)를 이렇게 바꿉니다.
+
+- **허브 API는 Cloudflare Worker입니다(`hub/worker/`).** 허브가 하는 일 대부분은 서명 검증 한 번과 작은 행 몇 개를 읽고 쓰는 HTTP 요청입니다(기기 10대면 하루 수천 건). 이 정도면 Workers로 충분히 가볍고, DNS가 이미 Cloudflare라 ACME TXT 게시(FR-H5)도 같은 계정의 API 토큰 하나로 됩니다. ash 뷰어는 Workers 정적 자산으로 냅니다.
+- **언어는 TypeScript입니다(workers-rs가 아님).** Workers의 1급 언어라 D1·정적 자산·Rate Limiting·Cron 바인딩을 그대로 쓰고, `@cloudflare/vitest-pool-workers`(miniflare)로 실제 D1 위에서 테스트합니다. Web Crypto에 ed25519가 있어 서명 검증에 의존성이 없습니다. workers-rs는 `iroh-dns`의 `SignedPacket`을 재사용할 수 있다는 장점이 있지만, wasm 빌드 도구(worker-build)와 더 큰 번들, 덜 성숙한 D1 바인딩을 떠안습니다. 다시 구현하는 iroh 부분은 pkarr 패킷 형식과 DNS 응답 파싱 약 200줄뿐이고, 형식이 iroh-dns 1.3과 같은지는 테스트와 배포 후 Rust 쪽 시험 벡터로 확인합니다.
+- **저장소는 D1 하나입니다.** 허브가 원자적으로 해야 하는 일(일회용 거래와 챌린지 소비, "더 새 패킷만" 저장, 기기 링크를 한 번만 받기)은 모두 SQLite 한 문장(`DELETE … RETURNING`, 조건부 upsert, 조건부 `UPDATE`)으로 됩니다. Durable Objects는 지금 필요 없고, 릴레이를 Container로 옮길 때만 그 바인딩으로 들어옵니다.
+- **릴레이는 UDP를 받는 곳에 둡니다(`relay.darkpyonix.dev`, `hub/server/`).** Workers와 Containers는 들어오는 UDP를 받지 않아 iroh의 QUIC 주소 발견(QAD, UDP 7842)을 낼 수 없습니다. QAD가 없으면 기기가 자기 공인 주소를 몰라 직접 연결이 줄어듭니다. 그래서 작은 VPS에서 iroh-relay와 QAD를 함께 돌리는 것으로 시작하고, ember NFR-N1 측정에서 QAD를 끈 직접 연결 비율도 기준(85%)을 넘으면 릴레이를 Cloudflare Container로 옮깁니다(SPEC FR-H3). 릴레이는 누구를 들일지 Worker에 묻습니다.
+- **`hub/server`(axum 크레이트)는 릴레이 호스트로 남깁니다.** iroh-relay 서버 크레이트를 쓰는 Rust 코드라 VPS에서 그대로 돌고, Worker로 옮긴 API·SQLite 부분은 빌드할 수 있을 때 걷어 냅니다. 그 전까지 그 부분은 배포하지 않는 D14 이전 구현입니다.
+- **계정은 GitHub 로그인입니다(FR-H6).** 인가 코드 + PKCE(S256) + state로 GitHub 사용자 ID를 계정의 정체로 삼고, GitHub 토큰은 사용자 정보를 읽은 뒤 바로 폐기합니다. 기기는 기기 링크로 그 계정에 들어옵니다(FR-H1). 원격 호스팅 서비스가 "Sign in with ChatGPT"를 쓰려면 OpenAI의 신청과 승인이 필요하고(웹사이트 통합은 2026-10 현재 일부 상업 파트너 대상 시범), 허브가 받을 수 있는 OpenAI ID 토큰도 없습니다. ember server가 동적 등록으로 받는 `client_id`는 설치마다 다르고 그 사용자에게 묶여 있어서, 허브가 그 토큰을 받으려면 audience를 검사하지 않아야 합니다. 그러면 사용자가 로그인한 아무 앱의 ID 토큰으로도 그 사용자 계정을 가로챌 수 있습니다. 그래서 OpenAI 로그인과 플랜 사용은 ember server에만 두고(PROJECT Q2), 허브는 GitHub를 씁니다.
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
@@ -110,3 +121,10 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 | 실행 기록을 한 폴더(`logs/`)에 모음 | 어느 파일의 기록인지 다시 찾아야 하고, 클라이언트가 파일을 열 때 맵핑하기 어렵습니다 |
 | 커널 상태를 pickle로 저장해 복원 | 와이어나 디스크에서 받은 pickle을 푸는 것은 임의 코드 실행입니다. 기억(D 목적)은 실행 기록과 살아 있는 네임스페이스로 풉니다 |
 | FastAPI 매니저 + nginx 앞단 | 사용자가 nginx 설정을 떠안고, 에이전트 CLI가 부를 때마다 파이썬 인터프리터를 띄워야 합니다. Rust 단일 바이너리로 대체했습니다(D10, 2026-10-03) |
+| 허브 전체를 Rust 바이너리 하나로 VPS에서 운영(D14 이전 SPEC §10) | 사용자는 DNS가 있는 Cloudflare의 Workers를 원했고, 허브의 대부분은 Workers로 충분히 가볍습니다. UDP가 필요한 릴레이만 따로 둡니다(D14) |
+| 허브가 발급하는 계정 토큰과 가입 비밀값으로 계정 만들기 | 사용자 지적(2026-10-03): 계정 생성은 외부 로그인이어야 했습니다. GitHub 로그인으로 바꿨습니다(D14, SPEC FR-H6) |
+| 허브에 OpenAI 로그인("Sign in with ChatGPT") | 원격 호스팅은 OpenAI 승인이 필요하고, 사용자 결정으로 OpenAI 로그인은 ember server에서만 합니다(D14) |
+| ember server가 받은 OpenAI ID 토큰을 허브가 받아 계정 확인 | 그 토큰의 audience는 설치마다 다른 ember의 `client_id`라 허브가 검사할 수 없고, 검사하지 않으면 다른 앱용 토큰으로 계정을 가로챌 수 있습니다(D14) |
+| workers-rs로 허브 API 작성 | wasm 빌드 도구와 큰 번들, 덜 성숙한 D1 바인딩. iroh에서 재사용할 부분이 작습니다(D14) |
+| 주소 디렉터리를 키마다 Durable Object로 | D1의 조건부 upsert 한 문장으로 "더 새 것만"이 원자적입니다. 객체를 늘릴 이유가 없습니다(D14) |
+| 릴레이는 Cloudflare Container, QAD만 따로 VPS | iroh에서 QAD는 릴레이 목록의 항목마다 붙어서 QAD 호스트도 릴레이 항목이 되고 릴레이를 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 됩니다(SPEC FR-H3) |
