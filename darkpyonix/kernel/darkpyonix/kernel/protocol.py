@@ -15,8 +15,10 @@ import socket
 import struct
 from typing import Any, Dict, Optional
 
+from .. import __version__
+
 DKP_VERSION = 1
-KERNEL_VERSION = "0.1.0"
+KERNEL_VERSION = __version__  # the kernel ships in the darkpyonix package
 
 # §2 discovery
 DISCOVERY_GROUP = "239.255.68.80"

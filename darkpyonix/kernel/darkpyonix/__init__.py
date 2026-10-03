@@ -9,7 +9,7 @@ Inside a kernel the calls talk to ``darkpyonix.kernel.hostctx``; anywhere else t
 as under plain ``python file.py`` (SPEC FR-F5).
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _EXPORTS = {
     "markdown": "_markdown",

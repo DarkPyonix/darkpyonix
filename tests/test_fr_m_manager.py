@@ -121,7 +121,9 @@ def test_fr_m1_docs_page_is_served_outside_the_schema(manager):
 
 def test_fr_m1_health_and_manager_info(manager):
     with manager.client(token=None) as c:
-        assert c.get("/health").json() == {"status": "ok", "version": "0.1.0"}
+        health = c.get("/health").json()
+        assert health["status"] == "ok" and re.match(r"^\d+\.\d+\.\d+", health["version"])
+        assert set(health) == {"status", "version"}
     with manager.client() as c:
         info = c.get("/api/manager").json()
     assert info["mode"] == "ephemeral" and info["permission"] == "admin" and isinstance(info["pid"], int)
@@ -190,7 +192,7 @@ def test_fr_m1_list_and_get_kernels(manager, kernel):
         assert {"kernel_id", "path", "pid", "status", "python", "started_at", "runs_dir"} <= set(k)
         assert "port" not in k and k["runs_dir"].endswith(os.path.join("__runs__", "train.py"))
         info = c.get("/api/kernels/%s" % kernel.kernel_id).json()
-        assert info["status"] == "idle" and info["queue"] == [] and info["kernel_version"] == "0.1.0"
+        assert info["status"] == "idle" and info["queue"] == [] and info["kernel_version"] == protocol.KERNEL_VERSION
         _error(c.get("/api/kernels/k_00000000000000000000"), 404, "not_found")
         _error(c.get("/api/kernels/not-a-kernel"), 404, "not_found")
 
