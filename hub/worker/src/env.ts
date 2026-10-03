@@ -48,6 +48,8 @@ export interface Deps {
   fetch: typeof fetch;
   /** Unix milliseconds. */
   nowMs: () => number;
+  /** Waits (long-poll rounds, FR-H9). */
+  sleep: (ms: number) => Promise<void>;
   /** The DNS provider for ACME TXT records; `null` when none is configured. */
   dns: (env: Env) => DnsProvider | null;
   /** Work that may finish after the response (ctx.waitUntil). */

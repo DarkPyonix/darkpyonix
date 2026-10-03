@@ -114,6 +114,36 @@ function clientIp(request: Request): string {
   return request.headers.get("cf-connecting-ip") ?? "unknown";
 }
 
+// ---------------------------------------------------------------- device list version (FR-H9)
+
+/** Longest `wait` of a long-poll on `GET /v1/devices`. */
+export const MAX_WAIT_SECS = 25;
+/** How often a long-poll re-reads the account's version. */
+export const WAIT_POLL_MS = 2000;
+
+/** Marks a change visible in the account's device list (not `last_seen` alone). */
+export function bumpDevicesVersion(env: Env, accountId: string): D1PreparedStatement {
+  return env.DB.prepare("UPDATE accounts SET devices_version = devices_version + 1 WHERE account_id = ?").bind(accountId);
+}
+
+async function devicesVersion(env: Env, accountId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT devices_version FROM accounts WHERE account_id = ?")
+    .bind(accountId)
+    .first<{ devices_version: number }>();
+  return row?.devices_version ?? 0;
+}
+
+function etagFor(version: number): string {
+  return `W/"v${version}"`;
+}
+
+/** Weak comparison (RFC 9110 §13.1.2): `W/` is ignored; `*` matches. */
+function ifNoneMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const opaque = (tag: string) => tag.trim().replace(/^W\//, "");
+  return header.split(",").some((tag) => tag.trim() === "*" || opaque(tag) === opaque(etag));
+}
+
 // ---------------------------------------------------------------- /v1/me
 
 export async function me(request: Request, env: Env, deps: Deps): Promise<Response> {
@@ -322,6 +352,7 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
       throw ApiError.conflict("endpoint id already registered");
     }
   }
+  await bumpDevicesVersion(env, link.account_id).run();
   const device = await env.DB.prepare("SELECT * FROM devices WHERE endpoint_id = ?")
     .bind(link.endpoint_id)
     .first<DeviceRow>();
@@ -341,14 +372,38 @@ export async function rotateResolveToken(request: Request, env: Env, deps: Deps)
 
 // ---------------------------------------------------------------- devices
 
+/**
+ * `GET /v1/devices[?wait=<secs>]` with `If-None-Match`: 304 when unchanged; with `wait`, held
+ * until the account's device list changes or `wait` passes (FR-H9).
+ */
 export async function listDevices(request: Request, env: Env, deps: Deps): Promise<Response> {
-  const p = await principal(request, env, nowSecs(deps.nowMs()));
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM devices WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at, endpoint_id",
-  )
-    .bind(p.accountId)
-    .all<DeviceRow>();
-  return json(200, { devices: results.map(deviceJson) });
+  const rawWait = new URL(request.url).searchParams.get("wait");
+  const wait = rawWait === null ? 0 : /^\d{1,2}$/.test(rawWait) ? Number(rawWait) : -1;
+  let p = await principal(request, env, nowSecs(deps.nowMs()));
+  if (wait < 0 || wait > MAX_WAIT_SECS) throw ApiError.badRequest(`wait must be an integer from 0 to ${MAX_WAIT_SECS}`);
+  const ifNoneMatch = request.headers.get("if-none-match");
+  const version = await devicesVersion(env, p.accountId);
+  if (ifNoneMatches(ifNoneMatch, etagFor(version))) {
+    let changed = false;
+    for (let round = 0; round < Math.ceil((wait * 1000) / WAIT_POLL_MS) && !changed; round++) {
+      await deps.sleep(WAIT_POLL_MS);
+      changed = (await devicesVersion(env, p.accountId)) !== version;
+    }
+    if (!changed) return new Response(null, { status: 304, headers: { etag: etagFor(version) } });
+    // The change may be the caller's own removal.
+    p = await principal(request, env, nowSecs(deps.nowMs()));
+  }
+  // One snapshot: the version and the list it describes.
+  const [current, list] = await env.DB.batch([
+    env.DB.prepare("SELECT devices_version FROM accounts WHERE account_id = ?").bind(p.accountId),
+    env.DB.prepare("SELECT * FROM devices WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at, endpoint_id").bind(p.accountId),
+  ]);
+  const now = (current.results[0] as { devices_version: number } | undefined)?.devices_version ?? 0;
+  return json(
+    200,
+    { devices: (list.results as DeviceRow[]).map(deviceJson) },
+    { etag: etagFor(now), "cache-control": "private, no-cache" },
+  );
 }
 
 export async function accountDevice(env: Env, p: Principal, endpointId: string): Promise<DeviceRow> {
@@ -400,11 +455,12 @@ export async function updateDevice(request: Request, env: Env, deps: Deps, endpo
   const isSelf = p.kind === "device" && p.endpointId === endpointId;
   if ("app" in body && !isSelf) throw ApiError.forbidden("only the device itself reports its app");
   const accountId = requireSelfOrAccountAdmin(p, endpointId);
-  await env.DB.prepare(
-    `UPDATE devices SET ${sets.join(", ")} WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL`,
-  )
-    .bind(...values, accountId, endpointId)
-    .run();
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE devices SET ${sets.join(", ")} WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL`,
+    ).bind(...values, accountId, endpointId),
+    bumpDevicesVersion(env, accountId),
+  ]);
   return json(200, deviceJson(await accountDevice(env, p, endpointId)));
 }
 
@@ -451,6 +507,7 @@ export async function removeDevice(request: Request, env: Env, deps: Deps, endpo
     .run();
   if (revoked.meta.changes !== 1) throw ApiError.notFound();
   await env.DB.batch([
+    bumpDevicesVersion(env, accountId),
     env.DB.prepare("DELETE FROM names WHERE endpoint_id = ?").bind(endpointId),
     env.DB.prepare("DELETE FROM shares WHERE endpoint_id = ?").bind(endpointId),
     env.DB.prepare("DELETE FROM records WHERE endpoint_id = ?").bind(endpointId),

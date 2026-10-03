@@ -8,6 +8,7 @@ function deps(ctx: ExecutionContext): Deps {
   return {
     fetch: (input, init) => fetch(input, init),
     nowMs: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     dns: (env) => (env.CF_API_TOKEN && env.CF_ZONE_ID ? new CloudflareDns(env.CF_API_TOKEN, env.CF_ZONE_ID, (i, n) => fetch(i, n)) : null),
     waitUntil: (promise) => ctx.waitUntil(promise),
   };

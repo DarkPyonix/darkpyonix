@@ -65,6 +65,8 @@ export function makeDeps(overrides: Partial<Deps> = {}): Deps & { github: FakeGi
   return {
     fetch: fakeFetch as typeof fetch,
     nowMs: () => Date.now(),
+    // No real waiting in tests; a test that needs something to happen "meanwhile" overrides it.
+    sleep: async () => undefined,
     dns: () => memoryDns,
     waitUntil: (p) => {
       pending.push(p);
@@ -84,6 +86,8 @@ export interface Call {
   origin?: string | null;
   json?: unknown;
   body?: BodyInit;
+  /** Extra request headers. */
+  headers?: Record<string, string>;
   /** Bindings to override for this call (e.g. a var the test config leaves unset). */
   env?: Partial<Env>;
 }
@@ -94,6 +98,7 @@ export function call(deps: Deps, method: string, path: string, c: Call = {}): Pr
   headers.set("cf-connecting-ip", `test-${crypto.randomUUID()}`);
   if (c.token) headers.set("authorization", `Bearer ${c.token}`);
   if (c.cookie) headers.set("cookie", c.cookie);
+  for (const [k, v] of Object.entries(c.headers ?? {})) headers.set(k, v);
   // Browsers send Origin on POST/PUT/DELETE; default to ours when a cookie is used.
   const origin = c.origin === undefined ? (c.cookie ? ORIGIN : null) : c.origin;
   if (origin) headers.set("origin", origin);

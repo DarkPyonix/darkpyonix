@@ -51,8 +51,18 @@ export async function presence(request: Request, env: Env, deps: Deps): Promise<
   if (typeof body.endpoint_id !== "string" || !ENDPOINT_ID_RE.test(body.endpoint_id) || typeof body.online !== "boolean") {
     throw ApiError.badRequest("endpoint_id (hex) and online (boolean) are required");
   }
-  await env.DB.prepare("UPDATE devices SET online = ?, last_seen = ? WHERE endpoint_id = ? AND revoked_at IS NULL")
-    .bind(body.online ? 1 : 0, nowSecs(deps.nowMs()), body.endpoint_id)
-    .run();
+  const online = body.online ? 1 : 0;
+  // One transaction: bump the account's device list version (FR-H9) only if `online` changes.
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE accounts SET devices_version = devices_version + 1 WHERE account_id =
+         (SELECT account_id FROM devices WHERE endpoint_id = ? AND revoked_at IS NULL AND online != ?)`,
+    ).bind(body.endpoint_id, online),
+    env.DB.prepare("UPDATE devices SET online = ?, last_seen = ? WHERE endpoint_id = ? AND revoked_at IS NULL").bind(
+      online,
+      nowSecs(deps.nowMs()),
+      body.endpoint_id,
+    ),
+  ]);
   return noContent();
 }
