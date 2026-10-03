@@ -1,5 +1,5 @@
-"""FR-K1, FR-K3, FR-K4, FR-K7: kernel process plumbing (launch, lock, detached
-lifetime, hard restart)."""
+"""FR-K1, FR-K3, FR-K4, FR-K7, FR-K8: kernel process plumbing (launch, lock, detached
+lifetime, hard restart, shutdown)."""
 from __future__ import annotations
 
 import json
@@ -13,8 +13,9 @@ import time
 import pytest
 
 from darkpyonix import _home
-from darkpyonix.kernel import launcher, registry
+from darkpyonix.kernel import discovery, launcher, lock, registry
 from darkpyonix.kernel.protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
+from darkpyonix.kernel.runs import RunStore
 
 from kernel_procs import (
     connect, kill, notebook, reap, run_and_wait, start, stream_text, wait_pid_gone,
@@ -223,3 +224,53 @@ def test_fr_k7_hard_restart_keeps_kernel_id(python, dp_home, scratch):
             kill(pid, signal.SIGKILL)
             wait_pid_gone(pid)
 
+
+def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
+    monkeypatch.delenv("DARKPYONIX_DISCOVERY", raising=False)   # bye travels by multicast
+    path = write_notebook(scratch, "shutdown.py", """
+        import time
+        # %% [code]
+        print("started", flush=True)
+        while True:
+            time.sleep(0.01)
+        """)
+    kid = kernel_id_for(path)
+    seen = []
+    listener = discovery.DiscoveryClient(_home.user_tag())
+    listener.listen(seen.append)
+    proc = start(python, path)
+    try:
+        info = launcher.wait_for_announce(kid, pid=proc.pid, timeout=15)
+        assert info is not None
+        assert os.path.exists(registry.entry_path(kid))
+        c = connect(info)
+        try:
+            acc = c.request("run", {"mode": "all"})
+            deadline = time.time() + 15
+            while time.time() < deadline:
+                ev = c.next_event(timeout=0.5)
+                if ev and ev["type"] == "output" and "started" in ev["data"]["output"].get("text", ""):
+                    break
+            else:
+                raise AssertionError("cell did not start")
+            assert c.request("shutdown") == {"shutting_down": True}
+        finally:
+            c.close()
+        assert proc.wait(15) == 0
+        deadline = time.time() + 5
+        while time.time() < deadline and not any(m.get("op") == "bye" for m in seen):
+            time.sleep(0.02)
+    finally:
+        listener.close()
+        reap(proc)
+    assert any(m.get("op") == "bye" and m.get("kernel_id") == kid and m.get("pid") == proc.pid
+               for m in seen)
+    assert not os.path.exists(registry.entry_path(kid))
+    # The OS lock is gone: a new holder gets it at once (the lock file itself may remain).
+    probe = lock.FileLock(lock.lock_path(kid))
+    assert probe.acquire()
+    probe.release()
+    store = RunStore(path, kid)
+    meta = store.get(acc["run_id"])["metadata"]["darkpyonix"]
+    assert meta["status"] == "interrupted"
+    assert store.list(1)[0]["status"] == "interrupted"

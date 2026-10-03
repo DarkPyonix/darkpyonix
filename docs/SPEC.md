@@ -56,11 +56,10 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 수용 기준: soft 재시작 뒤 이전 변수가 없습니다. hard 재시작 뒤 커널 ID가 같고 `pid`나 시작 시각이 바뀝니다.
 - 테스트: `test_fr_k7_soft_restart_clears_namespace`, `test_fr_k7_hard_restart_stops_loop_and_sets_flag`(실행기 쪽), `test_fr_k7_hard_restart_keeps_kernel_id`(실제 커널 프로세스: 같은 커널 ID, 같은 인터프리터와 경로로 다시 announce하고 `started_at`이 늦어지며 이전 변수가 없음. POSIX에서는 `os.execv`라 `pid`는 그대로입니다)
 
-### FR-K8 종료 — `Agreed`
+### FR-K8 종료 — `Done`
 `shutdown`은 실행 중인 셀을 인터럽트하고, 실행 기록을 마저 쓰고, `bye`를 보내고, 등록 파일을 지우고, 코드 0으로 끝납니다.
 - 수용 기준: 종료 뒤 등록 파일과 잠금이 남지 않고 실행 기록의 상태는 `interrupted`입니다.
-- 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(아직 없음)
-- 상태 메모 (2026-10-03 감사): 실행 중인 셀을 인터럽트하고 실행 기록을 `interrupted`로 마무리하는 실행기 쪽과, SIGTERM으로 끝날 때 등록 파일이 지워지는 것(`test_fr_k4_kernel_survives_launcher_exit`)은 검증했습니다. 실제 커널에 `shutdown` 요청을 보내 `bye`, 종료 코드 0, 등록 파일과 잠금이 남지 않음을 확인하는 시험은 아직 없습니다.
+- 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, 등록 파일 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
 
 ## 3. 실행 (X)
 
