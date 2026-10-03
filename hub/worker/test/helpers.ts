@@ -166,7 +166,7 @@ export async function linkDevice(
   return (await linkDeviceTokens(deps, approver, device, role, name)).device_token;
 }
 
-export type Role = "main_server" | "computer";
+export type Role = "main_server" | "computer" | "client";
 
 /** The device-link flow, returning both tokens of the claim. */
 export async function linkDeviceTokens(

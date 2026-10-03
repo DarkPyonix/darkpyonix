@@ -64,8 +64,12 @@ export function linkMessage(linkId: string, challenge: string): Uint8Array {
   return utf8(`darkpyonix-hub/v2/link\n${linkId}\n${challenge}`);
 }
 
-function validRole(role: unknown): role is "main_server" | "computer" {
-  return role === "main_server" || role === "computer";
+/** Device roles (SPEC FR-H1). `client` only connects to other devices (provisional). */
+export const ROLES = ["main_server", "computer", "client"] as const;
+export type Role = (typeof ROLES)[number];
+
+function validRole(role: unknown): role is Role {
+  return (ROLES as readonly unknown[]).includes(role);
 }
 
 function validDeviceName(name: unknown): name is string {
@@ -108,7 +112,7 @@ export async function createLink(request: Request, env: Env, deps: Deps): Promis
     throw ApiError.badRequest("endpoint_id must be 64 lowercase hex characters");
   }
   if (!validDeviceName(body.name)) throw ApiError.badRequest("name must be 1 to 64 characters");
-  if (!validRole(body.role)) throw ApiError.badRequest("role must be main_server or computer");
+  if (!validRole(body.role)) throw ApiError.badRequest("role must be main_server, computer or client");
   const taken = await env.DB.prepare("SELECT 1 AS x FROM devices WHERE endpoint_id = ?").bind(endpointId).first();
   if (taken) throw ApiError.conflict("endpoint id already registered (removed keys are not reused)");
 

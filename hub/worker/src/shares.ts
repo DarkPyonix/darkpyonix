@@ -28,6 +28,7 @@ async function shareHost(env: Env, shareId: string): Promise<ShareHost | null> {
 export async function publishShare(request: Request, env: Env, deps: Deps): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   const device = requireDevice(await principal(request, env, now, { deviceOnly: true }));
+  if (device.role === "client") throw ApiError.forbidden("a client device hosts nothing to share");
   const body = await readJson<{ share_id?: unknown }>(request);
   const shareId = body.share_id;
   if (typeof shareId !== "string" || !SHARE_ID_RE.test(shareId)) {

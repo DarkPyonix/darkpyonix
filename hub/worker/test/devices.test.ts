@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { toHex, utf8 } from "../src/util";
-import { call, linkDevice, makeDeps, newDevice, signIn } from "./helpers";
+import { call, irohRecord, linkDevice, makeDeps, newDevice, signIn } from "./helpers";
 
 async function startLink(deps: ReturnType<typeof makeDeps>, endpointId: string, role = "computer") {
   const response = await call(deps, "POST", "/v1/device-links", { json: { endpoint_id: endpointId, name: "box", role } });
@@ -162,6 +162,22 @@ describe("device links", () => {
     expect(((await left.json()) as { code: string }).code).toBe("device_removed");
     const list = (await (await call(deps, "GET", "/v1/devices", { token: tokenB })).json()) as { devices: { endpoint_id: string }[] };
     expect(list.devices.map((d) => d.endpoint_id)).toEqual([b.endpointId]);
+  });
+
+  it("test_fr_h1_client_role_joins_and_connects_but_cannot_share_or_name", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 12, login: "owner" });
+    const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
+    const phone = await newDevice();
+    // A main server approves a client like a computer.
+    const token = await linkDevice(deps, { token: main }, phone, "client", "phone");
+    const list = (await (await call(deps, "GET", "/v1/devices", { token })).json()) as { devices: { endpoint_id: string; role: string }[] };
+    expect(list.devices.find((d) => d.endpoint_id === phone.endpointId)?.role).toBe("client");
+    expect((await call(deps, "PUT", `/pkarr/${phone.z32}`, { body: await irohRecord(phone, "https://relay.darkpyonix.dev/", [], 1n) })).status).toBe(204);
+    expect((await call(deps, "POST", "/v1/shares", { token, json: { share_id: "s_00000000000000c1" } })).status).toBe(403);
+    expect((await call(deps, "PUT", "/v1/names/my-phone", { token })).status).toBe(403);
+    const link = await startLink(deps, (await newDevice()).endpointId);
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token, json: { approve: true } })).status).toBe(403);
   });
 
   it("test_fr_h1_link_request_is_validated", async () => {
