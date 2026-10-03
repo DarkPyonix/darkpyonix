@@ -11,6 +11,7 @@ import time
 
 import httpx
 
+import darkpyonix
 from conftest import KERNEL_ROOT, REPO
 
 HELPERS = os.path.join(REPO, "tests", "helpers")
@@ -53,7 +54,7 @@ def test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain(dp_home, scr
         assert _wait(lambda: os.path.exists(record_file))
         assert stat.S_IMODE(os.stat(record_file).st_mode) == 0o600
         record = json.load(open(record_file))
-        assert record["pid"] == manager.pid and record["mode"] == "ephemeral" and record["version"] == "0.1.0"
+        assert record["pid"] == manager.pid and record["mode"] == "ephemeral" and record["version"] == darkpyonix.__version__
         assert record["url"].startswith("http://127.0.0.1:") and record["token"] and record["started_at"]
 
         with httpx.Client(base_url=record["url"], headers={"Authorization": "Bearer " + record["token"]},

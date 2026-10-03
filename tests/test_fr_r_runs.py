@@ -316,7 +316,7 @@ def test_fr_r2_update_is_throttled(scratch):
     stop.set()
     t.join()
     writes = len(seen) - 1          # the first sample is the file written by begin()
-    assert n > 500
+    assert n > 100                  # far more updates than writes, even with coarse sleep timers (macOS CI)
     # ~3 s of updates → one rewrite per WRITE_INTERVAL (< 1 s), never one per update
     assert 2 <= writes <= 5, writes
     gaps = [b - a for a, b in zip(seen[1:], seen[2:])]

@@ -4,15 +4,45 @@ build-backend = "pdm.backend"
 
 [project]
 name = "darkpyonix"
-version = "0.1.0"
+# Single source: darkpyonix/kernel/darkpyonix/__init__.py (see [tool.pdm.version]).
+dynamic = ["version"]
 description = "File-bound, manager-independent Python kernel for AI/ML work by people and agents"
-authors = [{name = "DarkPyonix"}]
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+authors = [{name = "DarkPyonix"}]
+maintainers = [{name = "DarkPyonix"}]
 requires-python = ">=3.8"
+keywords = ["kernel", "notebook", "jupyter", "agents", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Interpreters",
+]
 # The runtime API and the kernel are standard library only (INTENT §2).
 dependencies = []
+
+[project.urls]
+Homepage = "https://darkpyonix.dev"
+Repository = "https://github.com/DarkPyonix/darkpyonix"
+Issues = "https://github.com/DarkPyonix/darkpyonix/issues"
 
 [project.optional-dependencies]
 manager = [
@@ -27,8 +57,11 @@ dev = [
     "jsonschema>=4",
 ]
 
-[project.scripts]
-darkpyonix = "darkpyonix.manager.cli:main"
+# No console script: the `darkpyonix` CLI is the Rust binary (INTENT D10).
+
+[tool.pdm.version]
+source = "file"
+path = "darkpyonix/kernel/darkpyonix/__init__.py"
 
 [tool.pdm.build]
 package-dir = "darkpyonix/kernel"
