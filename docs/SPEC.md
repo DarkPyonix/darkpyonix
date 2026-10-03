@@ -115,7 +115,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 - 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`
 - 상태 메모 (2026-10-03 감사): 기록이 최대 1초 간격으로 원자적으로 다시 쓰이는 것, `RunStore`로 기록하던 프로세스를 `SIGKILL`로 죽여도 유효한 JSON과 `running` 상태가 남는 것, `recover_crashed()`가 `crashed`로 바꾸는 것은 검증했습니다. 시험은 실제 커널 대신 `RunStore`만 쓰는 대역 프로세스를 죽이고 복구 함수를 직접 부르며, 마지막 출력이 죽기 1.3초 전 이내인지 봅니다(기준은 1초). 실제 커널을 실행 중에 죽이고, 다음 커널이 시작하면서 그 기록을 `crashed`로 바꾸는 시험은 아직 없습니다.
 
-### FR-R3 매직 변수 `__runs__` — `Agreed`
+### FR-R3 매직 변수 `__runs__` — `Done`
 커널 네임스페이스에는 `__runs__` 객체가 있습니다.
 
 | 표현 | 값 |
@@ -144,7 +144,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
   - `__runs__.current.run_id`는 지금 실행의 ID이고, `__runs__.current.path`는 그 실행의 기록 경로입니다.
   - `json.dumps(__runs__.latest)`가 성공하고, `json.loads`한 값이 `run.notebook`과 같습니다.
 - 테스트: `test_fr_r3_runs_magic_exposes_logs_as_json`, `test_fr_r3_runs_magic_attribute_access_in_kernel_cell`
-- 상태 메모 (2026-10-03 감사): dict로서의 `__runs__`(`current`, `latest`, `[run_id]`, `[-1]`, `list()`, `dir`, `json.dumps`)는 검증했습니다. 속성 접근(`run.run_id`, `run.cells[i].text`, `.result`, `run.cell(...)`, `run.path`, `run.notebook`)은 아직 구현되지 않았고, 커널 셀 안에서 `__runs__.latest.run_id`와 `__runs__.latest.cells[1].text`를 읽는 시험도 없습니다.
+- 상태 메모 (2026-10-03): 속성 접근(`RunLog`, `CellLog`)을 구현했고, 위 수용 기준을 실제 커널 셀 안에서 이 기기의 모든 인터프리터(3.9, 3.11, 3.13, 3.14, 3.15)로 검증했습니다. 이 기기에는 3.8 인터프리터가 없어 3.8에서는 돌리지 않았고, 코드는 `ast.parse(feature_version=(3, 8))`를 통과합니다.
 
 ### FR-R4 기록과 셀 맵핑 — `Done`
 매니저의 `GET /kernels/{id}/document`는 파일의 셀 목록에 최신 실행의 출력을 붙여서 돌려줍니다. 맵핑 순서는 `id` → `source_sha256` → `index`이고, 소스 해시가 다르면 `stale: true`로 표시합니다.
