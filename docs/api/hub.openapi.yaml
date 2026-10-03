@@ -9,10 +9,13 @@ info:
 
     **Hosts** (SPEC §10, INTENT D15 and its 2026-10-03 amendment, a proposal):
 
-    - `https://darkpyonix.dev` (the root) is the **front**: the landing page and the ash web
-      app, static files only (SPEC FR-H12). It is not part of this API. Its pages are
-      `/n/{notebook_id}` (hosted notebooks), `/s/{share_id}#<token>` (share links), `/link`
-      (device approval) and `/new`; they call this API from the browser.
+    - `https://darkpyonix.dev/` (the root) is the **main page** (the front): the landing page
+      and the ash web app, static files only (SPEC FR-H12). darkpyonix-ash builds it and
+      publishes it to the organization GitHub Pages site (`DarkPyonix/DarkPyonix.github.io`).
+      It is not part of this API. Its pages are `/n/{notebook_id}` (hosted notebooks),
+      `/s/{share_id}#<token>` (share links), `/link` (device approval) and `/new`; they call
+      this API from the browser. Project guides stay at `https://darkpyonix.dev/<repo>/`
+      (each repository's GitHub Pages project site) and are not part of this API either.
     - `https://api.darkpyonix.dev` is a **Cloudflare Worker** (`hub/worker/`, TypeScript, D1
       for metadata, a private R2 bucket for notebook content). It serves GitHub sign-in, the
       device registry, the address directory, share resolution, HTTPS names (ACME TXT through
@@ -136,7 +139,7 @@ paths:
                   api_version: {type: integer, const: 1}
                   hub_version: {type: string}
                   api_url: {type: string, format: uri, example: "https://api.darkpyonix.dev", description: This API's base URL.}
-                  front_url: {type: string, format: uri, example: "https://darkpyonix.dev", description: "The front (ash web app); share and notebook links live here."}
+                  front_url: {type: string, format: uri, example: "https://darkpyonix.dev", description: "The front (the main page with the ash web app, on GitHub Pages); share and notebook links live here."}
                   relay_urls:
                     type: array
                     items: {type: string}
@@ -165,7 +168,7 @@ paths:
         - name: return_to
           in: query
           required: false
-          description: A path on the front (`https://darkpyonix.dev`) to return to after sign-in (anything else becomes `/`).
+          description: "A path (and query) on the front (`https://darkpyonix.dev`) to return to after sign-in; it must start with `/` and not with `//` or `/\\`, anything else becomes `/`. Never put the URL fragment here: share tokens live in the fragment and must not reach the hub (SPEC FR-H13)."
           schema: {type: string}
       responses:
         "302":

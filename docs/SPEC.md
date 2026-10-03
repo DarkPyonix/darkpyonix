@@ -19,7 +19,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 | 매니저 | 커널을 발견·실행하고 HTTP API를 내는 프로세스. 임시/전용 모드 |
 | 런타임 홈 | `DARKPYONIX_HOME`, 기본 `~/.darkpyonix` |
 | 호스팅 노트북 | 허브(`api.darkpyonix.dev`)에 보관한 노트북. 판(version)의 묶음이고, 판은 노트북 파일 하나와 선택적인 실행 기록 하나입니다(FR-H14) |
-| 프런트 | 루트 `darkpyonix.dev`의 정적 웹 앱(랜딩 + ash). API를 부를 뿐 서버 코드가 없습니다(FR-H12) |
+| 프런트(메인 페이지) | 루트 `darkpyonix.dev/`의 정적 웹 앱(랜딩 + ash). darkpyonix-ash가 빌드하고 조직 GitHub Pages가 냅니다. API를 부를 뿐 서버 코드가 없습니다(FR-H12) |
 
 ## 2. 커널 (K)
 
@@ -318,16 +318,16 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 
 전송은 iroh 1.x로 정했습니다(PROJECT Q1, 2026-10-03, 조건부: ember SPEC NFR-N1을 못 맞추면 직접 구현을 검토). 그래서 허브는 직접 만든 랑데부·중계 대신 iroh가 이미 쓰는 프로토콜을 그대로 받습니다. 기기는 iroh 엔드포인트이고, 기기 ID는 그 엔드포인트 ID(ed25519 공개 키, 소문자 hex 64자)입니다.
 
-**호스트 역할 분담(INTENT D15와 그 개정, 2026-10-03, 개정은 제안).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다. 동적 기능은 서브도메인에 두고, 루트는 그것을 띄우는 프런트입니다(FR-H12).
+**호스트 역할 분담(INTENT D15와 그 개정, 2026-10-03, 개정은 제안).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다. 동적 기능은 서브도메인에 두고, 루트는 그것을 띄우는 정적 메인 페이지입니다. 프로젝트 가이드는 지금처럼 `darkpyonix.dev/<저장소>/`에 있습니다(FR-H12).
 
 | 호스트 | 구현 | 맡는 일 |
 |---|---|---|
-| `https://darkpyonix.dev` | 정적 프런트: darkpyonix-ash 웹 빌드 + 랜딩, Workers 정적 자산(정적 전용 Worker) | 랜딩, ash 웹 앱, 노트북 페이지(FR-H16, FR-H17), 공유 링크 페이지(FR-H4), 기기 승인 페이지(FR-H1), Flathub 검증 파일(FR-H7), 옛 가이드 주소의 이동(FR-H12). 서버 코드와 쿠키가 없습니다 |
+| `https://darkpyonix.dev/` | 정적 메인 페이지: darkpyonix-ash 웹 빌드, 조직 GitHub Pages 사이트 `DarkPyonix/DarkPyonix.github.io` | 랜딩, ash 웹 앱, 노트북 페이지(FR-H16, FR-H17), 공유 링크 페이지(FR-H4), 기기 승인 페이지(FR-H1), Flathub 검증 파일(FR-H7). 서버 코드와 쿠키가 없습니다 |
+| `https://darkpyonix.dev/<저장소>/` | 각 저장소의 GitHub Pages 프로젝트 사이트 | 프로젝트 가이드(예: `/dioxus-compose/`). 허브의 일이 아니고, 메인 페이지와 경로가 겹치지 않게만 합니다(FR-H12) |
 | `https://api.darkpyonix.dev` | Cloudflare Worker `hub/worker/` (TypeScript, D1, R2, Cron) | GitHub 로그인(FR-H6, FR-H13), 기기 등록(FR-H1), 주소 디렉터리(FR-H2), 릴레이 입장 판정 API(FR-H3), 공유 해석(FR-H4), 이름과 ACME TXT(FR-H5), 설정 발견(FR-H8), 노트북 보관(FR-H14~H19) |
 | `https://relay.darkpyonix.dev` | 릴레이 호스트 `hub/server/` (Rust, `iroh-relay` 서버 크레이트) | iroh 릴레이 `/relay`, `/ping`, `/generate_204`, UDP 7842의 QUIC 주소 발견(QAD). 누구를 들일지는 Worker에 묻습니다 |
-| `https://docs.darkpyonix.dev` | 조직 GitHub Pages(`DarkPyonix.github.io`의 custom domain) | 프로젝트 가이드 `/<저장소>/`. 허브의 일이 아니고, 여기서는 이름만 예약합니다 |
 
-- API Worker는 `api.darkpyonix.dev`에만 붙습니다(custom domain). 프런트는 apex(`darkpyonix.dev`)에 붙는 별도의 정적 전용 Worker입니다. `relay.darkpyonix.dev`는 Cloudflare 프록시를 끈(DNS only) A/AAAA 레코드로 릴레이 호스트를 가리킵니다. 프록시는 UDP 7842를 넘기지 않고, QAD는 릴레이 호스트 자신의 TLS 인증서를 쓰기 때문입니다.
+- API Worker는 `api.darkpyonix.dev`에만 붙습니다(custom domain). apex(`darkpyonix.dev`)는 지금처럼 GitHub Pages를 가리킵니다(DNS only). `relay.darkpyonix.dev`는 Cloudflare 프록시를 끈(DNS only) A/AAAA 레코드로 릴레이 호스트를 가리킵니다. 프록시는 UDP 7842를 넘기지 않고, QAD는 릴레이 호스트 자신의 TLS 인증서를 쓰기 때문입니다.
 - Worker의 부하: iroh `PkarrPublisher`는 5분마다(그리고 주소가 바뀔 때) 다시 올립니다. 기기 10대면 하루 약 3,000번의 `PUT /pkarr`와 그만큼의 D1 쓰기 두 번이고, 요청마다 ed25519 검증 한 번과 D1 질의 몇 개입니다. Workers 무료 한도(하루 10만 요청, D1 쓰기 10만)의 몇 % 수준이라 "가볍다"는 조건을 만족합니다. 운영은 CPU 한도 여유를 위해 Workers Paid를 권합니다.
 - 언어는 TypeScript입니다. 근거는 INTENT D15에 있습니다.
 
@@ -336,12 +336,12 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 | 이미 만든 것 | 바뀌는 것 |
 |---|---|
 | Worker 라우트 `darkpyonix.dev`(custom domain), 변수 `PUBLIC_URL` | 라우트 `api.darkpyonix.dev`, 변수 `API_URL`·`FRONT_URL`(FR-H8). R2 바인딩 `NOTEBOOKS`와 마이그레이션 `0007_notebooks.sql` 추가 |
-| FR-H4 자리표시 뷰어(`hub/worker/public/ash/`, `GET /ash/`, `GET /s/{share_id}`), `/link` HTML 페이지 | Worker의 정적 자산과 HTML 페이지를 걷어 내고 프런트로 옮김. 계약에서 `/ash/`, `/s/{share_id}`, `/link`, `/.well-known/org.flathub.VerifiedApps.txt` 연산을 뺌 |
+| FR-H4 자리표시 뷰어(`hub/worker/public/ash/`, `GET /ash/`, `GET /s/{share_id}`), `/link` HTML 페이지 | Worker의 정적 자산과 HTML 페이지를 걷어 내고 메인 페이지(darkpyonix-ash)로 옮김. 계약에서 `/ash/`, `/s/{share_id}`, `/link`, `/.well-known/org.flathub.VerifiedApps.txt` 연산을 뺌 |
 | 쿠키 `__Host-dp_session`, `__Host-dp_oauth`(apex) | 같은 이름으로 `api.darkpyonix.dev`에. 출처 검사는 `FRONT_URL` 기준(FR-H13). 배포 전이라 옮길 세션이 없음 |
 | GitHub OAuth App 콜백 `https://darkpyonix.dev/auth/callback` | `https://api.darkpyonix.dev/auth/callback`, `return_to`는 프런트 경로(FR-H6 개정) |
 | 릴레이 호스트의 입장·presence 호출 대상(apex) | `https://api.darkpyonix.dev/internal/v1/relay/*` |
 | Ember의 기본 허브 URL `https://darkpyonix.dev`(darkpyonix-ember `hub/src/config.rs` `DEFAULT_HUB_URL`과 그 시험들) | `https://api.darkpyonix.dev`. 그 뒤의 주소는 모두 `GET /v1/config`(FR-H8)에서 읽음 |
-| 조직 Pages `DarkPyonix.github.io`의 CNAME `darkpyonix.dev`, apex의 GitHub Pages A/AAAA 레코드 | CNAME `docs.darkpyonix.dev`, DNS `docs` → `darkpyonix.github.io`(DNS only). apex 레코드를 지운 뒤 프런트 Worker의 custom domain을 붙임(Cloudflare는 기존 레코드가 있으면 custom domain을 만들지 않음). 옛 가이드 주소는 프런트가 301(FR-H12) |
+| 조직 Pages `DarkPyonix.github.io`(CNAME `darkpyonix.dev`, 지금 `README.md`·`CNAME`뿐), apex의 GitHub Pages A/AAAA 레코드 | 저장소와 DNS는 그대로. darkpyonix-ash CI가 그 저장소 `main`에 빌드 결과를 커밋함(배포 키 하나). 프로젝트 가이드 주소는 바뀌지 않음(FR-H12) |
 
 계약은 [api/hub.openapi.yaml](api/hub.openapi.yaml) 하나이고, 릴레이 호스트가 답하는 연산은 경로 단위 `servers: relay.darkpyonix.dev`로 표시합니다. Worker 테스트가 Worker의 모든 연산이 문서의 상태 코드로만 답하고 Worker의 라우트와 문서의 연산이 정확히 같음을 확인합니다(`test_hub_every_operation_answers_with_a_documented_status`, `test_hub_every_worker_route_is_documented_and_vice_versa`). 릴레이 호스트의 같은 이름 테스트(`hub/server/tests/hub/openapi.rs`)는 `servers`가 붙은 연산만 확인합니다.
 
@@ -402,7 +402,7 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
 - 측정 기록: (구현 후 기입)
 
 ### FR-H4 ash 호스팅과 공유 링크 — `Agreed`
-**개정(제안, 2026-10-03, D15 개정).** ash는 더는 이 Worker의 정적 자산(`/ash/`)이 아니라 루트 프런트(FR-H12)입니다. 공유 링크의 모양 `https://darkpyonix.dev/s/<share_id>#<token>`은 그대로이고, 그 페이지는 프런트가 냅니다. API(`POST /v1/shares`, `GET`/`DELETE /v1/shares/{share_id}`)는 `api.darkpyonix.dev`로 옮기고, Worker의 HTML 연산 `GET /s/{share_id}`와 `GET /ash/`는 계약에서 뺍니다. 프런트는 공유 페이지에서 `GET https://api.darkpyonix.dev/v1/shares/{share_id}`(인증 없음, CORS)를 부르고, 없는 공유는 화면에서 "없는 공유"로 보여 줍니다. 아래 본문의 `/ash/`·`/s/` HTML 부분과 `test_fr_h4_viewer_pages_are_served`는 이 개정이 승인되면 프런트 쪽 시험으로 옮깁니다.
+**개정(제안, 2026-10-03, D15 개정).** ash는 더는 이 Worker의 정적 자산(`/ash/`)이 아니라 루트 메인 페이지(FR-H12, darkpyonix-ash가 빌드해 조직 GitHub Pages로 배포)입니다. 공유 링크의 모양 `https://darkpyonix.dev/s/<share_id>#<token>`은 그대로이고, 그 페이지는 메인 페이지의 `404.html` 앱이 냅니다(HTTP 상태 404, 토큰은 그대로 남음, FR-H12). API(`POST /v1/shares`, `GET`/`DELETE /v1/shares/{share_id}`)는 `api.darkpyonix.dev`로 옮기고, Worker의 HTML 연산 `GET /s/{share_id}`와 `GET /ash/`는 계약에서 뺍니다. 프런트는 공유 페이지에서 `GET https://api.darkpyonix.dev/v1/shares/{share_id}`(인증 없음, CORS)를 부르고, 없는 공유는 화면에서 "없는 공유"로 보여 줍니다. 아래 본문의 `/ash/`·`/s/` HTML 부분과 `test_fr_h4_viewer_pages_are_served`는 이 개정이 승인되면 darkpyonix-ash의 시험(FR-H12)으로 옮깁니다.
 
 (개정 전 본문) `https://darkpyonix.dev/ash/`에서 공식 ash 뷰어를 Workers 정적 자산으로 호스팅하고(`hub/worker/public/ash/`에 darkpyonix-ash 빌드 결과를 넣어 배포), 공유 링크 `https://darkpyonix.dev/s/<share_id>#<token>`을 그 공유를 연 기기로 이어 줍니다. 공유 토큰은 URL 조각(`#` 뒤)에 있어서 허브로 가지 않습니다. 권한 검사는 끝단의 전용 매니저가 합니다(FR-A3).
 - 기기는 `POST /v1/shares`로 자기 공유를 게시하고, 누구나 `GET /v1/shares/{share_id}`로 그 공유를 연 기기의 엔드포인트 ID와 릴레이 URL(기기가 올린 홈 릴레이, 없으면 `https://relay.darkpyonix.dev/`), 10분짜리 손님 릴레이 통행권을 받습니다. ash(브라우저 iroh, 릴레이 전용)는 그 통행권으로 릴레이에 붙어 기기에 연결합니다. `GET /s/{share_id}`는 ash 뷰어 페이지를 냅니다(뷰어가 배포되기 전까지는 자리표시 페이지). 공유를 내리면 그 공유의 통행권도 더는 통하지 않습니다.
@@ -430,14 +430,14 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
 
 ### FR-H7 Flathub 앱 검증 — `Agreed`
 Flathub의 앱 ID `dev.darkpyonix.Ember`는 도메인 darkpyonix.dev로 검증합니다. Flathub가 주는 토큰을 `https://darkpyonix.dev/.well-known/org.flathub.VerifiedApps.txt`에 평문으로 둡니다. 내용은 Worker 변수 또는 비밀값 `FLATHUB_VERIFICATION_TOKEN`에서 오므로 저장소에 토큰을 넣지 않습니다. 비어 있거나 없으면 404입니다.
-- **개정(제안, 2026-10-03, D15 개정).** Flathub는 도메인 `darkpyonix.dev` 자체를 보므로 이 파일은 apex에 남아야 하고, apex는 이제 정적 프런트입니다. 그래서 이 파일은 프런트가 정적 파일로 내고, 내용은 프런트 배포 때 CI 비밀값 `FLATHUB_VERIFICATION_TOKEN`에서 넣습니다(저장소에는 여전히 없음). API Worker의 같은 연산은 계약에서 뺍니다.
+- **개정(제안, 2026-10-03, D15 개정).** Flathub는 도메인 `darkpyonix.dev` 자체를 보므로 이 파일은 apex에 있어야 하고, apex는 조직 GitHub Pages 사이트(메인 페이지)입니다. 그래서 이 파일은 darkpyonix-ash의 빌드 결과에 들어가 Pages가 정적 파일로 냅니다(FR-H12). 점으로 시작하는 경로이므로 빌드 결과에 `.nojekyll`이 있어야 합니다. 내용은 ash CI가 저장소 변수 `FLATHUB_VERIFICATION_TOKEN`에서 넣습니다. 이 값은 공개되는 파일의 내용이라 비밀은 아니지만, 소스에 박지 않고 변수로 둬서 다시 발급할 때 빌드만 다시 돌립니다. 변수가 비면 파일을 만들지 않습니다(404). API Worker의 같은 연산과 `flathub.test.ts`는 계약과 Worker에서 빼고, 수용 기준은 FR-H12의 배포 점검으로 옮깁니다.
 - 수용 기준: 토큰이 있으면 200 `text/plain`이고 본문은 앞뒤 공백을 뺀 토큰입니다. 없거나 공백뿐이면 404입니다. 실제 Flathub 검증은 배포 후 확인합니다.
 - 테스트(`hub/worker/test/flathub.test.ts`): `test_fr_h7_verified_apps_file_serves_the_configured_token`, `test_fr_h7_verified_apps_file_is_absent_without_a_token`
 
 ### FR-H8 허브 설정 발견 — `Agreed`
 클라이언트(ember, ash)가 릴레이 주소나 pkarr URL을 코드에 박아 두지 않도록, 허브가 자기 설정을 공개합니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - `GET /v1/config`(인증 없음, `Cache-Control: public, max-age=300`)는 `{api_version, hub_version, relay_urls, pkarr_url, link_url}`를 냅니다. `api_version`은 정수이고 `/v1` 아래 계약을 깨는 변경이 있을 때만 올립니다(지금 1). `relay_urls`는 기기가 iroh `RelayMap`에 넣을 릴레이 목록(지금은 Worker 변수 `RELAY_URL` 하나), `pkarr_url`은 iroh `PkarrPublisher`/`PkarrResolver`에 줄 기준 URL(`<PUBLIC_URL>/pkarr`, 조회할 때는 `?token=<조회 토큰>`을 붙임, NFR-H2), `link_url`은 기기 링크 승인 페이지입니다.
-- **개정(제안, 2026-10-03, D15 개정).** `GET https://api.darkpyonix.dev/v1/config`에 `api_url`(`https://api.darkpyonix.dev`)과 `front_url`(`https://darkpyonix.dev`)을 더합니다. `pkarr_url`은 `<API_URL>/pkarr`, `link_url`은 `<FRONT_URL>/link`입니다. Worker 변수 `PUBLIC_URL`은 `API_URL`과 `FRONT_URL` 둘로 나눕니다. 필드 추가라 `api_version`은 1 그대로입니다.
+- **개정(제안, 2026-10-03, D15 개정).** `GET https://api.darkpyonix.dev/v1/config`에 `api_url`(`https://api.darkpyonix.dev`)과 `front_url`(`https://darkpyonix.dev`)을 더합니다. `pkarr_url`은 `<API_URL>/pkarr`, `link_url`은 `<FRONT_URL>/link`입니다. Worker 변수 `PUBLIC_URL`은 `API_URL`과 `FRONT_URL` 둘로 나눕니다. 필드 추가라 `api_version`은 1 그대로입니다. 메인 페이지 빌드에는 API 주소(`https://api.darkpyonix.dev`) 하나만 넣고, 릴레이·pkarr 주소는 실행 중에 이 응답에서 읽습니다. 그래서 릴레이를 옮겨도 메인 페이지를 다시 배포하지 않습니다.
 - 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`, 개정 뒤에는 `API_URL`, `FRONT_URL`, `RELAY_URL`)를 따릅니다.
 - 테스트(`hub/worker/test/config.test.ts`): `test_fr_h8_config_names_relays_and_pkarr_url`, `test_fr_h8_config_follows_the_worker_vars`
 
@@ -467,23 +467,29 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 수용 기준: 지운 키의 링크 요청은 409, 세션이 다시 들이기를 표시한 뒤에는 201입니다. 메인 서버 토큰의 표시와 승인은 403입니다. 받은 뒤 기기가 목록에 다시 나오고 새 토큰이 통하며 옛 토큰은 401 `invalid_credentials`입니다. 15분이 지나면 다시 409입니다. 지우지 않은 기기의 표시는 409, 다른 계정의 기기는 404입니다. 다른 메인 서버가 있을 때 `main_server`로 돌아오는 링크의 승인은 `replace` 없이 409 `main_server_exists`이고, `replace`로 승인해 받으면 되살아난 기기가 유일한 메인 서버가 되고 바뀐 메인 서버의 토큰은 401 `device_removed`이며 이름이 옮겨 갑니다. 지운 기기 목록은 세션에 지운 기기를 최근 것부터 지울 때의 이름·역할·`removed_at`과 함께 보여 주고, 다시 들이기를 표시하면 `readmit_until`이 나오며, 되살아난 기기와 다른 계정의 기기는 나오지 않습니다. 기기 토큰은 403입니다.
 - 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h11_owner_readmits_a_removed_key`, `test_fr_h11_readmission_expires`, `test_fr_h11_readmit_needs_a_removed_device_of_the_account`, `test_fr_h11_owner_lists_removed_devices`, `test_fr_h11_only_a_session_lists_removed_devices`
 
-### FR-H12 호스트 역할 분담과 루트 프런트 — `Draft`
-INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도메인으로 해놓고, 루트 darkpyonix.dev가 그걸 띄우도록 할건데? 역할 분담을 좀 시켜야지. ... 루트 darkpyonix.dev는 가이드가 아니야." 호스트는 §10 머리의 표대로 나눕니다.
-- **루트(`darkpyonix.dev`)는 정적 프런트입니다.** darkpyonix-ash 웹 빌드와 랜딩을 Cloudflare Workers 정적 자산(스크립트 없는 정적 전용 Worker, apex custom domain)으로 냅니다. 서버 코드, 쿠키, 비밀값이 없고, 동적인 일은 모두 `api.darkpyonix.dev`와 `relay.darkpyonix.dev`를 부릅니다. 빌드와 배포는 darkpyonix-ash 저장소가 맡는 것을 제안합니다 [provisional]. 이 저장소는 프런트가 지켜야 할 경로·헤더 계약과 API만 가집니다.
-- **프런트 경로.** `/`(랜딩, 로그인했으면 내 노트북), `/n/<notebook_id>`와 `/n/<notebook_id>/v/<version>`(FR-H16, FR-H17), `/s/<share_id>`(FR-H4, 토큰은 `#` 뒤), `/link`(기기 승인, FR-H1), `/new`(노트북 올리기). 이 경로는 모두 200과 같은 앱 HTML을 냅니다(SPA 처리, `not_found_handling = "single-page-application"`). 없는 노트북이나 공유는 앱이 API 응답을 보고 화면에 표시합니다.
-- **헤더(`_headers`).** 모든 HTML에 `Content-Security-Policy`(`default-src 'self'`, `connect-src 'self' https://api.darkpyonix.dev https://relay.darkpyonix.dev wss://relay.darkpyonix.dev`와 ash 런타임이 받는 CDN, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. `/link`는 클릭재킹을 막기 위해 `frame-ancestors 'none'`이 꼭 있어야 합니다. Pyodide가 `SharedArrayBuffer`를 요구하게 되면 그 경로에만 COOP/COEP를 더합니다 [provisional].
-- **가이드는 `docs.darkpyonix.dev`입니다.** 조직 Pages 사이트(`DarkPyonix.github.io`)의 custom domain을 `docs.darkpyonix.dev`로 바꾸면 프로젝트 가이드가 `docs.darkpyonix.dev/<저장소>/`로 옮겨 갑니다. 프런트는 옛 주소 `darkpyonix.dev/<저장소>/*`를 `https://docs.darkpyonix.dev/<저장소>/*`로 301 이동합니다(`_redirects`에 Pages가 있는 저장소를 나열, 지금은 `dioxus-compose`).
-- **API 호스트는 HTML 프런트를 내지 않습니다.** `api.darkpyonix.dev`가 내는 HTML은 없고, `/auth/*`는 리디렉트만 합니다. 반대로 apex는 API가 아닙니다(`https://darkpyonix.dev/v1/...`는 프런트의 SPA 응답일 뿐 API가 아님).
-- 수용 기준(배포 후 점검 스크립트): `https://darkpyonix.dev/`, `/n/n_<32 hex>`, `/s/s_<16 hex>`, `/link?code=BCDF-GHJK`가 200 `text/html`이고 위 헤더가 있습니다. `/dioxus-compose/`는 301로 `https://docs.darkpyonix.dev/dioxus-compose/`를 가리키고, 그 주소가 가이드를 냅니다. `/.well-known/org.flathub.VerifiedApps.txt`는 200 `text/plain`입니다(FR-H7). 응답에 `Set-Cookie`가 없습니다. `https://api.darkpyonix.dev/v1/config`는 200 JSON입니다.
-- 테스트: 배포 점검 `test_fr_h12_front_routes_serve_the_app_with_headers`, `test_fr_h12_old_guide_paths_move_to_docs`, `test_fr_h12_front_sets_no_cookies`(프런트 저장소 CI 또는 배포 후 스크립트)
+### FR-H12 호스트 역할 분담과 루트 메인 페이지 — `Draft`
+INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도메인으로 해놓고, 루트 darkpyonix.dev가 그걸 띄우도록", "darkpyonix.dev/는 메인 페이지고 darkpyonix.dev/dioxus-compose는 가이드인거잖아", 프런트 저장소는 "darkpyonix-ash". 호스트는 §10 머리의 표대로 나눕니다.
+- **루트(`darkpyonix.dev/`)는 정적 메인 페이지입니다.** darkpyonix-ash 웹 빌드(랜딩 + ash 웹 앱)를 조직 GitHub Pages 사이트 `DarkPyonix/DarkPyonix.github.io`(`main`의 루트, custom domain `darkpyonix.dev`, HTTPS 강제)로 냅니다. 서버 코드, 쿠키, 비밀값이 없고, 동적인 일은 모두 `api.darkpyonix.dev`와 `relay.darkpyonix.dev`를 부릅니다. apex의 DNS(GitHub Pages A/AAAA, DNS only)와 `www`는 지금 그대로입니다.
+- **빌드와 배포는 darkpyonix-ash가 합니다.** ash CI가 웹 빌드를 만들고, `DarkPyonix.github.io`에만 쓰기 권한이 있는 배포 키(ash 저장소 비밀값 `PAGES_DEPLOY_KEY`)로 빌드 결과 전체를 그 저장소 `main`에 새 커밋으로 올립니다(강제 푸시 없음, 이력이 곧 배포 기록). 조직 사이트 저장소에는 워크플로가 없습니다. 이 저장소(darkpyonix)는 메인 페이지가 지켜야 할 경로·파일 계약과 API만 가집니다. 빌드 결과의 최상위는 다음과 같습니다.
+  - `index.html`(앱 HTML), `404.html`(`index.html`과 같은 내용), `link.html`·`new.html`(같은 내용. Pages는 `/link`를 `link.html`로 리디렉트 없이 내므로 `?code=`가 그대로 남음), `assets/`(해시 붙은 JS·CSS, 모든 참조는 `/assets/…` 절대 경로), `CNAME`(`darkpyonix.dev`), `.nojekyll`(Jekyll 처리를 끄고 점으로 시작하는 경로를 내게 함), `sandbox/index.html`(NFR-H3의 렌더러 페이지, 자기 meta CSP를 가짐), `.well-known/org.flathub.VerifiedApps.txt`(FR-H7), `robots.txt`, 그리고 교차 출처 격리를 쓸 때 서비스 워커 파일(아래).
+  - Pyodide와 그 패키지는 빌드에 넣지 않고 CDN(jsDelivr)에서 받습니다. GitHub Pages의 사이트 크기(1 GB)와 대역폭(월 100 GB, 권고) 한도 안에 머물기 위해서입니다.
+- **경로와 상태 코드.** `/`(랜딩, 로그인했으면 내 노트북), `/link`(기기 승인, FR-H1), `/new`(노트북 올리기)는 실제 파일이라 200입니다. `/n/<notebook_id>`, `/n/<notebook_id>/v/<version>`(FR-H16, FR-H17), `/s/<share_id>`(FR-H4, 토큰은 `#` 뒤)는 파일이 없으므로 Pages가 `404.html`을 냅니다. 내용은 같은 앱이라 그대로 뜨고, 앱은 `location.pathname`으로 경로를 고릅니다(다른 주소로 리디렉트하지 않으므로 `#` 뒤 토큰이 그대로 남음). HTTP 상태는 404이므로 검색 엔진과 링크 미리보기는 이 페이지를 쓰지 못합니다(FR-H15). 없는 노트북이나 공유는 앱이 API 응답을 보고 화면에 표시합니다.
+- **가이드와 경로 나눠 쓰기.** 프로젝트 가이드는 각 저장소의 GitHub Pages 프로젝트 사이트로 `darkpyonix.dev/<저장소>/`에 그대로 있습니다(예: `/dioxus-compose/`). Pages는 프로젝트 사이트가 있는 저장소 이름의 경로를 그 사이트로 먼저 보내므로 두 규칙을 지킵니다. (1) 메인 페이지는 Pages가 켜진 저장소의 이름을 최상위 경로로 쓰지 않습니다. (2) 조직은 메인 페이지의 최상위 이름(`n`, `s`, `link`, `new`, `assets`, `sandbox`, `.well-known`)과 같은 이름의 저장소에 Pages를 켜지 않습니다. ash CI는 배포 전에 조직의 Pages 사이트 목록과 빌드 결과의 최상위 이름이 겹치지 않는지 확인합니다.
+- **헤더를 정할 수 없는 것의 처리.** GitHub Pages는 응답 헤더를 바꿀 수 없습니다.
+  - CSP는 앱 HTML의 `<meta http-equiv="Content-Security-Policy">`로 둡니다: `default-src 'self'`, `script-src 'self'`와 ash 런타임이 받는 CDN, `connect-src 'self' https://api.darkpyonix.dev https://relay.darkpyonix.dev wss://relay.darkpyonix.dev`와 그 CDN, `frame-src 'self'`(NFR-H3의 렌더러 페이지. 사용자 콘텐츠 도메인을 쓰기로 하면 그 도메인), `base-uri 'none'`, `form-action 'none'`. `frame-ancestors`는 meta로 쓸 수 없어서 빠집니다. `Referrer-Policy`는 `<meta name="referrer" content="no-referrer">`입니다.
+  - **클릭재킹**(`/link` 승인을 남의 사이트에 끼워 누르게 하기)은 두 겹으로 막습니다. API 세션 쿠키가 `SameSite=Lax`라(FR-H13) 남의 사이트 안에 끼워진 메인 페이지가 보내는 API 요청에는 쿠키가 실리지 않고, 그래서 승인은 401입니다. 그리고 앱은 `window.top !== window.self`이면 화면을 그리지 않습니다. 앱 전체가 스크립트로 그려지므로 스크립트를 끈 iframe에서는 아무것도 보이지 않습니다.
+  - **교차 출처 격리(COOP/COEP, `SharedArrayBuffer`).** 호스팅한 노트북 보기(FR-H16)와 라이브 커널로 열기(FR-H17)는 브라우저에서 Python을 돌리지 않으므로 필요 없습니다. ash의 브라우저 내 Python(Pyodide)은 격리가 있으면 Web Worker에서(화면이 멈추지 않고 인터럽트 가능), 없으면 메인 스레드에서 돕니다. 격리가 필요한 화면은 ash가 이미 가진 서비스 워커(응답에 COOP/COEP를 덧붙임, `starboard-sw.js`)로 켭니다 [provisional]. 이 방식은 첫 방문 때 한 번 다시 읽어야 하고, 그 화면이 받는 교차 출처 자원은 CORS나 `Cross-Origin-Resource-Policy`가 있어야 합니다(API는 CORS, jsDelivr는 CORS `*`). 격리는 최상위 문서의 성질이라 iframe만 다른 호스트에서 띄워서는 얻을 수 없습니다.
+- **API 호스트는 HTML을 내지 않습니다.** `api.darkpyonix.dev`가 내는 HTML은 없고, `/auth/*`는 리디렉트만 합니다. 반대로 `https://darkpyonix.dev/v1/...`는 API가 아니라 메인 페이지의 404 응답입니다.
+- 수용 기준(배포 후 점검 스크립트, ash CI의 배포 뒤 단계): `https://darkpyonix.dev/`, `/link?code=BCDF-GHJK`, `/new`가 200 `text/html`, `/n/n_<32 hex>`와 `/s/s_<16 hex>`가 404 `text/html`이고 본문이 `index.html`과 같으며, 모든 앱 HTML에 위 meta CSP와 referrer가 있습니다. `/dioxus-compose/`가 그 저장소의 가이드를 냅니다(메인 페이지가 가로채지 않음). `/.well-known/org.flathub.VerifiedApps.txt`는 200 `text/plain`입니다(FR-H7). 응답에 `Set-Cookie`가 없습니다. 메인 페이지를 다른 출처의 iframe에 넣으면 아무것도 그려지지 않고, 그 안에서 `/link` 승인을 보내도 401입니다. `https://api.darkpyonix.dev/v1/config`는 200 JSON입니다.
+- 테스트(darkpyonix-ash): `test_fr_h12_front_routes_serve_the_app`, `test_fr_h12_guides_stay_on_project_sites`, `test_fr_h12_build_names_do_not_collide_with_pages_repos`, `test_fr_h12_front_sets_no_cookies`, `test_fr_h12_framed_front_renders_nothing_and_cannot_approve`
 
 ### FR-H13 브라우저에서 API 부르기(CORS, 쿠키, OAuth) — `Draft`
 프런트와 API가 다른 호스트이므로 브라우저 경로를 정합니다.
 - **CORS.** 허용 출처는 정확히 `FRONT_URL`(`https://darkpyonix.dev`) 하나이고, 운영자가 `CORS_DEV_ORIGINS`(쉼표 구분, 예: `http://localhost:5173`)를 두면 그것도 더합니다 [provisional]. 허용 출처의 요청에는 `Access-Control-Allow-Origin: <그 출처>`, `Access-Control-Allow-Credentials: true`, `Vary: Origin`, `Access-Control-Expose-Headers: ETag`를 붙입니다. 사전 요청(`OPTIONS`)은 204와 `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE`, `Access-Control-Allow-Headers: Authorization, Content-Type, If-None-Match`, `Access-Control-Max-Age: 600`입니다. 그 밖의 출처(사용자 이름 서브도메인 `<name>.darkpyonix.dev`, 출처 `null` 포함)에는 CORS 헤더를 붙이지 않습니다. 기기 토큰을 쓰는 기기(ember, CLI)는 브라우저가 아니라 CORS와 무관합니다.
 - **쿠키.** `__Host-dp_session`과 `__Host-dp_oauth`는 `api.darkpyonix.dev`가 `Domain` 없이(`__Host-` 접두어 규칙) `Path=/; Secure; HttpOnly; SameSite=Lax`로 둡니다. 프런트는 쿠키를 읽지 못하고, 로그인 여부는 `GET /v1/me`(401이면 로그아웃 상태)로 압니다. 프런트와 API는 같은 사이트(`darkpyonix.dev`)이므로 `SameSite=Lax` 쿠키가 `credentials: "include"` 요청에 실리고, 서드파티 쿠키 차단과 무관합니다.
 - **쿠키 쓰기의 출처 검사.** 쿠키로 인증한 쓰기 요청은 `Origin`이 `FRONT_URL`(또는 `CORS_DEV_ORIGINS`)이 아니면 403입니다(§10 인증 모델). 같은 사이트의 사용자 이름 서브도메인은 남의 서버이므로 여기서 막힙니다.
-- **OAuth.** FR-H6 개정대로 콜백은 `https://api.darkpyonix.dev/auth/callback`이고, 끝나면 프런트의 `return_to` 경로로 보냅니다.
-- 수용 기준: `Origin: https://darkpyonix.dev`의 사전 요청은 204와 위 헤더, 실제 요청은 그 출처를 그대로 돌려줍니다. `Origin: https://studio.darkpyonix.dev`나 `null`에는 `Access-Control-Allow-Origin`이 없고, 그 출처의 쿠키 쓰기는 403입니다. 로그인 콜백의 `Set-Cookie`에 `Domain`이 없고 이름이 `__Host-`로 시작합니다. 콜백은 `https://darkpyonix.dev/<return_to>`로 302하고, 바깥 `return_to`는 `https://darkpyonix.dev/`가 됩니다.
+- **OAuth.** FR-H6 개정대로 로그인은 메인 페이지가 `https://api.darkpyonix.dev/auth/login?return_to=<경로>`로 최상위 이동하는 것이고(iframe·팝업 아님), 콜백은 `https://api.darkpyonix.dev/auth/callback`이며, 끝나면 `https://darkpyonix.dev<return_to>`로 302합니다. `return_to`는 `/`로 시작하고 `//`나 `\`로 시작하지 않는 경로와 쿼리만 받습니다. **URL 조각(`#` 뒤)은 `return_to`에 넣지 않습니다.** 공유 토큰(FR-H4, FR-H17)이 API로 가면 안 되므로, 메인 페이지는 로그인으로 떠나기 전에 조각을 `sessionStorage`에 두고 돌아와서 되살립니다. 콜백 302는 GitHub OAuth와 API 쪽 리디렉트만 거치므로 상태가 메인 페이지 호스팅(Pages)과 무관합니다.
+- 수용 기준: `Origin: https://darkpyonix.dev`의 사전 요청은 204와 위 헤더, 실제 요청은 그 출처를 그대로 돌려줍니다. `Origin: https://studio.darkpyonix.dev`나 `null`에는 `Access-Control-Allow-Origin`이 없고, 그 출처의 쿠키 쓰기는 403입니다. 로그인 콜백의 `Set-Cookie`에 `Domain`이 없고 이름이 `__Host-`로 시작합니다. 콜백은 `https://darkpyonix.dev/<return_to>`로 302하고, 바깥 `return_to`(`https://…`, `//evil`, `/\evil`)는 `https://darkpyonix.dev/`가 됩니다.
 - 테스트(`hub/worker/test/cors.test.ts`): `test_fr_h13_cors_allows_only_the_front`, `test_fr_h13_preflight_lists_methods_and_headers`, `test_fr_h13_session_cookie_is_host_only_on_the_api`, `test_fr_h13_callback_returns_to_the_front`, `test_fr_h13_cookie_writes_from_user_subdomains_are_refused`
 
 ### FR-H14 노트북 보관과 판 — `Draft`
@@ -507,7 +513,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 |---|---|---|---|
 | `private` | 그 계정(세션, 그 계정의 기기 토큰) | 자기 목록(`GET /v1/notebooks`)에만 | 아님 |
 | `unlisted` | 링크(ID)를 아는 누구나, 인증 없이 | 자기 목록에만 | `X-Robots-Tag: noindex` |
-| `public` | 누구나, 인증 없이 | 자기 목록과 `GET /v1/users/{github_login}/notebooks` | 허용 [provisional] |
+| `public` | 누구나, 인증 없이 | 자기 목록과 `GET /v1/users/{github_login}/notebooks` | 막지 않음. 단 메인 페이지의 `/n/<id>`는 HTTP 404 상태라(FR-H12) 실제로 색인되지 않음 [provisional] |
 
 - 읽기 권한이 없으면 403이 아니라 404입니다(있는지도 드러내지 않음). `private`으로 바꾸면 그 순간부터 남의 API 읽기는 404입니다. 이미 받아 간 사본과 60초 캐시(FR-H14)는 회수할 수 없습니다.
 - 공개 범위는 노트북 단위이고 모든 판에 같이 걸립니다. 판마다 다르게 두지 않습니다(판을 숨기려면 그 판을 지움, FR-H18).
@@ -520,7 +526,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - `text/html`, `application/javascript`, `image/svg+xml`, 위젯 MIME처럼 스크립트가 돌 수 있는 출력과 마크다운 안의 HTML은 NFR-H3의 샌드박스에서만 그립니다. `text/plain`, `image/png`, `image/jpeg`, `error`, `stream`은 프런트가 텍스트·이미지로 그립니다.
 - 판 고르기, 소스와 실행 기록 내려받기, "라이브로 열기"(FR-H17, 공유가 걸려 있을 때)를 둡니다.
 - 수용 기준: 주인의 기기가 꺼져 있고 릴레이에 닿지 못해도 `public` 노트북의 모든 셀과 출력이 그려집니다. 실행 기록 뒤에 고친 셀은 `stale`로 표시되고 출력은 남습니다. 실행 기록이 없는 판은 코드와 마크다운만 그려집니다. `text/html` 출력 안의 스크립트는 프런트의 DOM, 저장소, API 쿠키에 닿지 못합니다(NFR-H3).
-- 테스트: 프런트 저장소 `test_fr_h16_renders_stored_outputs_without_a_kernel`, `test_fr_h16_marks_stale_cells`, `test_fr_h16_cell_split_matches_the_kernel_parser`(FORMAT 예시 파일로 FR-F1 파서와 같은 셀 목록인지 확인)
+- 테스트(darkpyonix-ash): `test_fr_h16_renders_stored_outputs_without_a_kernel`, `test_fr_h16_marks_stale_cells`, `test_fr_h16_cell_split_matches_the_kernel_parser`(FORMAT 예시 파일로 FR-F1 파서와 같은 셀 목록인지 확인)
 
 ### FR-H17 라이브 커널로 열기 — `Draft`
 호스팅한 노트북을 주인의 살아 있는 커널에 붙여 엽니다. 실행은 언제나 주인의 기기에서 일어나고, 허브는 실행하지 않습니다.
@@ -597,12 +603,13 @@ iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{ke
 - 테스트(`hub/worker/test/tokens.test.ts`): `test_nfr_h2_resolve_token_reads_records_and_nothing_else`, `test_nfr_h2_query_refuses_device_tokens`, `test_nfr_h2_resolve_token_rotates`, `test_nfr_h2_removed_device_resolve_token_is_device_removed`, `test_nfr_h2_worker_never_logs_the_query`, `test_nfr_h2_invocation_logs_are_off`
 
 ### NFR-H3 남의 노트북 내용 격리 — `Draft`
-호스팅한 노트북의 출력, 라이브 커널의 출력, 마크다운 안의 HTML, ash가 브라우저에서 돌리는 코드(Pyodide 등)는 모두 남이 쓴 것입니다. 프런트 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로(FR-H13), 이것들은 프런트 출처에서 돌지 않습니다(INTENT D15 개정).
-- 스크립트가 돌 수 있는 내용은 `sandbox="allow-scripts"`(그 밖의 허용은 필요한 것만, **`allow-same-origin`은 절대 없음**) iframe 안에서만 돌립니다. 그 iframe의 출처는 opaque(`null`)이므로 프런트의 DOM·저장소·쿠키에 닿지 못하고, 그 iframe의 요청에는 교차 사이트 규칙이 걸려 `SameSite=Lax` 세션 쿠키가 실리지 않으며, API는 `null` 출처에 CORS를 열지 않습니다(FR-H13).
+호스팅한 노트북의 출력, 라이브 커널의 출력, 마크다운 안의 HTML, ash가 브라우저에서 돌리는 코드(Pyodide 등)는 모두 남이 쓴 것입니다. 메인 페이지 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로(FR-H13), 이것들은 메인 페이지 출처에서 돌지 않습니다(INTENT D15 개정).
+- 스크립트가 돌 수 있는 내용은 `sandbox="allow-scripts"`(그 밖의 허용은 필요한 것만, **`allow-same-origin`은 절대 없음**) iframe 안에서만 돌립니다. 그 iframe은 `srcdoc`이나 `blob:`이 아니라 메인 페이지가 내는 렌더러 페이지 `https://darkpyonix.dev/sandbox/`를 읽고, 그릴 내용은 `postMessage`로 받습니다. `srcdoc`·`blob:` 문서는 메인 페이지의 CSP를 물려받아 출력 안의 인라인 스크립트(Plotly, Bokeh 등)가 막히지만, 따로 읽은 렌더러 페이지는 자기 CSP를 가집니다. 렌더러를 별도 등록 도메인으로 옮기는 것은 그 URL 하나만 바꾸면 되도록 둡니다. 그 iframe의 출처는 opaque(`null`)이므로 프런트의 DOM·저장소·쿠키에 닿지 못하고, 그 iframe의 요청에는 교차 사이트 규칙이 걸려 `SameSite=Lax` 세션 쿠키가 실리지 않으며, API는 `null` 출처에 CORS를 열지 않습니다(FR-H13).
 - API의 노트북 본문 응답은 문서로 실행되지 않는 헤더를 붙입니다(FR-H14). 별도 콘텐츠 호스트나 R2 공개 버킷으로 본문을 내지 않습니다.
+- **열린 질문(PROJECT Q10): 사용자 콘텐츠 도메인.** 렌더러 iframe을 `darkpyonix.dev`와 다른 등록 도메인(예: `darkpyonix-usercontent.dev`, 이름 미정)에서 띄울지 정하지 않았습니다. opaque 샌드박스는 메인 페이지의 DOM·저장소·API 쿠키를 지키지만, 같은 사이트 안에 남는 것(Safe Browsing 판정이 `darkpyonix.dev` 전체에 걸릴 위험, 브라우저에 따라 같은 프로세스, 그 프레임 안의 피싱 화면)과 opaque 출처의 제약(저장소·서비스 워커 없음)은 풀지 못합니다. 정해지면 이 항목과 FR-H12의 `frame-src`를 고칩니다.
 - 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트의 남의 서버입니다. 세션 쿠키는 `__Host-`라 그 서브도메인이 덮어쓸 수 없고, 출처 검사가 그 서브도메인의 쿠키 쓰기를 막습니다(FR-H13).
 - 수용 기준: `text/html` 출력으로 `<script>`가 `document.cookie`, `parent.document`, `localStorage`를 읽고 `fetch("https://api.darkpyonix.dev/v1/me", {credentials: "include"})`를 부르는 노트북을 열었을 때, 앞의 셋은 예외나 빈 값이고, API 요청은 쿠키 없이 `Origin: null`로 도착해 401이며 응답을 읽지 못합니다. 같은 내용을 API 본문 주소로 직접 열면 내려받기가 되고 실행되지 않습니다.
-- 테스트: 프런트 저장소 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`, Worker `test_nfr_h3_null_origin_gets_no_cors`
+- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`, Worker `test_nfr_h3_null_origin_gets_no_cors`
 
 ## 12. 프로토콜 요구사항
 
