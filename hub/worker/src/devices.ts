@@ -302,7 +302,9 @@ async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Pr
 
 export async function removeDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
-  const accountId = requireAccountAdmin(await principal(request, env, now));
+  const p = await principal(request, env, now);
+  // A device may always leave by itself; removing another device needs account rights.
+  const accountId = p.kind === "device" && p.endpointId === endpointId ? p.accountId : requireAccountAdmin(p);
   const { results: names } = await env.DB.prepare("SELECT name FROM names WHERE endpoint_id = ?")
     .bind(endpointId)
     .all<{ name: string }>();

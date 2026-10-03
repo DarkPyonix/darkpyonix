@@ -149,6 +149,21 @@ describe("device links", () => {
     }
   });
 
+  it("test_fr_h1_a_device_removes_itself_but_not_others", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 11, login: "owner" });
+    const a = await newDevice();
+    const b = await newDevice();
+    const tokenA = await linkDevice(deps, { cookie }, a);
+    const tokenB = await linkDevice(deps, { cookie }, b);
+    expect((await call(deps, "DELETE", `/v1/devices/${b.endpointId}`, { token: tokenA })).status).toBe(403);
+    expect((await call(deps, "DELETE", `/v1/devices/${a.endpointId}`, { token: tokenA })).status).toBe(204);
+    const left = await call(deps, "GET", "/v1/devices", { token: tokenA });
+    expect(((await left.json()) as { code: string }).code).toBe("device_removed");
+    const list = (await (await call(deps, "GET", "/v1/devices", { token: tokenB })).json()) as { devices: { endpoint_id: string }[] };
+    expect(list.devices.map((d) => d.endpoint_id)).toEqual([b.endpointId]);
+  });
+
   it("test_fr_h1_link_request_is_validated", async () => {
     const deps = makeDeps();
     const bad = [
