@@ -239,8 +239,8 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
 INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는 이벤트 스트림(`GET /api/kernels/{kernel_id}/events`), WebSocket 동기화(`GET /api/ws/kernels/{kernel_id}`), 실행 대기(`GET /api/kernels/{kernel_id}/runs/{run_ref}/wait`)를 인증하고 권한을 검사한 뒤 연결을 커널에 넘깁니다. 이미 읽은 요청 바이트와 `{permission, client_id, user, nickname, share_id}`를 함께 보냅니다. 나머지 REST 호출은 매니저가 DKP/1 요청으로 처리합니다.
-- POSIX 날 소켓: 커널의 `handoff` 유닉스 도메인 소켓으로 `SCM_RIGHTS`. 넘긴 뒤 매니저는 자기 FD를 닫습니다.
-- Windows 날 소켓: `WSADuplicateSocketW`로 만든 `WSAPROTOCOL_INFOW`를 `adopt`의 `share`로 보냅니다.
+- POSIX 날 소켓: 커널의 제어 채널인 유닉스 도메인 소켓(announce의 `control`, FR-A1)으로 `SCM_RIGHTS`. 넘긴 뒤 매니저는 자기 FD를 닫습니다.
+- Windows 날 소켓: `WSADuplicateSocketW`로 만든 `WSAPROTOCOL_INFOW`를 제어 파이프 위 `adopt`의 `share`로 보냅니다.
 - TLS, HTTP/2, P2P 터널: 소켓 쌍의 한쪽을 넘기고 바이트를 퍼 나릅니다. 본문은 바꾸지 않습니다. 이런 스트림은 매니저와 함께 끝납니다.
 - 공유를 지우거나 그 타입의 토큰을 다시 만들면 `streams.close {share_id}`를 보냅니다.
 - 인증이나 권한에서 실패한 요청은 넘기지 않고 매니저가 `401`/`403`/`404`로 답합니다.
@@ -280,10 +280,16 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ## 9. 인증과 공유 (A)
 
-### FR-A1 커널 인증 — `Done`
-PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음 쓰는 쪽이 0600으로 원자적으로 만듭니다.
-- 상태 메모 (2026-10-03): 이 방식은 리더 결정, 사용자 확인 대기입니다(INTENT D5, PROJECT Q12). 클라이언트의 인증과 권한 검사는 매니저가 하고, 커널은 매니저를 믿습니다.
-- 테스트: `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`
+### FR-A1 커널 인증 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #55)
+INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 방법은 사용자가 고른 "OS가 알려 주는 상대 계정 확인"입니다. 커널의 제어 채널은 POSIX 유닉스 도메인 소켓과 Windows 이름 있는 파이프이고, 커널은 연결마다 상대 UID(POSIX)나 SID(Windows)가 자기 계정과 같은지 OS에 묻습니다. 매니저도 커널 쪽 계정을 같은 방법으로 확인합니다. 키 파일과 HMAC은 없습니다. 클라이언트의 인증과 권한 검사는 매니저가 하고, 커널은 매니저를 믿습니다.
+- 수용 기준(사용 가능한 모든 인터프리터, POSIX와 Windows):
+  - 다른 OS 계정의 프로세스가 커널의 소켓이나 파이프에 붙으면 커널은 프레임을 하나도 보내지 않고 닫습니다.
+  - 같은 계정의 프로세스는 키 없이 `welcome`까지 갑니다.
+  - 커널은 TCP 포트를 열지 않습니다.
+  - 매니저는 소켓이나 파이프 건너편이 다른 계정이면 요청을 보내지 않고 그 커널을 `kernel_unreachable`로 둡니다.
+  - 런타임 홈에 `user.key`가 생기지 않습니다.
+  - 다른 계정 시험은 두 번째 OS 계정을 만들 수 있는 CI에서 돕니다.
+- 테스트(계획): `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`. 지금의 `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`는 지웁니다(#55).
 
 ### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 세 연산(초기 토큰 발급, 비밀번호 로그인, 마스터 토큰 재설정, FR-A4)만 `Authorization` 없이 열립니다. 뒤의 둘은 본문의 비밀번호로 인증합니다.
@@ -586,9 +592,9 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 PROTOCOL §3.1. 64 MiB를 넘는 프레임은 거절합니다.
 - 테스트: `test_pr_1_oversized_frame_is_refused`, `test_pr_1_frame_too_large_closes_connection`
 
-### PR-2 핸드셰이크 — `Done`
-PROTOCOL §3.2. 5초 제한, 상수 시간 비교.
-- 테스트: `test_pr_2_handshake_times_out`
+### PR-2 핸드셰이크 — `Agreed` (새 채널에서 다시 통과 대기 #55)
+PROTOCOL §3.2. 상대 계정 확인(FR-A1)이 먼저이고, 그다음 `hello`/`auth`/`welcome`입니다. 5초 제한. 비밀값이 없으므로 상수 시간 비교도 없습니다.
+- 테스트: `test_pr_2_handshake_times_out`(지금은 TCP 채널에서 통과. 소켓·파이프 채널로 옮긴 뒤 다시 통과해야 `Done`)
 
 ### PR-3 이벤트 재전송 — `Done`
 PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있어도 이벤트를 내는 쪽은 막히지 않습니다(클라이언트별 송신 버퍼, 64 MiB를 넘으면 그 클라이언트를 끊음).
@@ -600,9 +606,9 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 - 테스트: `test_pr_4_unknown_fields_are_ignored`
 
 ### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
-PROTOCOL §3.7.1–§3.7.3. POSIX는 `handoff` 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
-- 수용 기준: TCP 제어 채널로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
-- 테스트(계획): `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_fd_over_tcp_is_bad_request`, `test_pr_5_adopt_without_fd_is_bad_request`
+PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
+- 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
+- 테스트(계획): `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_fd_over_a_windows_pipe_is_bad_request`, `test_pr_5_adopt_without_fd_is_bad_request`
 
 ### PR-6 공유 철회 `streams.close` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
 PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.

@@ -1606,7 +1606,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     KernelUnreachable:
-      description: The kernel was discovered but its control channel could not be reached or authenticated (`kernel_unreachable`),
+      description: The kernel was discovered but its control channel could not be reached or belongs to another OS account (`kernel_unreachable`),
         or it is shutting down (`shutting_down`).
       content:
         application/json:

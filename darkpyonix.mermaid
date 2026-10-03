@@ -213,8 +213,10 @@ classDiagram
             +result str|None
         }
         class ControlServer {
-            <<control thread>>
-            +port int
+            <<control thread, unix socket or named pipe>>
+            +address str
+            -same_account(conn) bool
+            -receive_fd(session ClientSession) int
             -sessions list~ClientSession~
             +serve_forever() None
             +broadcast(event Event) None
@@ -230,12 +232,6 @@ classDiagram
             -ring deque~Event~
             +append(type str, data dict) Event
             +since(seq int) list~Event~
-        }
-        class HandoffServer {
-            <<POSIX unix socket>>
-            +path str
-            +serve_forever() None
-            -receive_fd(session ClientSession) int
         }
         class AdoptedStream {
             <<handed-off connection>>
@@ -299,8 +295,6 @@ classDiagram
     Executor ..> RunsMagic : injects as __runs__
     ControlServer *-- ClientSession
     ControlServer *-- AdoptedStream : adopt
-    HandoffServer ..> ControlServer : same DKP/1 frames + SCM_RIGHTS
-    Kernel *-- HandoffServer
     AdoptedStream *-- StreamLabel
     WebSocketSync --> AdoptedStream : kind ws
     WebSocketSync ..> ClientSession : start_typing / cell_focus as doc.* requests
@@ -341,7 +335,7 @@ classDiagram
             +kernel_id str
             +path str
             +pid int
-            +port int
+            +control str
             +status str
             +python dict
         }
@@ -443,8 +437,8 @@ classDiagram
     Cli ..> ManagerApp : HTTP
 
     %% ───────────── Wire boundaries ─────────────
-    KernelClient ..> ControlServer : DKP/1 over loopback TCP (HMAC handshake)
-    StreamHandoff ..> HandoffServer : POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
+    KernelClient ..> ControlServer : DKP/1 over unix socket or named pipe (same OS account)
+    StreamHandoff ..> ControlServer : adopt + POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
     DiscoveryClient ..> DiscoveryResponder : UDP multicast 239.255.68.80 port 46880
     KernelLauncher ..> Kernel : spawns detached
 

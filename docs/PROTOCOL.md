@@ -11,10 +11,11 @@
 
 | 경로 | 권한 | 내용 |
 |---|---|---|
-| `user.key` | 0600 | 32바이트 무작위 키. 없으면 처음 쓰는 쪽이 원자적으로 만듭니다(리더 결정, 사용자 확인 대기, INTENT D5) |
 | `kernels/<kernel_id>.log` | 0600 | 커널 자신의 진단 로그(사용자 출력이 아님) |
 | `locks/<kernel_id>.lock` | 0600 | 파일당 커널 하나를 보장하는 OS 잠금 |
-| `sockets/<kernel_id>.sock` | 0600 (폴더 0700) | POSIX 전용. 스트림 넘김(§3.7)을 받는 유닉스 도메인 소켓. 발견에는 쓰지 않습니다. 경로는 announce의 `handoff`로 알립니다 |
+| `sockets/<kernel_id>.sock` | 0600 (폴더 0700) | POSIX 전용. 커널의 제어 채널(§3)인 유닉스 도메인 소켓. 스트림 넘김(§3.7)도 여기서 받습니다. 경로가 OS 한도(macOS 104바이트, Linux 108바이트)를 넘으면 `<tempfile.gettempdir()>/darkpyonix-<uid>/<kernel_id>.sock`(폴더 0700)을 씁니다. 실제 경로는 announce의 `control`로 알립니다 |
+
+Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-<user_tag>-<kernel_id>`입니다. 파일이 아니라서 런타임 홈 아래에 없습니다. 이름은 announce의 `control`로 알립니다.
 
 ## 2. 발견 (UDP 멀티캐스트)
 
@@ -27,7 +28,7 @@
 
 ### 2.2 사용자 태그
 
-`user_tag = hex(SHA-256(user.key))[:16]`. 모든 데이터그램에 들어가고, 자기 태그와 다른 데이터그램은 무시합니다. 같은 기계의 다른 OS 사용자 커널과 섞이지 않게 하는 필터일 뿐 인증이 아닙니다(인증은 §3).
+`user_tag = hex(SHA-256(account))[:16]`. `account`는 POSIX에서 `"uid:" + str(os.getuid())`, Windows에서 `"sid:" + 문자열 SID`(`S-1-5-21-…`)의 UTF-8입니다. 모든 데이터그램에 들어가고, 자기 태그와 다른 데이터그램은 무시합니다. 같은 기계의 다른 OS 사용자 커널과 섞이지 않게 하는 필터일 뿐 인증이 아닙니다(계정 확인은 §3.2). 2026-10-04까지는 `user.key`에서 만들었습니다(INTENT D5).
 
 ### 2.3 query (매니저 → 그룹)
 
@@ -43,15 +44,14 @@
 {
   "dkp": 1, "op": "announce", "user_tag": "…", "nonce": "8f2c…",
   "kernel_id": "k_3f9a0c1b2d4e5f607182", "path": "/home/u/exp/train.py",
-  "pid": 41234, "port": 53122, "status": "busy",
+  "pid": 41234, "control": "/home/u/.darkpyonix/sockets/k_3f9a0c1b2d4e5f607182.sock", "status": "busy",
   "run_id": "20261003-142233-a1f0",
   "python": {"version": "3.11.9", "implementation": "CPython", "executable": "/usr/bin/python3.11"},
-  "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py", "started_at": "2026-10-03T05:22:33Z", "host": "macmini",
-  "handoff": "/home/u/.darkpyonix/sockets/k_3f9a0c1b2d4e5f607182.sock"
+  "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py", "started_at": "2026-10-03T05:22:33Z", "host": "macmini"
 }
 ```
 
-`handoff`는 스트림 넘김용 유닉스 도메인 소켓 경로입니다(§3.7). Windows에서는 `null`입니다. 경로가 OS 한도(macOS 104바이트, Linux 108바이트)를 넘으면 커널은 `null`을 알리고, 그 커널로 가는 스트림은 매니저가 소켓 쌍으로 퍼 나릅니다(§3.7.3). 구현 대기(#47).
+`control`은 제어 채널의 주소입니다(§3). POSIX는 유닉스 도메인 소켓 경로, Windows는 파이프 이름입니다. 2026-10-04까지 있던 TCP `port`와 넘김용 `handoff`는 이 하나로 합쳤습니다(INTENT D5). 구현 대기(#55).
 
 커널은 다음 때 announce를 보냅니다.
 - query에 응답할 때(`nonce`를 그대로 돌려줌)
@@ -77,7 +77,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 같은 파일을 가리키는 심볼릭 링크와 상대 경로는 같은 ID가 됩니다.
 
-## 3. 제어 채널 (루프백 TCP, POSIX는 유닉스 도메인 소켓도)
+## 3. 제어 채널 (POSIX 유닉스 도메인 소켓, Windows 이름 있는 파이프)
 
 ### 3.1 프레임
 
@@ -88,19 +88,34 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 ```
 
 - `length`는 payload 바이트 수이고 최대 64 MiB입니다. 넘으면 받는 쪽이 `error {code: "frame_too_large"}`를 보내고 연결을 닫습니다.
-- 커널은 `127.0.0.1`에만 리슨합니다. POSIX 커널은 스트림 넘김용으로 `sockets/<kernel_id>.sock`(0600)에서도 같은 프레임을 받습니다(§3.7.2).
+- 커널은 TCP 포트를 열지 않습니다. POSIX는 `sockets/<kernel_id>.sock`(0600, §1), Windows는 파이프 `\\.\pipe\darkpyonix-<user_tag>-<kernel_id>`에서만 받습니다. 주소는 announce의 `control`입니다. 같은 채널로 요청, 이벤트, 스트림 넘김(§3.7)을 모두 나릅니다.
+- Windows 파이프는 `selectors`에 넣을 수 없어서, Windows 커널은 파이프 연결마다 스레드 하나를 둡니다.
 
 ### 3.2 핸드셰이크
 
+INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 확인은 OS가 알려 주는 상대 계정으로 합니다. 키 파일과 비밀값은 없습니다. 구현 대기(#55).
+
+**먼저 계정을 확인합니다.** 연결이 맺어지면 프레임을 주고받기 전에 양쪽이 OS에 상대 프로세스의 계정을 묻습니다. 커널은 상대가 자기 계정이 아니면 아무것도 보내지 않고 닫습니다. 매니저도 커널 쪽이 자기 계정이 아니면 닫습니다. 다른 계정이 같은 경로나 파이프 이름을 먼저 차지해 커널인 척하는 것을 막으려는 것입니다.
+
+| OS | 커널(받는 쪽, 파이썬 3.8+ 표준 라이브러리) | 매니저(거는 쪽) |
+|---|---|---|
+| Linux | `conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))` → `struct ucred (pid, uid, gid)`. `uid == os.getuid()` | 같은 `SO_PEERCRED` |
+| macOS | `conn.getsockopt(0, socket.LOCAL_PEERCRED, 76)` → `struct xucred`. 앞 8바이트 `struct.unpack_from("II", raw)`가 `(cr_version, cr_uid)`. 3.8에는 `socket.SOL_LOCAL`이 없어서 값 0을 씁니다 | `getpeereid` |
+| 그 밖의 BSD | `ctypes.CDLL(None).getpeereid(fd, byref(uid), byref(gid))` | `getpeereid` |
+| Windows | `ctypes`로 kernel32 `CreateNamedPipeW`를 부릅니다. 보안 설명자는 `D:P(A;;GA;;;<자기 SID>)`(`ConvertStringSecurityDescriptorToSecurityDescriptorW`), 모드에 `PIPE_REJECT_REMOTE_CLIENTS`, 첫 인스턴스에 `FILE_FLAG_FIRST_PIPE_INSTANCE`. 연결마다 advapi32 `ImpersonateNamedPipeClient` → `OpenThreadToken` → `GetTokenInformation(TokenUser)` → `EqualSid(자기 SID)` → `RevertToSelf` | `GetNamedPipeServerProcessId` → `OpenProcess` → `OpenProcessToken` → `GetTokenInformation(TokenUser)`를 자기 SID와 비교 |
+
+- `_winapi`에는 상대 계정을 묻는 함수가 없어서 Windows 커널은 `ctypes`를 씁니다. `ctypes`는 표준 라이브러리이고 3.8에도 있습니다.
+- 측정 기록(2026-10-04, 맥미니 macOS, CPython 3.8.20): `socketpair(AF_UNIX)`에서 `getsockopt(0, socket.LOCAL_PEERCRED, 76)`이 76바이트를 돌려주고, `cr_version` 0, `cr_uid`가 `os.getuid()`(501)와 같았습니다. `socket.LOCAL_PEERCRED`는 3.8.20부터 3.15.0rc1까지 1로 있었습니다.
+
+**그다음 핸드셰이크입니다.**
+
 ```
-커널  → {"dkp":1,"op":"hello","kernel_id":"k_…","nonce":"<base64 32B>","kernel_version":"0.1.0"}
-클라 → {"dkp":1,"op":"auth","client":{"name":"manager","kind":"manager","pid":123},
-        "mac":"<hex HMAC-SHA256(user.key, nonce_bytes + kernel_id.encode())>"}
+커널  → {"dkp":1,"op":"hello","kernel_id":"k_…","kernel_version":"0.1.0"}
+클라 → {"dkp":1,"op":"auth","client":{"name":"manager","kind":"manager","pid":123}}
 커널  → {"dkp":1,"op":"welcome","session":"s_…","seq":1042}
-   또는 {"dkp":1,"op":"error","code":"auth_failed","message":"…"} 후 연결 종료
 ```
 
-`seq`는 커널이 마지막으로 낸 이벤트 번호입니다. 핸드셰이크가 5초 안에 끝나지 않으면 커널이 연결을 닫습니다. 비교는 상수 시간(`hmac.compare_digest`)으로 합니다.
+`auth`는 이름만 남았고 비밀값이 없습니다. 클라이언트가 누구인지 알리는 정보뿐입니다. `seq`는 커널이 마지막으로 낸 이벤트 번호입니다. 핸드셰이크가 5초 안에 끝나지 않으면 커널이 연결을 닫습니다. 2026-10-04까지 있던 `hello.nonce`, `auth.mac`(`user.key` HMAC)과 `auth_failed` 오류는 지웁니다(INTENT D5).
 
 ### 3.3 요청과 응답
 
@@ -126,7 +141,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 | `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. 구현 대기(#47) |
 | `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현 대기(#47) |
 
-오류 코드: `auth_failed`, `bad_request`, `unknown_method`, `busy`, `not_found`, `frame_too_large`, `shutting_down`, `internal`.
+오류 코드: `bad_request`, `unknown_method`, `busy`, `not_found`, `frame_too_large`, `shutting_down`, `internal`.
 
 ### 3.4 이벤트
 
@@ -156,7 +171,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 ```json
 {
-  "kernel_id": "k_…", "path": "/home/u/exp/train.py", "pid": 41234, "port": 53122,
+  "kernel_id": "k_…", "path": "/home/u/exp/train.py", "pid": 41234, "control": "/home/u/.darkpyonix/sockets/k_….sock",
   "status": "busy", "run_id": "20261003-142233-a1f0", "queue": ["20261003-142301-0b1c"],
   "execution_count": 12, "python": {"version": "3.11.9", "implementation": "CPython", "executable": "…"},
   "started_at": "…", "host": "macmini", "kernel_version": "0.1.0", "runs_dir": "/home/u/exp/__runs__/train.py"
@@ -199,22 +214,22 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
 - `transport`: `fd`(POSIX, 날 소켓), `share`(Windows, 날 소켓), `pump`(소켓 쌍의 한쪽, §3.7.3).
 - `request`: 커널은 이 바이트를 소켓에서 읽은 것처럼 다룹니다. 매니저는 요청을 다시 쓰지 않습니다. 요청에 든 토큰(`Authorization`, `?token=`)은 커널이 보지 않습니다.
 - `label`: 매니저가 인증 결과로 채웁니다. `share_id`는 공유 토큰으로 들어온 연결에만 있고, 마스터·관리자 토큰이면 `null`입니다. 커널은 `permission`을 무엇을 보낼지 거르는 데만 씁니다(SPEC FR-K9). 인증이나 토큰 검사는 하지 않습니다.
-- `share`: Windows에서만 씁니다. 매니저가 `WSADuplicateSocketW(socket, kernel_pid, &info)`로 만든 `WSAPROTOCOL_INFOW`의 base64입니다. 커널은 `socket.fromshare(base64 디코드 값)`으로 엽니다. 파이썬 `socket.share`와 같은 형식입니다. 커널 `pid`는 announce에 있습니다.
+- `share`: Windows에서만 씁니다. 매니저가 `WSADuplicateSocketW(socket, kernel_pid, &info)`로 만든 `WSAPROTOCOL_INFOW`의 base64입니다. 커널은 `socket.fromshare(base64 디코드 값)`으로 엽니다. 파이썬 `socket.share`와 같은 형식입니다. `kernel_pid`는 매니저가 제어 파이프에서 `GetNamedPipeServerProcessId`로 얻고, announce의 `pid`와 같아야 합니다.
 
 #### 3.7.2 POSIX: `SCM_RIGHTS`
 
-`SCM_RIGHTS`는 유닉스 도메인 소켓에서만 됩니다. 그래서 POSIX 커널은 루프백 TCP 제어 채널과 함께 `sockets/<kernel_id>.sock`(announce의 `handoff`)에서도 DKP/1 연결을 받습니다. 같은 핸드셰이크(§3.2)를 거칩니다.
+`SCM_RIGHTS`는 유닉스 도메인 소켓에서만 됩니다. POSIX 제어 채널이 바로 유닉스 도메인 소켓이므로(§3.1) 넘김용 소켓을 따로 두지 않습니다.
 
-1. 매니저가 `handoff` 경로에 연결하고 핸드셰이크를 마칩니다.
+1. 매니저가 announce의 `control` 경로에 연결하고, 상대 계정 확인과 핸드셰이크(§3.2)를 마칩니다.
 2. `adopt` 요청 프레임(`transport: "fd"`)을 보낸 직후, 1바이트 `b"F"`를 `sendmsg`의 보조 데이터 `(SOL_SOCKET, SCM_RIGHTS, fd)`와 함께 보냅니다.
 3. 커널은 프레임을 읽은 뒤 `socket.recvmsg(1, socket.CMSG_LEN(4))`로 FD를 받고 `socket.socket(fileno=fd)`로 엽니다. 3.8에는 `socket.recv_fds`가 없으므로 `recvmsg`를 직접 씁니다.
 4. 커널이 `response {stream_id}`를 보내면 매니저는 자기 쪽 FD를 닫습니다. 그 뒤 매니저는 그 연결과 무관합니다.
 
-`adopt`가 TCP 제어 채널로 `transport: "fd"`를 받으면 `bad_request`입니다. FD를 받지 못하면(보조 데이터 없음) `bad_request`이고, 매니저는 그 연결에 `502`를 쓰고 닫습니다.
+Windows 파이프로 `transport: "fd"`가 오면 `bad_request`입니다. FD를 받지 못하면(보조 데이터 없음) `bad_request`이고, 매니저는 그 연결에 `502`를 쓰고 닫습니다.
 
 #### 3.7.3 소켓 쌍과 퍼 나르기 (`pump`)
 
-TLS, HTTP/2, P2P 터널 위의 연결, 그리고 `handoff`가 `null`인 POSIX 커널로 가는 연결에는 넘길 날 소켓이 없습니다. 매니저는 소켓 쌍(POSIX `socketpair(AF_UNIX, SOCK_STREAM)`, Windows는 루프백 TCP 쌍)을 만들어 한쪽을 §3.7.1·§3.7.2와 같이 넘기고(`transport: "pump"`, POSIX는 `fd`로, Windows는 `share`로), 다른 쪽과 클라이언트 연결 사이에서 바이트를 퍼 나릅니다.
+TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. 매니저는 소켓 쌍(POSIX `socketpair(AF_UNIX, SOCK_STREAM)`, Windows는 루프백 TCP 쌍)을 만들어 한쪽을 §3.7.1·§3.7.2와 같이 넘기고(`transport: "pump"`, POSIX는 `fd`로, Windows는 `share`로), 다른 쪽과 클라이언트 연결 사이에서 바이트를 퍼 나릅니다.
 
 - 커널은 소켓 쌍 위에서도 HTTP/1.1로 응답합니다(상태 줄, 헤더, 본문. `ws`는 `101` 뒤 WebSocket 프레임).
 - 매니저는 본문 바이트를 바꾸지 않습니다. 매니저가 맡는 것은 바깥 운반뿐입니다. TLS 레코드의 암복호화, HTTP/2에서는 커널 응답 머리(상태 줄과 헤더)를 HEADERS 프레임으로 옮기고 본문을 DATA 프레임에 그대로 싣는 일, 터널에서는 터널 스트림에 싣는 일입니다.

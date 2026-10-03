@@ -64,7 +64,6 @@ flowchart LR
 ```mermaid
 flowchart TB
   subgraph Home["~/.darkpyonix  (DARKPYONIX_HOME)"]
-    KEY["user.key (0600)"]
     LOCK["locks/&lt;kernel_id&gt;.lock<br/>파일당 커널 하나 (OS 잠금)"]
   end
 
@@ -72,9 +71,9 @@ flowchart TB
   IDE2["IDE 확장"] --> M1
   M1["manager (ephemeral)<br/>127.0.0.1:임의 포트"]
   M2["manager (dedicated)<br/>외부 접속용"]
-  M1 -->|DKP/1 + HMAC| K["kernel: train.py<br/>127.0.0.1:임의 포트"]
+  M1 -->|DKP/1, 같은 OS 계정만| K["kernel: train.py<br/>제어: 유닉스 소켓 / 이름 있는 파이프<br/>TCP 포트 없음"]
   M1 -.->|스트림 소켓 넘김<br/>SCM_RIGHTS / WSADuplicateSocketW| K
-  M2 -->|DKP/1 + HMAC| K
+  M2 -->|DKP/1, 같은 OS 계정만| K
   M1 <-->|멀티캐스트 질의/공지| MC(("239.255.68.80:46880<br/>루프백"))
   K <--> MC
   K --- LOCK
@@ -82,7 +81,7 @@ flowchart TB
 ```
 
 - **커널은 누구의 자식도 아닙니다.** 매니저가 띄우더라도 새 세션으로 분리되어 시작합니다(INTENT D2). 매니저가 끝나도 커널은 남습니다.
-- **매니저는 여러 개가 동시에 떠 있어도 됩니다.** 모두 같은 커널을 발견하고, 같은 사용자 키로 인증합니다(INTENT D5). 매니저는 파일로 자기를 알리지 않습니다. 토큰을 모르는 에이전트는 CLI로 자기 임시 매니저를 띄우고, 그 매니저가 표준 출력으로 알린 주소와 토큰을 씁니다(INTENT D4, SPEC FR-C1). 발견은 루프백 멀티캐스트 하나이고 등록 파일은 없습니다.
+- **매니저는 여러 개가 동시에 떠 있어도 됩니다.** 모두 같은 커널을 발견하고 붙습니다. 커널은 OS가 알려 주는 상대 계정이 자기와 같을 때만 받습니다(INTENT D5, 사용자 결정 2026-10-04). 매니저는 파일로 자기를 알리지 않습니다. 토큰을 모르는 에이전트는 CLI로 자기 임시 매니저를 띄우고, 그 매니저가 표준 출력으로 알린 주소와 토큰을 씁니다(INTENT D4, SPEC FR-C1). 발견은 루프백 멀티캐스트 하나이고 등록 파일은 없습니다.
 - **파일당 커널 하나**는 커널이 `locks/<kernel_id>.lock`에 거는 OS 잠금이 보장합니다. 프로세스가 죽으면 OS가 잠금을 풀므로 남은 잠금 파일 때문에 막히는 일이 없습니다.
 
 ### 2.1 커널 내부 스레드
@@ -156,13 +155,13 @@ sequenceDiagram
   M->>M: kernel_id = H(정규화 경로)
   M->>K: 멀티캐스트 query {kernel_id}
   alt 이미 살아 있음
-    K-->>M: announce {port, status}
+    K-->>M: announce {control, status}
   else 없음
     M->>K: 부트스트랩으로 실행 (분리 세션)
     K->>FS: locks/<id>.lock 잠금
-    K-->>M: announce {port, status: idle}
+    K-->>M: announce {control, status: idle}
   end
-  M->>K: TCP 연결, hello/auth(HMAC)/welcome
+  M->>K: 제어 소켓·파이프 연결, 상대 계정 확인, hello/auth/welcome
   M-->>A: 200 Kernel
   A->>M: POST /kernels/{id}/runs {mode: all}
   M->>K: request run
