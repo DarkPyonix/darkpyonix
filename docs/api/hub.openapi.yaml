@@ -483,9 +483,10 @@ paths:
     patch:
       tags: [Devices]
       operationId: updateDevice
-      summary: Rename a device
+      summary: Rename a device, or set the app it reports
       description: |
-        Account rights, or the device's own token. Fields left out are unchanged.
+        Fields left out are unchanged. `name`: account rights or the device's own token.
+        `app` (FR-H10, provisional): the device's own token only; `null` clears it.
       requestBody:
         required: true
         content:
@@ -496,6 +497,10 @@ paths:
               additionalProperties: false
               properties:
                 name: {type: string, minLength: 1, maxLength: 64}
+                app:
+                  oneOf:
+                    - {$ref: "#/components/schemas/DeviceApp"}
+                    - {type: "null"}
       responses:
         "200":
           description: The updated device.
@@ -507,7 +512,7 @@ paths:
         "401":
           description: No valid session or device token.
         "403":
-          description: Another device's token without account rights, or a cross-origin cookie request.
+          description: Another device's token without account rights; anyone but the device itself setting `app`; or a cross-origin cookie request.
         "404":
           description: No such device in the caller's account.
     delete:
@@ -1014,7 +1019,7 @@ components:
           enum: [invalid_credentials, device_removed]
     Device:
       type: object
-      required: [endpoint_id, name, role, created_at, last_seen, online]
+      required: [endpoint_id, name, role, created_at, last_seen, online, app]
       properties:
         endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
         name: {type: string}
@@ -1022,6 +1027,25 @@ components:
         created_at: {type: integer, description: Unix seconds.}
         last_seen: {type: [integer, "null"], description: Unix seconds of the last relay admission, presence report or address publish.}
         online: {type: boolean, description: Connected to the relay host now, as it last reported.}
+        app:
+          description: What the device says it runs (FR-H10); self-reported, a hint only.
+          oneOf:
+            - {$ref: "#/components/schemas/DeviceApp"}
+            - {type: "null"}
+    DeviceApp:
+      type: object
+      required: [kind, version, services]
+      additionalProperties: false
+      description: In a request `services` may be left out (empty).
+      properties:
+        kind: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", example: ember}
+        version: {type: string, pattern: "^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$", example: "0.4.0"}
+        services:
+          type: array
+          maxItems: 16
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}$"}
+          example: [kernel-manager, ash-host]
     AddressRecord:
       type: object
       required: [endpoint_id, relay_urls, direct_addresses, published_at_us, signed_packet]

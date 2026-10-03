@@ -391,6 +391,14 @@ Flathub의 앱 ID `dev.darkpyonix.Ember`는 도메인 darkpyonix.dev로 검증�
 - 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`)를 따릅니다.
 - 테스트(`hub/worker/test/config.test.ts`): `test_fr_h8_config_names_relays_and_pkarr_url`, `test_fr_h8_config_follows_the_worker_vars`
 
+### FR-H10 기기 앱 정보 — `Agreed` [provisional]
+기기 목록만으로 "어느 기기가 ember 노드이고 무슨 버전이며 무엇을 제공하는지" 알 수 있게, 기기가 자기 앱 정보를 허브에 적습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
+- 기기는 `PATCH /v1/devices/{자기 endpoint_id} {"app": {...}}`로 적고 `{"app": null}`로 지웁니다. **그 기기 자신만** 적을 수 있습니다(세션이나 메인 서버가 남의 `app`을 적으면 403). 기기 목록과 조회의 `Device.app`에 그대로 나옵니다(없으면 `null`).
+- 형식(엄격, 알 수 없는 필드는 400): `kind`(필수, `^[a-z][a-z0-9-]{0,31}$`, 예: `ember`), `version`(필수, `^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$`), `services`(선택, 기본 `[]`, 같은 형식의 이름 최대 16개, 중복 없음, 예: `["kernel-manager", "ash-host"]`).
+- 허브는 이 값을 표시와 힌트로만 씁니다. 기기가 스스로 말한 것이라 권한 판단에 쓰지 않고, 클라이언트도 연결 상대를 고르는 힌트로만 씁니다(상대 인증은 iroh 키가 함). 형식을 좁게 둔 이유: 계정의 모든 기기에 그대로 보이는 값이므로 크기와 문자 집합을 묶어 두고, 자유 형식 필드가 필요해지면 그때 넓힙니다. Ember의 실제 사용으로 확정할 때까지 `[provisional]`입니다.
+- 수용 기준: 기기가 적은 앱 정보가 같은 계정의 목록과 조회에 나오고, `null`로 지워집니다. 남이 적으면 403, 형식이 틀리거나 알 수 없는 필드면 400입니다.
+- 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h10_device_reports_its_app`, `test_fr_h10_only_the_device_writes_its_app`, `test_fr_h10_app_is_validated`
+
 ## 11. 비기능 요구사항
 
 ### NFR-K1 인터프리터 범위 — `Agreed`
