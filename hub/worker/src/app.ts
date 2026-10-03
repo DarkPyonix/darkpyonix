@@ -128,7 +128,7 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
     if (url.pathname.startsWith("/ash/")) return env.ASSETS.fetch(request);
     return json(404, { error: "not found" });
   } catch (err) {
-    if (err instanceof ApiError) return json(err.status, { error: err.message });
+    if (err instanceof ApiError) return json(err.status, err.body());
     console.error("unhandled", err);
     return json(500, { error: "internal error" });
   }

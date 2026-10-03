@@ -3,19 +3,29 @@
 import type { Env } from "./env";
 import { hashToken } from "./util";
 
-/** An error answered as `{"error": "..."}` with a status the OpenAPI file documents. */
+/** Machine-readable error codes (components/schemas/Error in the OpenAPI file). */
+export type ErrorCode = "invalid_credentials" | "device_removed";
+
+/** An error answered as `{"error": "...", "code"?: "..."}` with a status the OpenAPI file documents. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: ErrorCode,
   ) {
     super(message);
+  }
+  body(): { error: string; code?: ErrorCode } {
+    return this.code ? { error: this.message, code: this.code } : { error: this.message };
   }
   static badRequest(message: string): ApiError {
     return new ApiError(400, message);
   }
   static unauthorized(message = "missing or invalid credentials"): ApiError {
-    return new ApiError(401, message);
+    return new ApiError(401, message, "invalid_credentials");
+  }
+  static deviceRemoved(): ApiError {
+    return new ApiError(401, "this device was removed from its account", "device_removed");
   }
   static forbidden(message: string): ApiError {
     return new ApiError(403, message);
@@ -118,12 +128,14 @@ export async function principal(
   let token = bearer(request);
   if (!token && opts.allowQuery) token = new URL(request.url).searchParams.get("token");
   if (token) {
+    // Removed devices keep their token hash, so their token is told apart from a bad one.
     const row = await env.DB.prepare(
-      "SELECT endpoint_id, account_id, role FROM devices WHERE token_hash = ? AND revoked_at IS NULL",
+      "SELECT endpoint_id, account_id, role, revoked_at FROM devices WHERE token_hash = ?",
     )
       .bind(await hashToken(token))
-      .first<{ endpoint_id: string; account_id: string; role: string }>();
+      .first<{ endpoint_id: string; account_id: string; role: string; revoked_at: number | null }>();
     if (!row) throw ApiError.unauthorized();
+    if (row.revoked_at !== null) throw ApiError.deviceRemoved();
     return { kind: "device", accountId: row.account_id, endpointId: row.endpoint_id, role: row.role };
   }
   const session = opts.deviceOnly ? null : getCookie(request, SESSION_COOKIE);

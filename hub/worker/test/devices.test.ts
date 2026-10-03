@@ -131,6 +131,24 @@ describe("device links", () => {
     ]);
   });
 
+  it("test_fr_h1_removed_device_token_is_told_apart_from_a_bad_token", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 10, login: "owner" });
+    const device = await newDevice();
+    const token = await linkDevice(deps, { cookie }, device);
+    const bad = await call(deps, "GET", "/v1/devices", { token: "dpd_not-a-token" });
+    expect(bad.status).toBe(401);
+    expect(((await bad.json()) as { code: string }).code).toBe("invalid_credentials");
+    const none = await call(deps, "GET", "/v1/me");
+    expect(((await none.json()) as { code: string }).code).toBe("invalid_credentials");
+    expect((await call(deps, "DELETE", `/v1/devices/${device.endpointId}`, { cookie })).status).toBe(204);
+    for (const path of ["/v1/devices", "/v1/me", `/pkarr/${device.z32}?token=${token}`]) {
+      const removed = await call(deps, "GET", path, path.includes("?") ? {} : { token });
+      expect(removed.status, path).toBe(401);
+      expect(((await removed.json()) as { code: string }).code, path).toBe("device_removed");
+    }
+  });
+
   it("test_fr_h1_link_request_is_validated", async () => {
     const deps = makeDeps();
     const bad = [
