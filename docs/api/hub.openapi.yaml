@@ -321,6 +321,43 @@ paths:
         "503":
           description: Could not allocate a user code.
 
+  /v1/device-links/{link_id}:
+    parameters:
+      - name: link_id
+        in: path
+        required: true
+        schema: {type: string, pattern: "^l_[0-9a-f]{32}$"}
+    get:
+      tags: [Devices]
+      operationId: getDeviceLink
+      summary: A device link's status, for a device that restarted while waiting
+      description: |
+        No credentials: the link id is 128 random bits known only to the device. The
+        challenge is not secret (claiming needs the endpoint's key) and no token is returned.
+        Expired links are deleted hourly, after which this is 404.
+      security: []
+      responses:
+        "200":
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [link_id, status, endpoint_id, name, role, user_code, verification_uri_complete, challenge, interval, expires_at]
+                properties:
+                  link_id: {type: string}
+                  status: {type: string, enum: [pending, approved, denied, claimed, expired]}
+                  endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  name: {type: string}
+                  role: {type: string, enum: [main_server, computer, client]}
+                  user_code: {type: string}
+                  verification_uri_complete: {type: string}
+                  challenge: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  interval: {type: integer}
+                  expires_at: {type: integer}
+        "404":
+          description: Unknown link, or an expired one already deleted.
+
   /v1/device-links/{link_id}/token:
     parameters:
       - name: link_id
