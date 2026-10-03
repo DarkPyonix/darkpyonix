@@ -502,3 +502,64 @@ def test_fr_f5_reduced_reference_in_kernel_emits_markdown(scratch, kernel, capsy
     assert capsys.readouterr().out == REDUCED_STDOUT
     assert emitted == [({"text/markdown": "# Python support in Starboard Notebook"}, True),
                        ({"text/markdown": "## Visualizing car data"}, False)]
+
+
+# --------------------------------------------------------------------------- real kernel
+
+
+@pytest.fixture
+def real_kernel(dp_home):
+    """Start a real kernel for a file; yields ``open(path, python) -> client``."""
+    from darkpyonix.kernel import launcher
+    from darkpyonix.kernel.protocol import kernel_id_for
+    from kernel_procs import connect, kill, wait_pid_gone
+    started = []
+
+    def open_kernel(path, python):
+        pid = launcher.launch(path, python=python)
+        started.append(pid)
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=15)
+        assert info is not None, "kernel did not announce"
+        c = connect(info)
+        started.append(c)
+        return c
+
+    yield open_kernel
+    for item in reversed(started):
+        if isinstance(item, int):
+            kill(item, signal.SIGTERM)
+            if not wait_pid_gone(item):
+                kill(item, signal.SIGKILL)
+                wait_pid_gone(item)
+        else:
+            item.close()
+
+
+def test_fr_f2_markdown_in_real_kernel_is_display_data_and_silent_is_not_logged(
+        python, scratch, real_kernel):
+    from kernel_procs import run_and_wait
+    path = _write(scratch, "md_kernel.py", '''
+        import darkpyonix
+
+        # %% [code]
+        darkpyonix.markdown("""
+            # Shown
+            kept in the log
+        """)
+        darkpyonix.markdown("# Hidden", silent=True)
+        print("done")
+    ''')
+    c = real_kernel(path, python)
+    status, events = run_and_wait(c)
+    assert status == "ok"
+    live = [e["data"]["output"] for e in events if e["type"] == "output"
+            and e["data"]["output"]["output_type"] == "display_data"]
+    assert [o["data"] for o in live] == [{"text/markdown": "# Shown\nkept in the log"},
+                                         {"text/markdown": "# Hidden"}]
+    nb = c.request("runs.get", {"run_id": "latest"})
+    logged = [o for cell in nb["cells"] for o in cell["outputs"]
+              if o["output_type"] == "display_data"]
+    assert [o["data"] for o in logged] == [{"text/markdown": "# Shown\nkept in the log"}]
+    outputs = [o for cell in nb["cells"] for o in cell["outputs"]]
+    assert not any("# Hidden" in str(o) for o in outputs)
+    assert [o.get("text") for o in outputs if o["output_type"] == "stream"] == ["done\n"]

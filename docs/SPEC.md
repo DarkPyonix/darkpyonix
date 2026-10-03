@@ -167,10 +167,9 @@ FORMAT §2의 문법(프리앰블, 셀 표식, 제목, 타입, 메타데이터, 
 - 수용 기준: `docs/examples/darkpyonix_format.py`를 파싱하면 프리앰블 1개와 셀 22개(code 11, markdown 2, binding 2, argparse·shell·parallel·concurrent·cinterop·cppinterop·rustinterop 각 1)가 나오고, 타입, 제목, `@width` 메타데이터, `concorrunt`→`concurrent` 별칭이 FORMAT대로 나옵니다. 파싱 후 다시 직렬화하면 원문과 바이트 단위로 같습니다.
 - 테스트: `test_fr_f1_reference_file_parses`, `test_fr_f1_parse_serialize_roundtrip`
 
-### FR-F2 `darkpyonix.markdown` — `Agreed`
+### FR-F2 `darkpyonix.markdown` — `Done`
 FORMAT §3.2. 커널 안에서는 `text/markdown` `display_data`를 내고(`silent=True`이면 기록에 남기지 않음), 커널 밖에서는 아무것도 하지 않습니다. 모르는 키워드 인자는 경고만 남깁니다.
-- 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`
-- 상태 메모: 커널 밖 동작과 `darkpyonix.kernel.hostctx` 계약까지는 검증했습니다. 실제 커널이 `display_data`로 내보내는 경로는 실행기(executor)와 합친 뒤 검증하고 `Done`으로 바꿉니다. 2026-10-03 감사: 실행기는 합쳐졌고 `hostctx.emit_display`의 커널 경로는 `test_fr_x5_hostctx_exposes_params_and_display`가 검증합니다. 셀 안에서 `darkpyonix.markdown`을 불러 `text/markdown` `display_data`가 나오고 `silent=True`면 기록에 남지 않는지 보는 시험은 아직 없습니다.
+- 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`(커널 밖 동작, 경고, `hostctx` 계약), `test_fr_f2_markdown_in_real_kernel_is_display_data_and_silent_is_not_logged`(실제 커널: 두 호출 모두 실시간 `output` 이벤트로 `text/markdown` `display_data`가 나가고, 실행 기록에는 `silent=True`가 아닌 것만 남음)
 
 ### FR-F3 `darkpyonix.params` — `Done`
 FORMAT §3.3. 값의 우선순위는 실행 요청 `params` → 명령줄 `--name` → `default`입니다.
