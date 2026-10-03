@@ -89,9 +89,15 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 테스트: `test_fr_x5_fd_level_output_is_captured`, `test_fr_x5_repr_protocol_becomes_mime_bundle`
 
 ### FR-X6 matplotlib — `Agreed`
-matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 끝에 남은 그림을 `image/png` `display_data`로 냅니다. matplotlib이 없으면 아무것도 하지 않습니다(커널은 matplotlib을 import하지 않고, 사용자 코드가 import했을 때만 훅을 겁니다).
-- 수용 기준: `plt.plot([1,2]); plt.show()` 셀이 PNG 출력을 냅니다.
-- 테스트: `test_fr_x6_matplotlib_show_emits_png` (matplotlib이 없으면 skip)
+matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 끝에 남은 그림을 `image/png` `display_data`로 냅니다(`text/plain`은 그림의 `repr`). 낸 그림은 닫으므로 다음 셀이 같은 그림을 다시 내지 않습니다. 셀이 오류로 끝나도 그때까지 그린 그림은 냅니다.
+
+커널은 matplotlib을 import하지 않습니다. 사용자 코드가 `matplotlib.pyplot`을 처음 import할 때, 그 시점에 백엔드가 아직 정해지지 않았으면(`MPLBACKEND`, matplotlibrc, `matplotlib.use()` 어디에서도 정하지 않음) 커널의 백엔드 `module://darkpyonix.kernel.mplbackend`를 고릅니다. 사용자가 백엔드를 정했으면 그대로 둡니다. 커널은 환경 변수를 바꾸지 않으므로 하위 프로세스의 matplotlib에는 영향이 없습니다. `darkpyonix.kernel.mplbackend`는 matplotlib이 불러오는 모듈이라 `matplotlib`을 import할 수 있는 유일한 커널 모듈입니다(NFR-K2의 예외).
+- 수용 기준:
+  - `plt.plot([1,2]); plt.show()` 셀이 PNG `display_data` 하나를 내고, 실행 기록에도 남습니다.
+  - `show()` 없이 `plt.plot([1,2])`로 끝나는 셀도 셀 끝에 PNG 하나를 내고, 다음 셀은 그 그림을 다시 내지 않습니다.
+  - matplotlib을 쓰지 않는 실행 뒤 커널 프로세스의 `sys.modules`에 `matplotlib`이 없습니다.
+  - pyplot import 전에 `matplotlib.use("agg")`로 백엔드를 정한 셀은 PNG를 내지 않습니다.
+- 테스트: `test_fr_x6_matplotlib_show_emits_png`, `test_fr_x6_figure_left_at_cell_end_is_shown_once`, `test_fr_x6_kernel_does_not_import_matplotlib`, `test_fr_x6_user_chosen_backend_is_kept` (matplotlib이 없는 인터프리터에서는 skip, 셋째 테스트는 모든 인터프리터에서 실행)
 
 ## 4. 실행 기록 (R)
 
@@ -326,7 +332,7 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 - 측정 기록: (구현 후 기입)
 
 ### NFR-K2 표준 라이브러리 전용 — `Agreed`
-`kernel/darkpyonix/kernel/`, `kernel/darkpyonix/*.py`, `kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행).
+`kernel/darkpyonix/kernel/`, `kernel/darkpyonix/*.py`, `kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `kernel/darkpyonix/kernel/mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
 - 테스트: `test_nfr_k2_kernel_imports_stdlib_only`
 
 ### NFR-K3 출력 오버헤드 — `Agreed`
