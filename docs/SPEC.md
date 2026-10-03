@@ -312,7 +312,7 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 
 전송 계층 교체 가능성: 허브가 iroh에 묶이는 곳은 릴레이 호스트와 주소 레코드 형식(pkarr 서명 패킷)뿐입니다. 계정, 기기 등록, 공유, 이름은 "ed25519 공개 키 하나 = 기기"라는 가정만 씁니다. 직접 구현으로 바꾸면 그 두 곳만 바꿉니다.
 
-**인증 모델.** 계정은 GitHub 사용자입니다(FR-H6). 사람은 브라우저에서 GitHub로 로그인해 세션 쿠키(`__Host-dp_session`)를 받고, 기기는 기기 링크(FR-H1)로 계정에 들어와 기기 토큰을 받습니다. "계정 권한"은 로그인한 세션 또는 그 계정의 `main_server` 기기 토큰입니다. 단, `main_server` 역할을 새로 들이는 승인(FR-H1)은 세션만 할 수 있습니다. 토큰과 세션 ID는 SHA-256 해시로만 저장하고, GitHub 액세스 토큰은 사용자 정보를 한 번 읽은 뒤 바로 폐기(revoke)하며 저장하지 않습니다. 쿠키로 인증한 쓰기 요청은 `Origin`이 `https://darkpyonix.dev`가 아니면 403입니다. 자격 증명 오류(401)의 본문은 `{"error": <설명>, "code": <코드>}`이고, `code`는 `device_removed`(지운 기기의 토큰. 다시 시도해도 소용없으니 기기는 토큰을 버리고 사용자에게 알립니다) 또는 `invalid_credentials`(없거나 모르는 토큰·세션)입니다. 상태 코드는 둘 다 401입니다. 410은 자원이 사라졌다는 뜻이지 자격 증명이 틀렸다는 뜻이 아니고, 401을 유지하면 "401이면 다시 인증"하는 기존 클라이언트가 그대로 동작합니다(FR-H1). OpenAI 로그인("Sign in with ChatGPT")과 ChatGPT 플랜 사용은 허브 기능이 아니고, 사용자가 직접 띄운 ember server가 합니다(PROJECT Q2).
+**인증 모델.** 계정은 GitHub 사용자입니다(FR-H6). 사람은 브라우저에서 GitHub로 로그인해 세션 쿠키(`__Host-dp_session`)를 받고, 기기는 기기 링크(FR-H1)로 계정에 들어와 기기 토큰을 받습니다. "계정 권한"은 로그인한 세션 또는 그 계정의 `main_server` 기기 토큰입니다. 단, `main_server` 역할을 새로 들이는 승인과 다른 `main_server` 기기를 지우는 것(FR-H1)은 세션만 할 수 있습니다. 토큰과 세션 ID는 SHA-256 해시로만 저장하고, GitHub 액세스 토큰은 사용자 정보를 한 번 읽은 뒤 바로 폐기(revoke)하며 저장하지 않습니다. 쿠키로 인증한 쓰기 요청은 `Origin`이 `https://darkpyonix.dev`가 아니면 403입니다. 자격 증명 오류(401)의 본문은 `{"error": <설명>, "code": <코드>}`이고, `code`는 `device_removed`(지운 기기의 토큰. 다시 시도해도 소용없으니 기기는 토큰을 버리고 사용자에게 알립니다) 또는 `invalid_credentials`(없거나 모르는 토큰·세션)입니다. 상태 코드는 둘 다 401입니다. 410은 자원이 사라졌다는 뜻이지 자격 증명이 틀렸다는 뜻이 아니고, 401을 유지하면 "401이면 다시 인증"하는 기존 클라이언트가 그대로 동작합니다(FR-H1). OpenAI 로그인("Sign in with ChatGPT")과 ChatGPT 플랜 사용은 허브 기능이 아니고, 사용자가 직접 띄운 ember server가 합니다(PROJECT Q2).
 
 ### FR-H1 기기 등록 — `Agreed`
 기기는 iroh 엔드포인트 ID로 계정에 들어옵니다. 흐름은 OAuth 기기 인증(RFC 8628) 모양에 키 소유 증명을 더한 **기기 링크**입니다.
@@ -323,17 +323,19 @@ SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, �
 
 **역할 [provisional].** 기기의 역할은 셋입니다. 권한이 가장 좁은 쪽을 기본으로 둡니다.
 
-| 역할 | 무엇 | 계정 권한 | 이름(FR-H5) | 공유 게시(FR-H4) | 주소 게시·조회, 릴레이 |
-|---|---|---|---|---|---|
-| `main_server` | 사용자의 메인 서버(ember server) | 있음 | 가짐 | 됨 | 됨 |
-| `computer` | 커널을 돌리는 다른 컴퓨터 | 없음 | 못 가짐(403) | 됨 | 됨 |
-| `client` | 남의 기기에 붙기만 하는 기기(휴대폰, 노트북의 ember 앱) | 없음 | 못 가짐(403) | 안 됨(403) | 됨 |
+| 역할 | 무엇 | 계정 권한 | 기기 지우기 | 이름(FR-H5) | 공유 게시(FR-H4) | 주소 게시·조회, 릴레이 |
+|---|---|---|---|---|---|---|
+| `main_server` | 사용자의 메인 서버(ember server) | 있음 | 자기 자신, `computer`, `client` (다른 `main_server`는 403) | 가짐 | 됨 | 됨 |
+| `computer` | 커널을 돌리는 다른 컴퓨터 | 없음 | 자기 자신만 | 못 가짐(403) | 됨 | 됨 |
+| `client` | 남의 기기에 붙기만 하는 기기(휴대폰, 노트북의 ember 앱) | 없음 | 자기 자신만 | 못 가짐(403) | 안 됨(403) | 됨 |
+
+로그인한 브라우저 세션은 계정의 어느 기기든 지울 수 있습니다. **다른 `main_server` 기기는 세션만 지웁니다.** 지우면 그 기기의 이름·공유·주소 레코드가 사라지고 다시 들여도 돌아오지 않으므로(FR-H11), 메인 서버 토큰 하나가 새면 그것으로 진짜 메인 서버들을 밀어내고 이름을 잃게 만들 수 있기 때문입니다. `main_server` 링크 승인을 세션에만 맡기는 이유와 같습니다. 메인 서버가 `computer`·`client`를 지우는 것은 그대로 둡니다(브라우저 없이 기기를 정리하는 것이 메인 서버의 역할이고, 그 기기들은 계정 권한이 없어 잃는 것이 적습니다).
 
 `client` 링크는 `computer` 링크처럼 세션이나 메인 서버 토큰이 승인합니다. `client`가 공유를 게시하지 못하는 이유: 공유는 그것을 연 기기로 손님을 들이는 것(FR-H4)인데, 아무것도 서비스하지 않는 기기가 손님 통행권을 만들 이유가 없고, 잃어버리기 쉬운 휴대폰 토큰으로 할 수 있는 일을 줄입니다. 주소 게시는 허용합니다(상대가 휴대폰으로 되걸 수 있게). 역할은 링크로 정하고 바꾸지 않습니다. 바꾸려면 지우고 다시 들입니다(FR-H11). Ember의 실제 사용으로 확정할 때까지 `[provisional]`입니다.
 
-기기는 계정 하나에만 속하고, 기기 목록과 조회는 같은 계정 안에서만 보입니다. 기기 이름은 `PATCH /v1/devices/{endpoint_id} {"name": …}`로 바꿉니다(1~64자). 계정 권한이나 그 기기 자신만 바꿀 수 있고, 다른 `computer`/`client` 토큰은 403입니다. 기기를 지우면(계정 권한, 또는 그 기기 자신의 기기 토큰: 앱을 지우거나 계정에서 나갈 때 기기가 스스로 나갑니다) 그 키는 폐기되어 계정 주인이 다시 들이기 전에는(FR-H11) 다시 등록할 수 없고, 그 기기의 이름·공유·주소 레코드가 지워지며, Worker가 릴레이 호스트에 연결을 끊으라고 알립니다(`POST /admin/v1/disconnect`, FR-H3).
-- 수용 기준: 두 엔드포인트가 기기 링크로 등록되면 계정의 기기 목록에 두 엔드포인트 ID가 나옵니다. 다른 키의 서명이나 다른 메시지의 서명은 400입니다. 승인 전 폴링은 202, 거절된 링크는 403, 한 번 받은 링크를 다시 받으면 404입니다. 링크 상태 조회는 대기·승인·받음·거절·만료를 그대로 보여 주고, 모르는 링크는 404입니다. 메인 서버 토큰은 `computer` 링크를 승인하지만 `main_server` 링크의 승인은 403이고, 같은 링크를 세션은 승인합니다. 이미 등록되었거나 지운 키의 링크 요청은 409입니다. 기기 이름은 세션과 그 기기 자신이 바꾸고 다른 `computer` 토큰은 403, 빈 이름은 400입니다. `client`로 들어온 기기는 목록·주소 게시와 조회가 되고, 공유 게시·이름 예약·승인은 403입니다. 다른 계정에서는 그 기기가 보이지 않습니다(404). `computer` 기기 토큰으로 다른 기기를 지우면 403이고 자기 자신은 지울 수 있습니다(204). 지운 기기의 토큰은 401이고 `code`가 `device_removed`이며, 모르는 토큰은 401에 `invalid_credentials`입니다. 실제 iroh 엔드포인트(Rust `SecretKey::sign`)의 서명이 받아들여지는 것은 ember 전송 크레이트 연동 시험에서 확인합니다.
-- 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h1_register_two_iroh_endpoints`, `test_fr_h1_link_shows_code_and_polls_pending_until_approved`, `test_fr_h1_registration_requires_key_possession`, `test_fr_h1_denied_link_is_refused`, `test_fr_h1_restarted_device_reads_its_link_status`, `test_fr_h1_main_server_approves_computers_but_a_computer_cannot`, `test_fr_h1_only_a_session_approves_a_main_server_link`, `test_fr_h1_devices_are_scoped_to_their_account`, `test_fr_h1_removed_device_is_revoked`, `test_fr_h1_removed_device_token_is_told_apart_from_a_bad_token`, `test_fr_h1_a_device_removes_itself_but_not_others`, `test_fr_h1_client_role_joins_and_connects_but_cannot_share_or_name`, `test_fr_h1_rename_by_the_device_or_the_account`, `test_fr_h1_link_request_is_validated`
+기기는 계정 하나에만 속하고, 기기 목록과 조회는 같은 계정 안에서만 보입니다. 기기 이름은 `PATCH /v1/devices/{endpoint_id} {"name": …}`로 바꿉니다(1~64자). 계정 권한이나 그 기기 자신만 바꿀 수 있고, 다른 `computer`/`client` 토큰은 403입니다. 기기를 지우면(위 표의 권한: 세션, `computer`·`client`를 지우는 메인 서버 토큰, 또는 그 기기 자신의 기기 토큰: 앱을 지우거나 계정에서 나갈 때 기기가 스스로 나갑니다) 그 키는 폐기되어 계정 주인이 다시 들이기 전에는(FR-H11) 다시 등록할 수 없고, 그 기기의 이름·공유·주소 레코드가 지워지며, Worker가 릴레이 호스트에 연결을 끊으라고 알립니다(`POST /admin/v1/disconnect`, FR-H3).
+- 수용 기준: 두 엔드포인트가 기기 링크로 등록되면 계정의 기기 목록에 두 엔드포인트 ID가 나옵니다. 다른 키의 서명이나 다른 메시지의 서명은 400입니다. 승인 전 폴링은 202, 거절된 링크는 403, 한 번 받은 링크를 다시 받으면 404입니다. 링크 상태 조회는 대기·승인·받음·거절·만료를 그대로 보여 주고, 모르는 링크는 404입니다. 메인 서버 토큰은 `computer` 링크를 승인하지만 `main_server` 링크의 승인은 403이고, 같은 링크를 세션은 승인합니다. 이미 등록되었거나 지운 키의 링크 요청은 409입니다. 기기 이름은 세션과 그 기기 자신이 바꾸고 다른 `computer` 토큰은 403, 빈 이름은 400입니다. `client`로 들어온 기기는 목록·주소 게시와 조회가 되고, 공유 게시·이름 예약·승인은 403입니다. 다른 계정에서는 그 기기가 보이지 않습니다(404). `computer` 기기 토큰으로 다른 기기를 지우면 403이고 자기 자신은 지울 수 있습니다(204). 메인 서버 토큰으로 `computer`를 지우고 자기 자신도 지울 수 있지만(204), 다른 `main_server`를 지우면 403이고 그 기기는 그대로 남으며, 같은 기기를 세션은 지웁니다(204). 지운 기기의 토큰은 401이고 `code`가 `device_removed`이며, 모르는 토큰은 401에 `invalid_credentials`입니다. 실제 iroh 엔드포인트(Rust `SecretKey::sign`)의 서명이 받아들여지는 것은 ember 전송 크레이트 연동 시험에서 확인합니다.
+- 테스트(`hub/worker/test/devices.test.ts`): `test_fr_h1_register_two_iroh_endpoints`, `test_fr_h1_link_shows_code_and_polls_pending_until_approved`, `test_fr_h1_registration_requires_key_possession`, `test_fr_h1_denied_link_is_refused`, `test_fr_h1_restarted_device_reads_its_link_status`, `test_fr_h1_main_server_approves_computers_but_a_computer_cannot`, `test_fr_h1_only_a_session_approves_a_main_server_link`, `test_fr_h1_devices_are_scoped_to_their_account`, `test_fr_h1_removed_device_is_revoked`, `test_fr_h1_removed_device_token_is_told_apart_from_a_bad_token`, `test_fr_h1_a_device_removes_itself_but_not_others`, `test_fr_h1_only_a_session_removes_another_main_server`, `test_fr_h1_client_role_joins_and_connects_but_cannot_share_or_name`, `test_fr_h1_rename_by_the_device_or_the_account`, `test_fr_h1_link_request_is_validated`
 
 ### FR-H2 주소 디렉터리와 발견 — `Agreed`
 기기는 현재 iroh 주소(릴레이 URL과 직접 주소)를 자기 키로 서명한 pkarr 패킷으로 허브에 올리고, 같은 계정의 기기는 엔드포인트 ID만으로 서로의 주소를 찾습니다.
