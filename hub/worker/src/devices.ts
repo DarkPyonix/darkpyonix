@@ -16,8 +16,10 @@ import {
   json,
   noContent,
   principal,
+  RESOLVE_TOKEN_PREFIX,
   readJson,
   requireAccountAdmin,
+  requireDevice,
 } from "./http";
 import { clearNameRecords } from "./names";
 import {
@@ -226,6 +228,7 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
   if (claimed.meta.changes !== 1 || !link.account_id) throw ApiError.notFound("already claimed");
 
   const token = newToken("dpd_");
+  const resolveToken = newToken(RESOLVE_TOKEN_PREFIX);
   const device: DeviceRow = {
     endpoint_id: link.endpoint_id,
     account_id: link.account_id,
@@ -237,14 +240,25 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
   };
   try {
     await env.DB.prepare(
-      "INSERT INTO devices (endpoint_id, account_id, name, role, token_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      `INSERT INTO devices (endpoint_id, account_id, name, role, token_hash, resolve_token_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(device.endpoint_id, device.account_id, device.name, device.role, await hashToken(token), now)
+      .bind(device.endpoint_id, device.account_id, device.name, device.role, await hashToken(token), await hashToken(resolveToken), now)
       .run();
   } catch {
     throw ApiError.conflict("endpoint id already registered");
   }
-  return json(201, { device: deviceJson(device), device_token: token });
+  return json(201, { device: deviceJson(device), device_token: token, resolve_token: resolveToken });
+}
+
+/** `POST /v1/me/resolve-token`: a new read-only resolve token; the old one stops working (NFR-H2). */
+export async function rotateResolveToken(request: Request, env: Env, deps: Deps): Promise<Response> {
+  const device = requireDevice(await principal(request, env, nowSecs(deps.nowMs()), { deviceOnly: true }));
+  const resolveToken = newToken(RESOLVE_TOKEN_PREFIX);
+  await env.DB.prepare("UPDATE devices SET resolve_token_hash = ? WHERE endpoint_id = ? AND revoked_at IS NULL")
+    .bind(await hashToken(resolveToken), device.endpointId)
+    .run();
+  return json(201, { resolve_token: resolveToken });
 }
 
 // ---------------------------------------------------------------- devices

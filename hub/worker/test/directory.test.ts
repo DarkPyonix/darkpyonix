@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { base64url } from "../src/util";
-import { call, irohRecord, linkDevice, makeDeps, newDevice, signIn } from "./helpers";
+import { call, irohRecord, linkDevice, linkDeviceTokens, makeDeps, newDevice, signIn } from "./helpers";
 
 const RELAY = "https://relay.darkpyonix.dev/";
 
@@ -13,12 +13,12 @@ describe("address directory", () => {
     const a = await newDevice();
     const b = await newDevice();
     await linkDevice(deps, { cookie }, a);
-    const tokenB = await linkDevice(deps, { cookie }, b);
+    const { device_token: tokenB, resolve_token: resolveB } = await linkDeviceTokens(deps, { cookie }, b);
     const payload = await irohRecord(a, RELAY, ["192.0.2.7:51000"], 1_790_000_000_000_000n);
     // PkarrPublisher: PUT <relay>/<z32>, no auth header.
     expect((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: payload })).status).toBe(204);
-    // PkarrResolver configured with https://darkpyonix.dev/pkarr?token=<device token>.
-    const resolved = await call(deps, "GET", `/pkarr/${a.z32}?token=${encodeURIComponent(tokenB)}`);
+    // PkarrResolver configured with https://darkpyonix.dev/pkarr?token=<resolve token> (NFR-H2).
+    const resolved = await call(deps, "GET", `/pkarr/${a.z32}?token=${encodeURIComponent(resolveB)}`);
     expect(resolved.status).toBe(200);
     expect(resolved.headers.get("content-type")).toBe("application/octet-stream");
     expect(new Uint8Array(await resolved.arrayBuffer())).toEqual(payload);

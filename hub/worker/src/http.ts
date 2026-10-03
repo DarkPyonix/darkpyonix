@@ -115,18 +115,17 @@ function bearer(request: Request): string | null {
 }
 
 /**
- * The caller, from a device token (`Authorization: Bearer`, or `?token=` where `allowQuery`)
- * or the browser session cookie. A cookie-authenticated write must come from our own origin
+ * The caller, from a device token (`Authorization: Bearer`, never the query; NFR-H2) or the
+ * browser session cookie. Resolve tokens are not credentials here. A cookie-authenticated write must come from our own origin
  * (the session cookie is SameSite=Lax; this closes the rest of CSRF).
  */
 export async function principal(
   request: Request,
   env: Env,
   nowSecs: number,
-  opts: { allowQuery?: boolean; deviceOnly?: boolean } = {},
+  opts: { deviceOnly?: boolean } = {},
 ): Promise<Principal> {
-  let token = bearer(request);
-  if (!token && opts.allowQuery) token = new URL(request.url).searchParams.get("token");
+  const token = bearer(request);
   if (token) {
     // Removed devices keep their token hash, so their token is told apart from a bad one.
     const row = await env.DB.prepare(
@@ -165,6 +164,31 @@ export async function principal(
 export function requireAccountAdmin(p: Principal): string {
   if (p.kind === "session" || p.role === "main_server") return p.accountId;
   throw ApiError.forbidden("needs a signed-in session or the account's main server");
+}
+
+/** Resolve tokens (NFR-H2) start with this; they are credentials only for `GET /pkarr/{key}`. */
+export const RESOLVE_TOKEN_PREFIX = "dpr_";
+
+/**
+ * The caller of `GET /pkarr/{key}`: a resolve token (query or header), or else the usual
+ * header/cookie credentials. A device token in the query is never accepted (NFR-H2).
+ */
+export async function resolvePrincipal(request: Request, env: Env, now: number): Promise<Principal> {
+  const query = new URL(request.url).searchParams.get("token");
+  const header = bearer(request);
+  const token = header?.startsWith(RESOLVE_TOKEN_PREFIX) ? header : query;
+  if (token !== null && token !== undefined) {
+    if (!token.startsWith(RESOLVE_TOKEN_PREFIX)) throw ApiError.unauthorized("only resolve tokens are accepted in the query");
+    const row = await env.DB.prepare(
+      "SELECT endpoint_id, account_id, role, revoked_at FROM devices WHERE resolve_token_hash = ?",
+    )
+      .bind(await hashToken(token))
+      .first<{ endpoint_id: string; account_id: string; role: string; revoked_at: number | null }>();
+    if (!row) throw ApiError.unauthorized();
+    if (row.revoked_at !== null) throw ApiError.deviceRemoved();
+    return { kind: "device", accountId: row.account_id, endpointId: row.endpoint_id, role: row.role };
+  }
+  return principal(request, env, now);
 }
 
 export function requireDevice(p: Principal): Extract<Principal, { kind: "device" }> {

@@ -142,8 +142,8 @@ describe("device links", () => {
     const none = await call(deps, "GET", "/v1/me");
     expect(((await none.json()) as { code: string }).code).toBe("invalid_credentials");
     expect((await call(deps, "DELETE", `/v1/devices/${device.endpointId}`, { cookie })).status).toBe(204);
-    for (const path of ["/v1/devices", "/v1/me", `/pkarr/${device.z32}?token=${token}`]) {
-      const removed = await call(deps, "GET", path, path.includes("?") ? {} : { token });
+    for (const path of ["/v1/devices", "/v1/me", `/pkarr/${device.z32}`]) {
+      const removed = await call(deps, "GET", path, { token });
       expect(removed.status, path).toBe(401);
       expect(((await removed.json()) as { code: string }).code, path).toBe("device_removed");
     }

@@ -10,6 +10,7 @@ import {
   listDevices,
   me,
   removeDevice,
+  rotateResolveToken,
 } from "./devices";
 import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
 import type { Deps, Env } from "./env";
@@ -87,6 +88,7 @@ export const ROUTES: Route[] = [
   route("/auth/callback", { GET: callback }),
   route("/auth/logout", { POST: (r, e) => logout(r, e) }),
   route("/v1/me", { GET: me }),
+  route("/v1/me/resolve-token", { POST: rotateResolveToken }),
   // FR-H1 devices
   route("/link", { GET: linkLanding }),
   route("/v1/device-links", { POST: createLink }),

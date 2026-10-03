@@ -43,6 +43,16 @@ name = "WRITE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 30, period = 60 }
 
+# NFR-H2: Workers Logs keeps console output only. Invocation logs record each request's URL,
+# and iroh's PkarrResolver puts its (resolve) token in the query of GET /pkarr/{key}. Do not
+# add a Logpush job with request URL fields for this Worker either.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
 # Expired OAuth transactions, device links, relay passes and sessions.
 [triggers]
 crons = ["17 * * * *"]

@@ -2,7 +2,7 @@
 
 import { accountDevice } from "./devices";
 import type { Deps, Env } from "./env";
-import { ApiError, json, noContent, principal } from "./http";
+import { ApiError, json, noContent, principal, resolvePrincipal } from "./http";
 import { endpointAddresses, parseDnsAnswers, splitRelayPayload, verifyRelayPayload, z32DecodeKey, z32Encode } from "./pkarr";
 import { base64url, fromBase64url, fromHex, nowSecs, toHex } from "./util";
 
@@ -51,11 +51,11 @@ async function storedPayload(env: Env, endpointId: string): Promise<Uint8Array> 
   return payload;
 }
 
-/** `GET /pkarr/{z32}`: same-account callers only; the token may be `?token=` for iroh's resolver. */
+/** `GET /pkarr/{z32}`: same-account callers only; iroh's resolver sends a resolve token as `?token=`. */
 export async function pkarrGet(request: Request, env: Env, deps: Deps, z32: string): Promise<Response> {
   const key = z32DecodeKey(z32);
   if (!key) throw ApiError.badRequest("malformed key");
-  const p = await principal(request, env, nowSecs(deps.nowMs()), { allowQuery: true });
+  const p = await resolvePrincipal(request, env, nowSecs(deps.nowMs()));
   const endpointId = toHex(key);
   await accountDevice(env, p, endpointId);
   const payload = await storedPayload(env, endpointId);

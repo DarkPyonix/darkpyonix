@@ -160,9 +160,22 @@ export async function linkDevice(
   deps: Deps,
   approver: { cookie?: string; token?: string },
   device: Device,
-  role: "main_server" | "computer" = "computer",
+  role: Role = "computer",
   name = "test device",
 ): Promise<string> {
+  return (await linkDeviceTokens(deps, approver, device, role, name)).device_token;
+}
+
+export type Role = "main_server" | "computer";
+
+/** The device-link flow, returning both tokens of the claim. */
+export async function linkDeviceTokens(
+  deps: Deps,
+  approver: { cookie?: string; token?: string },
+  device: Device,
+  role: Role = "computer",
+  name = "test device",
+): Promise<{ device_token: string; resolve_token: string }> {
   const created = await call(deps, "POST", "/v1/device-links", {
     json: { endpoint_id: device.endpointId, name, role },
   });
@@ -173,7 +186,7 @@ export async function linkDevice(
   const signature = toHex(await device.sign(utf8(`darkpyonix-hub/v2/link\n${link.link_id}\n${link.challenge}`)));
   const claimed = await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } });
   if (claimed.status !== 201) throw new Error(`claim: ${claimed.status} ${await claimed.text()}`);
-  return ((await claimed.json()) as { device_token: string }).device_token;
+  return (await claimed.json()) as { device_token: string; resolve_token: string };
 }
 
 // ---------------------------------------------------------------- pkarr packets
