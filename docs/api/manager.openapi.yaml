@@ -73,7 +73,7 @@ info:
     url: https://github.com/DarkPyonix/darkpyonix
 servers:
 - url: http://127.0.0.1:{port}
-  description: Ephemeral manager (port is in ~/.darkpyonix/managers/<pid>.json)
+  description: Ephemeral manager (url and token are printed on stdout to the process that started it)
   variables:
     port:
       default: '46881'
@@ -145,9 +145,9 @@ paths:
       - Kernels
       operationId: listKernels
       summary: List running kernels
-      description: 'Kernels found by multicast discovery merged with the registry fallback
+      description: 'Kernels found by loopback multicast discovery, the only discovery
 
-        (SPEC FR-D1, FR-D2). A share token sees only its own kernel.
+        (SPEC FR-D1, INTENT D4). A share token sees only its own kernel.
 
         '
       parameters:
@@ -1506,9 +1506,11 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: 'The manager''s master token, or a share token. An ephemeral manager writes its master
+      description: 'The manager''s master token, a file''s admin token (SPEC FR-A4), or a share token. An
 
-        token to `~/.darkpyonix/managers/<pid>.json` (mode 0600) for clients of the same OS user.
+        ephemeral manager prints its url and master token on stdout to the process that started it and
+
+        writes them nowhere else (INTENT D4, SPEC FR-C1).
 
         '
     tokenQuery:

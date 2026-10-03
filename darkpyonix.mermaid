@@ -268,10 +268,6 @@ classDiagram
             +bye() None
             -on_query(msg dict, addr) None
         }
-        class Registry {
-            +write(info dict) None
-            +remove() None
-        }
     }
     Kernel *-- KernelIdentity
     Kernel *-- FileLock
@@ -311,7 +307,6 @@ classDiagram
     AdoptedStream ..> EventLog : replay and live events
     ControlServer ..> EventLog : replay
     ClientSession ..> Executor : run / interrupt / restart
-    DiscoveryResponder ..> Registry : mirrors announce
 
     %% ───────────── Manager (darkpyonix.manager) ─────────────
     namespace manager {
@@ -353,7 +348,6 @@ classDiagram
         class DiscoveryClient {
             +query(kernel_id str|None) list~dict~
             +listen() None
-            +scan_registry() list~dict~
         }
         class KernelLauncher {
             +python str
@@ -419,14 +413,10 @@ classDiagram
             +touch() None
             +run() None
         }
-        class ManagerRegistry {
-            +publish(url str, token str) None
-            +find_alive()$ list~dict~
-        }
         class Cli {
             <<darkpyonix CLI>>
             +main(argv list) int
-            -ensure_manager() ManagerHandle
+            -spawn_manager() ManagerHandle
         }
     }
     ManagerApp --> ManagerMode
@@ -438,7 +428,6 @@ classDiagram
     ManagerApp *-- StreamHandoff
     StreamHandoff ..> KernelClient : adopt / streams.close
     AuthService ..> StreamHandoff : revoke closes streams
-    ManagerApp ..> ManagerRegistry : ephemeral only
     KernelDirectory *-- DiscoveryClient
     KernelDirectory *-- KernelLauncher
     KernelDirectory --> KernelInfo
@@ -450,7 +439,7 @@ classDiagram
     FileCredentials o-- ShareToken : per type
     Principal --> Permission
     ShareToken --> Permission
-    Cli ..> ManagerRegistry : finds or spawns
+    Cli ..> ManagerApp : spawns its own, reads url and token from stdout
     Cli ..> ManagerApp : HTTP
 
     %% ───────────── Wire boundaries ─────────────

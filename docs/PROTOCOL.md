@@ -11,12 +11,10 @@
 
 | 경로 | 권한 | 내용 |
 |---|---|---|
-| `user.key` | 0600 | 32바이트 무작위 키. 없으면 처음 쓰는 쪽이 원자적으로 만듭니다 |
-| `kernels/<kernel_id>.json` | 0644 | 발견 보조 등록. §2.4의 announce 본문과 같고 비밀값이 없습니다 |
+| `user.key` | 0600 | 32바이트 무작위 키. 없으면 처음 쓰는 쪽이 원자적으로 만듭니다(리더 결정, 사용자 확인 대기, INTENT D5) |
 | `kernels/<kernel_id>.log` | 0600 | 커널 자신의 진단 로그(사용자 출력이 아님) |
 | `locks/<kernel_id>.lock` | 0600 | 파일당 커널 하나를 보장하는 OS 잠금 |
 | `sockets/<kernel_id>.sock` | 0600 (폴더 0700) | POSIX 전용. 스트림 넘김(§3.7)을 받는 유닉스 도메인 소켓. 발견에는 쓰지 않습니다. 경로는 announce의 `handoff`로 알립니다 |
-| `managers/<pid>.json` | 0600 | 매니저의 `url`, `token`, `mode`, `pid`, `started_at` |
 
 ## 2. 발견 (UDP 멀티캐스트)
 
@@ -24,7 +22,8 @@
 
 - 그룹 `239.255.68.80`, 포트 `46880`, 인터페이스 `127.0.0.1`, TTL 0(호스트 밖으로 나가지 않음), `IP_MULTICAST_LOOP` 켬.
 - 커널과 매니저 모두 `SO_REUSEADDR`(가능하면 `SO_REUSEPORT`)로 같은 포트에 바인드하고 그룹에 가입합니다.
-- `DARKPYONIX_DISCOVERY=registry`이면 멀티캐스트를 쓰지 않고 등록 파일만 씁니다.
+- 발견은 이 멀티캐스트 하나입니다. 등록 파일(`kernels/<kernel_id>.json`, `managers/<pid>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 사용자 지시로 지웁니다(INTENT D4, 구현 대기 #50). 루프백 멀티캐스트가 막힌 환경과 WSL↔Windows 사이 발견은 지원 범위 밖입니다(SPEC FR-D3).
+- 그룹 주소와 포트는 리더 결정, 사용자 확인 대기입니다(INTENT D4, PROJECT Q14).
 
 ### 2.2 사용자 태그
 
@@ -59,7 +58,7 @@
 - 시작을 마쳤을 때, 상태(`status`, `run_id`)가 바뀔 때
 - 5초마다(생존 신호)
 
-`status`는 `starting | idle | busy | stopping`입니다. 커널은 announce와 같은 본문을 `kernels/<kernel_id>.json`에도 원자적으로 씁니다.
+`status`는 `starting | idle | busy | stopping`입니다. 커널은 announce를 파일로 남기지 않습니다(INTENT D4).
 
 ### 2.5 bye (커널 → 그룹)
 
@@ -67,7 +66,7 @@
 {"dkp": 1, "op": "bye", "user_tag": "…", "kernel_id": "k_…", "pid": 41234}
 ```
 
-정상 종료 직전에 보내고 등록 파일을 지웁니다. 비정상 종료 때는 보내지 못하므로 매니저는 15초 동안 announce가 없거나 `pid`가 살아 있지 않은 커널을 목록에서 뺍니다.
+정상 종료 직전에 보냅니다. 비정상 종료 때는 보내지 못하므로 매니저는 15초 동안 announce가 없거나 `pid`가 살아 있지 않은 커널을 목록에서 뺍니다.
 
 ### 2.6 커널 ID
 
