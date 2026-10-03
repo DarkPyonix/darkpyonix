@@ -129,7 +129,8 @@ impl ShareStore {
 
     pub fn authenticate(&self, token: &str) -> Option<Principal> {
         let digest = sha256_hex(token);
-        let row: Option<(String, String, String, Option<i64>, Option<String>)> = self
+        type ShareRow = (String, String, String, Option<i64>, Option<String>);
+        let row: Option<ShareRow> = self
             .lock()
             .query_row(
                 "SELECT share_id, kernel_id, permission, expires_unix, label FROM shares WHERE token_sha256 = ?1",

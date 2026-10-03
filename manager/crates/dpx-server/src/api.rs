@@ -974,6 +974,30 @@ struct CellEditBody {
     before: Option<String>,
     #[serde(default)]
     base_version: Option<i64>,
+    /// Absent = unchanged, `null` = clear (PROTOCOL §4); hence the double Option.
+    #[serde(default, deserialize_with = "present")]
+    title: Option<Option<String>>,
+}
+
+/// Deserialize a field that is present (possibly `null`) into `Some(..)`.
+fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+const REQUEST_HEADER: &str = "x-darkpyonix-request";
+
+/// Copy `X-DarkPyonix-Request` into the kernel params as `request_id` (PROTOCOL §4).
+fn with_rid(mut v: Value, headers: &HeaderMap) -> Value {
+    if let (Some(rid), Value::Object(m)) = (headers.get(REQUEST_HEADER).and_then(|h| h.to_str().ok()), &mut v) {
+        if !rid.is_empty() {
+            m.insert("request_id".into(), Value::String(rid.to_string()));
+        }
+    }
+    v
 }
 
 /// `{client, type?, source?, metadata?}` for `doc.cell.create` / `doc.cell.update`.
@@ -988,6 +1012,9 @@ fn edit_params(client: Value, b: &CellEditBody) -> Map<String, Value> {
     }
     if let Some(md) = &b.metadata {
         m.insert("metadata".into(), Value::Object(md.clone()));
+    }
+    if let Some(t) = &b.title {
+        m.insert("title".into(), t.clone().map(Value::String).unwrap_or(Value::Null));
     }
     m
 }
@@ -1015,7 +1042,7 @@ pub async fn create_cell(
         if let Some(bf) = &b.before {
             params.insert("before".into(), Value::String(bf.clone()));
         }
-        let res = call(&st, &kid, "doc.cell.create", Value::Object(params)).await?;
+        let res = call(&st, &kid, "doc.cell.create", with_rid(Value::Object(params), &headers)).await?;
         ok_json(StatusCode::CREATED, field(res, "cell")?)
     };
     finish(r.await, OP_CREATE_CELL)
@@ -1039,7 +1066,7 @@ pub async fn update_cell(
         let mut params = edit_params(client, &b);
         params.insert("cell_id".into(), Value::String(cell_id.clone()));
         params.insert("base_version".into(), json!(base));
-        let res = call(&st, &kid, "doc.cell.update", Value::Object(params)).await?;
+        let res = call(&st, &kid, "doc.cell.update", with_rid(Value::Object(params), &headers)).await?;
         ok_json(StatusCode::OK, field(res, "cell")?)
     };
     finish(r.await, OP_UPDATE_CELL)
@@ -1068,7 +1095,7 @@ pub async fn delete_cell(
             &st,
             &kid,
             "doc.cell.delete",
-            json!({ "client": client, "cell_id": cell_id, "base_version": base }),
+            with_rid(json!({ "client": client, "cell_id": cell_id, "base_version": base }), &headers),
         )
         .await?;
         Ok(StatusCode::NO_CONTENT.into_response())
@@ -1101,7 +1128,7 @@ pub async fn move_cell(
             &st,
             &kid,
             "doc.cell.move",
-            json!({ "client": client, "cell_id": cell_id, "to_index": b.to_index }),
+            with_rid(json!({ "client": client, "cell_id": cell_id, "to_index": b.to_index }), &headers),
         )
         .await?;
         ok_json(StatusCode::OK, field(res, "cell")?)
@@ -1121,7 +1148,7 @@ pub async fn lock_cell(
         check_cell(&cell_id)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         visible(&st, &p, &kid).await?;
-        let res = call(&st, &kid, "doc.lock", json!({ "client": client, "cell_id": cell_id })).await?;
+        let res = call(&st, &kid, "doc.lock", with_rid(json!({ "client": client, "cell_id": cell_id }), &headers)).await?;
         ok_json(StatusCode::OK, field(res, "lock")?)
     };
     finish(r.await, OP_LOCK_CELL)
@@ -1162,7 +1189,7 @@ pub async fn unlock_cell(
         if let Some(base) = b.base_version {
             params.insert("base_version".into(), json!(base));
         }
-        let res = call(&st, &kid, "doc.unlock", Value::Object(params)).await?;
+        let res = call(&st, &kid, "doc.unlock", with_rid(Value::Object(params), &headers)).await?;
         ok_json(StatusCode::OK, field(res, "cell")?)
     };
     finish(r.await, OP_UNLOCK_CELL)
@@ -1246,7 +1273,7 @@ pub async fn update_presence(
                 params.insert(key.to_string(), v.clone());
             }
         }
-        call(&st, &kid, "presence.update", Value::Object(params)).await?;
+        call(&st, &kid, "presence.update", with_rid(Value::Object(params), &headers)).await?;
         let snap = call(&st, &kid, "doc.snapshot", json!({})).await?;
         let presence = snap.get("presence").cloned().unwrap_or_else(|| json!([]));
         ok_json(StatusCode::OK, json!({ "presence": presence }))
@@ -1265,7 +1292,7 @@ pub async fn leave_presence(
         require(&p, Permission::Viewer1)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         visible(&st, &p, &kid).await?;
-        call(&st, &kid, "presence.leave", json!({ "client": client.clone() })).await?;
+        call(&st, &kid, "presence.leave", with_rid(json!({ "client": client.clone() }), &headers)).await?;
         if let Some(id) = client.get("client_id").and_then(Value::as_str) {
             st.avatars.lock().unwrap_or_else(|e| e.into_inner()).remove(&(kid.clone(), id.to_string()));
         }
