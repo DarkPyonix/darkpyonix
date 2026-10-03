@@ -242,43 +242,72 @@ def test_fr_s1_snapshot_plus_events_converge(nb):
 
 def test_fr_s1_snapshot_racing_edits_is_exact(nb):
     """``seq`` is the last event reflected in the snapshot: snapshot + events after ``seq``
-    equals the final state, with no edit lost or applied twice, even while edits race it."""
-    rec = Recorder()
+    equals the final state, with no edit lost or applied twice, even while edits race it.
 
-    def slow_emit(type_, data):  # widen the window between a change and its event
-        time.sleep(0.0002)
+    The race is forced, not hoped for: every event the kernel emits (which happens after the
+    state change, before the event reaches the log) asks a watcher thread for a snapshot and
+    holds the window open briefly, so the watcher's ``doc.snapshot`` is always issued while an
+    edit is half done. Each editor then waits until that snapshot is taken before its next
+    edit, so a lock that is not fair cannot starve the watcher until the edits are over.
+    """
+    rec = Recorder()
+    pace = threading.Condition()
+    counts = {"asked": 0, "taken": 0}
+    done = threading.Event()
+
+    def racing_emit(type_, data):  # runs mid-edit: state changed, event not yet in the log
+        with pace:
+            counts["asked"] += 1
+            pace.notify_all()
+        time.sleep(0.001)  # let the watcher reach doc.snapshot while this edit is unfinished
         rec(type_, data)
 
-    ds = DocumentState(nb, slow_emit, clock=FakeClock(), seq_provider=lambda: rec.log.seq)
+    ds = DocumentState(nb, racing_emit, clock=FakeClock(), seq_provider=lambda: rec.log.seq)
     c1 = ids(ds)[1]
-    done = threading.Event()
     errors = []
+
+    def wait_for_snapshot():
+        with pace:
+            mark = counts["asked"]
+            assert pace.wait_for(lambda: counts["taken"] >= mark, timeout=10), "watcher stalled"
 
     def editor(who, n):
         try:
             mine = []
             for i in range(n):
                 cell = ds.cell_create({"client": who, "after": c1, "source": "v = %d\n" % i})["cell"]
+                wait_for_snapshot()
                 cell = ds.cell_update({"client": who, "cell_id": cell["cell_id"],
                                        "base_version": cell["version"],
                                        "source": "v = %d  # edited\n" % i})["cell"]
+                wait_for_snapshot()
                 mine.append(cell)
                 if i % 3 == 0:
                     ds.cell_move({"client": who, "cell_id": cell["cell_id"], "to_index": 1})
+                    wait_for_snapshot()
                 if i % 4 == 1:
                     old = mine.pop(0)
                     ds.cell_delete({"client": who, "cell_id": old["cell_id"],
                                     "base_version": old["version"]})
+                    wait_for_snapshot()
                 ds.presence_update({"client": who, "focused_cell_id": cell["cell_id"]})
-        except Exception as e:  # pragma: no cover - reported below
+                wait_for_snapshot()
+        except BaseException as e:  # pragma: no cover - reported below
             errors.append(e)
 
     snaps = []
 
     def snapshotter():
-        while not done.is_set():
-            snaps.append(ds.snapshot({}))
-            time.sleep(0)  # yield; snapshots compete with the editors for the lock
+        while True:
+            with pace:
+                pace.wait_for(lambda: counts["asked"] > counts["taken"] or done.is_set())
+                if counts["asked"] == counts["taken"]:
+                    return
+                target = counts["asked"]
+            snaps.append(ds.snapshot({}))  # contends with the edit that asked for it
+            with pace:
+                counts["taken"] = max(counts["taken"], target)
+                pace.notify_all()
 
     threads = [threading.Thread(target=editor, args=(A, 40)),
                threading.Thread(target=editor, args=(B, 40))]
@@ -289,14 +318,16 @@ def test_fr_s1_snapshot_racing_edits_is_exact(nb):
     for t in threads:
         t.join()
     done.set()
+    with pace:
+        pace.notify_all()
     watcher.join()
     assert not errors, errors
 
     final = ds.snapshot({})
-    assert len(snaps) > 10
     mid = [s for s in snaps if 0 < s["seq"] < final["seq"]]
-    assert mid, "no snapshot raced the edits"
-    for snap in snaps[::max(1, len(snaps) // 150)]:
+    # Every edit asked for a snapshot, so the watcher saw most of the history, not just its ends.
+    assert len(set(s["seq"] for s in mid)) > final["seq"] // 4, "no snapshot raced the edits"
+    for snap in snaps:
         replica = Replica(snap)
         events, oldest = rec.log.since(snap["seq"])
         assert oldest is None
