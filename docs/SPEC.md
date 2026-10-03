@@ -343,13 +343,15 @@ OpenAI 계정 로그인을 지원하고, Codex 토큰 사용량 외에 Chat 사�
 `kernel/darkpyonix/kernel/`, `kernel/darkpyonix/*.py`, `kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `kernel/darkpyonix/kernel/mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
 - 테스트: `test_nfr_k2_kernel_imports_stdlib_only`, `test_nfr_k2_no_kernel_code_imports_the_matplotlib_backend`
 
-### NFR-K3 출력 오버헤드 — `Agreed`
+### NFR-K3 출력 오버헤드 — `Done`
 `print`를 100,000번 하는 셀의 실행 시간이 같은 인터프리터의 일반 실행 대비 1.5배를 넘지 않습니다. 구독자가 느려도 메인 스레드가 막히지 않습니다(출력 큐 상한을 넘으면 기록은 계속하되 실시간 이벤트를 합칩니다).
 - 측정 기록 (2026-10-03, macOS arm64, `test_nfr_k3_print_overhead`): 셀 안 100,000번 `print`를 파이프로 출력하는 일반 실행과 비교, 5회 중 최솟값의 프로세스 CPU 시간 비율은 3.9 1.08, 3.11 1.17, 3.13 1.24, 3.14 1.42, 3.15 1.21입니다. 측정 당시 머신의 부하 평균이 100을 넘어 벽시계 시간은 같은 측정 안에서도 0.7~8배로 흔들렸으므로 판정에 쓰지 않았습니다. 한가한 머신에서 벽시계 시간을 다시 재야 `Done`이 됩니다.
+- 측정 기록 (2026-10-03 14:2x, 맥미니 M 시리즈, 부하 평균 약 4.5, `test_nfr_k3_print_overhead` 3회): 벽시계 시간 비율(5회 중 최솟값끼리)은 3.8 1.17~1.23, 3.9 1.07~1.23, 3.10 1.11~1.13, 3.11 1.12~1.24, 3.12 1.14~1.16, 3.13 1.06~1.15, 3.14 1.14~1.19, 3.15 1.08~1.14로 모두 1.5배 이하입니다. 100,000줄 일반 실행은 16~25 ms였습니다.
 
-### NFR-K4 시작 시간 — `Agreed`
+### NFR-K4 시작 시간 — `Done`
 커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다.
-- 측정 기록: (구현 후 기입)
+- 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 4): `bootstrap_command`로 프로세스를 실행한 순간부터 등록 파일이 생길 때까지(등록 파일은 첫 멀티캐스트 announce 직전에 씁니다, `discovery.announce_now`) 7회 중앙값이 3.8 38 ms, 3.9 63 ms, 3.11 54 ms, 3.12 39 ms, 3.13 56 ms, 3.14 46 ms입니다. 같은 인터프리터의 `python -c pass`는 13~22 ms였습니다. 측정 스크립트는 `.scratch/k4/measure.py`(커밋하지 않음)입니다.
+- 참고: Rust 매니저의 `ensure()`(시작 요청부터 announce 수신까지)는 300~344 ms로, 커널 시작 외에 약 250 ms가 더 듭니다. 이 요구사항의 범위 밖이지만 FR-M2 쪽에서 원인을 따로 봅니다.
 
 ### NFR-M1 발견 지연 — `Agreed`
 매니저의 커널 목록 조회는 커널 20개에서 300 ms 이하입니다.
