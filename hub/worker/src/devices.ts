@@ -179,11 +179,16 @@ export async function getLinkCode(request: Request, env: Env, deps: Deps, code: 
 /** `POST /v1/link-codes/{user_code}` `{"approve": bool}` */
 export async function decideLinkCode(request: Request, env: Env, deps: Deps, code: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
-  const accountId = requireAccountAdmin(await principal(request, env, now));
+  const p = await principal(request, env, now);
+  const accountId = requireAccountAdmin(p);
   await limited(env, `link-code:${accountId}`);
   const body = await readJson<{ approve?: unknown }>(request);
   if (typeof body.approve !== "boolean") throw ApiError.badRequest("approve must be a boolean");
   const link = await pendingLinkByCode(env, code, now);
+  // A leaked main server token must not mint more devices with account rights.
+  if (body.approve && link.role === "main_server" && p.kind !== "session") {
+    throw ApiError.forbidden("only a signed-in session may approve a main_server link");
+  }
   const result = await env.DB.prepare(
     "UPDATE device_links SET status = ?, account_id = ? WHERE link_id = ? AND status = 'pending'",
   )

@@ -87,6 +87,20 @@ describe("device links", () => {
     expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token: computer, json: { approve: true } })).status).toBe(403);
   });
 
+  it("test_fr_h1_only_a_session_approves_a_main_server_link", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 9, login: "owner" });
+    const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
+    const link = await startLink(deps, (await newDevice()).endpointId, "main_server");
+    const byToken = await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token: main, json: { approve: true } });
+    expect(byToken.status).toBe(403);
+    // Still pending: the session can approve it.
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true } })).status).toBe(204);
+    // A main server token may still deny a main_server link.
+    const other = await startLink(deps, (await newDevice()).endpointId, "main_server");
+    expect((await call(deps, "POST", `/v1/link-codes/${other.user_code}`, { token: main, json: { approve: false } })).status).toBe(204);
+  });
+
   it("test_fr_h1_devices_are_scoped_to_their_account", async () => {
     const deps = makeDeps();
     const alice = await signIn(deps, { id: 6, login: "alice" });
