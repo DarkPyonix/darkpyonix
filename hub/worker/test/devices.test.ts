@@ -299,3 +299,64 @@ describe("device app (FR-H10)", () => {
     }
   });
 });
+
+describe("re-admitting removed keys (FR-H11)", () => {
+  async function removed(deps: ReturnType<typeof makeDeps>, id: number) {
+    const cookie = await signIn(deps, { id, login: "owner" });
+    const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
+    const device = await newDevice();
+    const oldToken = await linkDevice(deps, { cookie }, device, "main_server", "mac mini");
+    expect((await call(deps, "DELETE", `/v1/devices/${device.endpointId}`, { cookie })).status).toBe(204);
+    return { cookie, main, device, oldToken };
+  }
+
+  it("test_fr_h11_owner_readmits_a_removed_key", async () => {
+    const deps = makeDeps();
+    const { cookie, main, device, oldToken } = await removed(deps, 18);
+    const ask = () => call(deps, "POST", "/v1/device-links", { json: { endpoint_id: device.endpointId, name: "mac mini", role: "computer" } });
+    expect((await ask()).status).toBe(409);
+    expect((await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { token: main })).status).toBe(403);
+    const opened = await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { cookie });
+    expect(opened.status).toBe(200);
+    expect(await opened.json()).toMatchObject({ endpoint_id: device.endpointId, expires_at: expect.any(Number) });
+    const created = await ask();
+    expect(created.status).toBe(201);
+    const link = (await created.json()) as { link_id: string; user_code: string; challenge: string };
+    // Even for a computer link, only a session approves a re-admitted key.
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token: main, json: { approve: true } })).status).toBe(403);
+    const stranger = await signIn(deps, { id: 19, login: "stranger" });
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie: stranger, json: { approve: true } })).status).toBe(403);
+    expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { cookie, json: { approve: true } })).status).toBe(204);
+    const signature = toHex(await device.sign(utf8(`darkpyonix-hub/v2/link\n${link.link_id}\n${link.challenge}`)));
+    const claimed = await call(deps, "POST", `/v1/device-links/${link.link_id}/token`, { json: { signature } });
+    expect(claimed.status).toBe(201);
+    const { device_token: token } = (await claimed.json()) as { device_token: string };
+    const back = await call(deps, "GET", `/v1/devices/${device.endpointId}`, { token });
+    expect(back.status).toBe(200);
+    expect(await back.json()).toMatchObject({ role: "computer", app: null });
+    const old = await call(deps, "GET", "/v1/devices", { token: oldToken });
+    expect(old.status).toBe(401);
+    expect(((await old.json()) as { code: string }).code).toBe("invalid_credentials");
+  });
+
+  it("test_fr_h11_readmission_expires", async () => {
+    let now = Date.now();
+    const deps = makeDeps({ nowMs: () => now });
+    const { cookie, device } = await removed(deps, 20);
+    expect((await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { cookie })).status).toBe(200);
+    now += 901_000;
+    const late = await call(deps, "POST", "/v1/device-links", { json: { endpoint_id: device.endpointId, name: "x", role: "computer" } });
+    expect(late.status).toBe(409);
+  });
+
+  it("test_fr_h11_readmit_needs_a_removed_device_of_the_account", async () => {
+    const deps = makeDeps();
+    const { cookie, device } = await removed(deps, 23);
+    const active = await newDevice();
+    await linkDevice(deps, { cookie }, active);
+    expect((await call(deps, "POST", `/v1/devices/${active.endpointId}/readmit`, { cookie })).status).toBe(409);
+    const stranger = await signIn(deps, { id: 24, login: "stranger" });
+    expect((await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { cookie: stranger })).status).toBe(404);
+    expect((await call(deps, "POST", `/v1/devices/${"ab".repeat(32)}/readmit`, { cookie })).status).toBe(404);
+  });
+});

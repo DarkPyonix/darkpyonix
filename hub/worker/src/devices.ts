@@ -141,10 +141,16 @@ export async function createLink(request: Request, env: Env, deps: Deps): Promis
   }
   if (!validDeviceName(body.name)) throw ApiError.badRequest("name must be 1 to 64 characters");
   if (!validRole(body.role)) throw ApiError.badRequest("role must be main_server, computer or client");
-  const taken = await env.DB.prepare("SELECT 1 AS x FROM devices WHERE endpoint_id = ?").bind(endpointId).first();
-  if (taken) throw ApiError.conflict("endpoint id already registered (removed keys are not reused)");
-
   const now = nowSecs(deps.nowMs());
+  const taken = await env.DB.prepare("SELECT revoked_at, readmit_until FROM devices WHERE endpoint_id = ?")
+    .bind(endpointId)
+    .first<{ revoked_at: number | null; readmit_until: number | null }>();
+  // A removed key comes back only while its owner has re-admitted it (FR-H11).
+  const readmitted = taken !== null && taken.revoked_at !== null && (taken.readmit_until ?? 0) > now;
+  if (taken && !readmitted) {
+    throw ApiError.conflict("endpoint id already registered, or removed and not re-admitted");
+  }
+
   const linkId = `l_${randomHex(16)}`;
   const challenge = randomHex(32);
   const expiresAt = now + LINK_TTL_SECS;
@@ -223,6 +229,15 @@ export async function decideLinkCode(request: Request, env: Env, deps: Deps, cod
   if (body.approve && link.role === "main_server" && p.kind !== "session") {
     throw ApiError.forbidden("only a signed-in session may approve a main_server link");
   }
+  // A removed key's return is the owner's call alone (FR-H11).
+  if (body.approve) {
+    const known = await env.DB.prepare("SELECT account_id FROM devices WHERE endpoint_id = ?")
+      .bind(link.endpoint_id)
+      .first<{ account_id: string }>();
+    if (known && (p.kind !== "session" || p.accountId !== known.account_id)) {
+      throw ApiError.forbidden("only a signed-in session of its account may re-admit a removed key");
+    }
+  }
   const result = await env.DB.prepare(
     "UPDATE device_links SET status = ?, account_id = ? WHERE link_id = ? AND status = 'pending'",
   )
@@ -285,26 +300,32 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
 
   const token = newToken("dpd_");
   const resolveToken = newToken(RESOLVE_TOKEN_PREFIX);
-  const device: DeviceRow = {
-    endpoint_id: link.endpoint_id,
-    account_id: link.account_id,
-    name: link.name,
-    role: link.role,
-    created_at: now,
-    last_seen: null,
-    online: 0,
-    app: null,
-  };
-  try {
-    await env.DB.prepare(
-      `INSERT INTO devices (endpoint_id, account_id, name, role, token_hash, resolve_token_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(device.endpoint_id, device.account_id, device.name, device.role, await hashToken(token), await hashToken(resolveToken), now)
-      .run();
-  } catch {
-    throw ApiError.conflict("endpoint id already registered");
+  const tokenHash = await hashToken(token);
+  const resolveHash = await hashToken(resolveToken);
+  // A re-admitted removed key (FR-H11) gets its row back with new tokens; anything else is new.
+  const restored = await env.DB.prepare(
+    `UPDATE devices SET revoked_at = NULL, readmit_until = NULL, name = ?, role = ?, token_hash = ?,
+       resolve_token_hash = ?, last_seen = NULL, online = 0, app = NULL
+     WHERE endpoint_id = ? AND account_id = ? AND revoked_at IS NOT NULL AND readmit_until IS NOT NULL`,
+  )
+    .bind(link.name, link.role, tokenHash, resolveHash, link.endpoint_id, link.account_id)
+    .run();
+  if (restored.meta.changes !== 1) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO devices (endpoint_id, account_id, name, role, token_hash, resolve_token_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(link.endpoint_id, link.account_id, link.name, link.role, tokenHash, resolveHash, now)
+        .run();
+    } catch {
+      throw ApiError.conflict("endpoint id already registered");
+    }
   }
+  const device = await env.DB.prepare("SELECT * FROM devices WHERE endpoint_id = ?")
+    .bind(link.endpoint_id)
+    .first<DeviceRow>();
+  if (!device) throw ApiError.conflict("endpoint id already registered");
   return json(201, { device: deviceJson(device), device_token: token, resolve_token: resolveToken });
 }
 
@@ -385,6 +406,23 @@ export async function updateDevice(request: Request, env: Env, deps: Deps, endpo
     .bind(...values, accountId, endpointId)
     .run();
   return json(200, deviceJson(await accountDevice(env, p, endpointId)));
+}
+
+/** `POST /v1/devices/{endpoint_id}/readmit`: the owner lets a removed key link again (FR-H11). */
+export async function readmitDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
+  const now = nowSecs(deps.nowMs());
+  const p = await principal(request, env, now);
+  if (p.kind !== "session") throw ApiError.forbidden("only a signed-in session may re-admit a removed key");
+  const row = await env.DB.prepare("SELECT revoked_at FROM devices WHERE endpoint_id = ? AND account_id = ?")
+    .bind(endpointId, p.accountId)
+    .first<{ revoked_at: number | null }>();
+  if (!row) throw ApiError.notFound();
+  if (row.revoked_at === null) throw ApiError.conflict("the device is not removed");
+  const expiresAt = now + LINK_TTL_SECS;
+  await env.DB.prepare("UPDATE devices SET readmit_until = ? WHERE endpoint_id = ? AND account_id = ? AND revoked_at IS NOT NULL")
+    .bind(expiresAt, endpointId, p.accountId)
+    .run();
+  return json(200, { endpoint_id: endpointId, expires_at: expiresAt });
 }
 
 /** Tells the relay host to drop a removed device's connections (best effort; SPEC FR-H3). */
