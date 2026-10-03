@@ -341,7 +341,11 @@ paths:
       tags: [Devices]
       operationId: decideLinkCode
       summary: Approve or deny a device into the caller's account
-      description: Account rights required. Approving adds the device to the caller's account.
+      description: |
+        Account rights required. Approving adds the device to the caller's account.
+        Approving a link that asks for the `main_server` role needs a signed-in browser
+        session; a main server's device token gets 403 for it (it may still deny it), so a
+        leaked main server token cannot mint more devices with account rights.
       requestBody:
         required: true
         content:
@@ -359,7 +363,7 @@ paths:
         "401":
           description: No valid session or device token.
         "403":
-          description: A computer's device token, or a cross-origin cookie request.
+          description: A computer's device token; a device token approving a `main_server` link; or a cross-origin cookie request.
         "404":
           description: Unknown, decided or expired code.
         "429":
