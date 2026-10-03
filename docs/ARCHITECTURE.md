@@ -118,7 +118,7 @@ sequenceDiagram
   participant K as kernel (train.py)
   participant FS as ~/.darkpyonix
 
-  A->>M: POST /api/v1/kernels {path: train.py}
+  A->>M: POST /api/kernels {path: train.py}
   M->>M: kernel_id = H(정규화 경로)
   M->>K: 멀티캐스트 query {kernel_id}
   alt 이미 살아 있음

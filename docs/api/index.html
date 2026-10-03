@@ -163,7 +163,7 @@
 
   function load(spec) {
     buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.spec === spec)); });
-    statusEl.textContent = spec.indexOf('hub') === 0 ? 'Draft · FR-H' : 'Agreed · v1';
+    statusEl.textContent = spec.indexOf('hub') === 0 ? 'Draft · FR-H' : 'Agreed';
     var u = new URL(location.href); u.searchParams.set('spec', spec); history.replaceState(null, '', u);
     window.ui = SwaggerUIBundle({
       url: spec,
