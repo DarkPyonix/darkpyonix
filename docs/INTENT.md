@@ -81,7 +81,7 @@ DarkPyonix 전체는 **에이전트 대화가 먼저이고, 필요할 때 코딩
 처음에는 FastAPI 매니저 앞에 nginx를 둘 생각이었습니다. 사용자 결정(2026-10-03): "nginx가 유저들한테 불편을 줄 것 같아. 혹시 매니저 자체를 rust로 대체할 수 있는 부분을 대체해서 nginx 없이도 빠른 속도를 내도록 해줄 수 있어?" 그래서 매니저와 CLI를 Rust 바이너리 `darkpyonix` 하나로 만듭니다.
 
 - 이 바이너리 하나가 HTTP/1.1·HTTP/2, SSE, WebSocket, TLS(rustls, 전용 모드는 ACME로 인증서 자동 발급), API 문서 페이지, 리버스 프록시(VS Code `serve-web` 등)를 직접 맡습니다. nginx가 하던 일이 모두 여기 들어오므로 사용자는 따로 설정할 것이 없습니다.
-- 매니저는 커널에 접근하는 API만 제공합니다. ash는 매니저가 서빙하지 않습니다. ash는 darkpyonix.dev 루트의 프런트가 호스팅하고(D15 개정, FR-H12), 매니저 API에 공유 토큰으로 붙습니다(FR-H4). 사용자 지적(2026-10-03): "ash은 darkpyonix.dev에서 배포되는거고 ember나 커널 매니저가 관계되는게 아니야. 커널 매니저는 접근 api만 주는거라고."
+- 매니저는 커널에 접근하는 API만 제공합니다. ash는 매니저가 서빙하지 않습니다. ash는 darkpyonix.dev 루트의 메인 페이지로 배포되고(darkpyonix-ash가 빌드·배포, D15 개정, FR-H12), 매니저 API에 공유 토큰으로 붙습니다(FR-H4). 사용자 지적(2026-10-03): "ash은 darkpyonix.dev에서 배포되는거고 ember나 커널 매니저가 관계되는게 아니야. 커널 매니저는 접근 api만 주는거라고."
 - CLI도 같은 바이너리입니다. 에이전트가 수없이 부르는 `darkpyonix run/stop/logs`가 인터프리터 기동 없이 바로 뜹니다.
 - 커널은 여전히 표준 라이브러리 파이썬입니다(§2 조건 1–2). 바이너리는 커널 소스를 안에 담고 있다가 런타임 홈(`~/.darkpyonix/runtime/<버전>/`)에 풀어서 부트스트랩합니다(D3). 그래서 바이너리 하나만 깔아도 동작합니다. PyPI에는 같은 바이너리를 담은 휠(maturin `bin`)과 런타임 API 패키지를 냅니다.
 - 계약은 그대로 `docs/api/manager.openapi.yaml`입니다. 테스트는 언어와 무관하게 HTTP 표면을 대상으로 파이썬 pytest로 돌립니다(SPEC NFR-M3).
@@ -107,33 +107,37 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 
 사용자 결정(2026-10-03): "dns는 클라우드 플레어고 허브 운영은 허브가 가볍다면 클라우드 플레어 워커를 쓰고 싶어. 계정 생성은 내가 분명히 OpenAI 로그인으로 한다고 했을 텐데?" 이어서 같은 날: "OpenAI 로그인은 엠버 서버에서 사용자가 자체적으로 하는걸로 하고 허브는 깃허브 로그인으로 하자." 그래서 허브(SPEC §10)를 이렇게 바꿉니다.
 
-- **허브 API는 Cloudflare Worker입니다(`hub/worker/`).** 허브가 하는 일 대부분은 서명 검증 한 번과 작은 행 몇 개를 읽고 쓰는 HTTP 요청입니다(기기 10대면 하루 수천 건). 이 정도면 Workers로 충분히 가볍고, DNS가 이미 Cloudflare라 ACME TXT 게시(FR-H5)도 같은 계정의 API 토큰 하나로 됩니다. 이 Worker는 `api.darkpyonix.dev`에 붙고, ash는 루트(`darkpyonix.dev`)의 프런트가 냅니다(아래 개정).
+- **허브 API는 Cloudflare Worker입니다(`hub/worker/`).** 허브가 하는 일 대부분은 서명 검증 한 번과 작은 행 몇 개를 읽고 쓰는 HTTP 요청입니다(기기 10대면 하루 수천 건). 이 정도면 Workers로 충분히 가볍고, DNS가 이미 Cloudflare라 ACME TXT 게시(FR-H5)도 같은 계정의 API 토큰 하나로 됩니다. 이 Worker는 `api.darkpyonix.dev`에 붙고, ash는 루트(`darkpyonix.dev`)의 메인 페이지가 냅니다(아래 개정).
 - **언어는 TypeScript입니다(workers-rs가 아님).** Workers의 1급 언어라 D1·정적 자산·Rate Limiting·Cron 바인딩을 그대로 쓰고, `@cloudflare/vitest-pool-workers`(miniflare)로 실제 D1 위에서 테스트합니다. Web Crypto에 ed25519가 있어 서명 검증에 의존성이 없습니다. workers-rs는 `iroh-dns`의 `SignedPacket`을 재사용할 수 있다는 장점이 있지만, wasm 빌드 도구(worker-build)와 더 큰 번들, 덜 성숙한 D1 바인딩을 떠안습니다. 다시 구현하는 iroh 부분은 pkarr 패킷 형식과 DNS 응답 파싱 약 200줄뿐이고, 형식이 iroh-dns 1.3과 같은지는 테스트와 배포 후 Rust 쪽 시험 벡터로 확인합니다.
 - **저장소는 D1 하나입니다.** 허브가 원자적으로 해야 하는 일(일회용 거래와 챌린지 소비, "더 새 패킷만" 저장, 기기 링크를 한 번만 받기)은 모두 SQLite 한 문장(`DELETE … RETURNING`, 조건부 upsert, 조건부 `UPDATE`)으로 됩니다. Durable Objects는 지금 필요 없고, 릴레이를 Container로 옮길 때만 그 바인딩으로 들어옵니다.
 - **릴레이는 UDP를 받는 곳에 둡니다(`relay.darkpyonix.dev`, `hub/server/`).** Workers와 Containers는 들어오는 UDP를 받지 않아 iroh의 QUIC 주소 발견(QAD, UDP 7842)을 낼 수 없습니다. QAD가 없으면 기기가 자기 공인 주소를 몰라 직접 연결이 줄어듭니다. 그래서 작은 VPS에서 iroh-relay와 QAD를 함께 돌리는 것으로 시작하고, ember NFR-N1 측정에서 QAD를 끈 직접 연결 비율도 기준(85%)을 넘으면 릴레이를 Cloudflare Container로 옮깁니다(SPEC FR-H3). 릴레이는 누구를 들일지 Worker에 묻습니다.
 - **`hub/server`(axum 크레이트)는 릴레이 호스트로 남깁니다.** iroh-relay 서버 크레이트를 쓰는 Rust 코드라 VPS에서 그대로 돌고, Worker로 옮긴 API·SQLite 부분은 빌드할 수 있을 때 걷어 냅니다. 그 전까지 그 부분은 배포하지 않는 D15 이전 구현입니다.
 - **계정은 GitHub 로그인입니다(FR-H6).** 인가 코드 + PKCE(S256) + state로 GitHub 사용자 ID를 계정의 정체로 삼고, GitHub 토큰은 사용자 정보를 읽은 뒤 바로 폐기합니다. 기기는 기기 링크로 그 계정에 들어옵니다(FR-H1). 원격 호스팅 서비스가 "Sign in with ChatGPT"를 쓰려면 OpenAI의 신청과 승인이 필요하고(웹사이트 통합은 2026-10 현재 일부 상업 파트너 대상 시범), 허브가 받을 수 있는 OpenAI ID 토큰도 없습니다. ember server가 동적 등록으로 받는 `client_id`는 설치마다 다르고 그 사용자에게 묶여 있어서, 허브가 그 토큰을 받으려면 audience를 검사하지 않아야 합니다. 그러면 사용자가 로그인한 아무 앱의 ID 토큰으로도 그 사용자 계정을 가로챌 수 있습니다. 그래서 OpenAI 로그인과 플랜 사용은 ember server에만 두고(PROJECT Q2), 허브는 GitHub를 씁니다.
 
-**개정(2026-10-03, 제안): 호스트 역할 분담과 ash 노트북 호스팅.** 같은 날 사용자 결정이 셋 이어졌습니다.
+**개정(2026-10-03, 제안): 호스트 역할 분담과 ash 노트북 호스팅.** 같은 날 사용자 결정이 이어졌습니다.
 
 1. 매니저는 커널 접근 API만 줍니다(D10): "커널 매니저는 접근 api만 주는거라고." ash는 매니저가 아니라 darkpyonix.dev가 배포합니다.
 2. 허브의 범위는 "ash 노트북 호스팅까지"입니다. 허브는 자리표시 뷰어를 내는 데서 그치지 않고 노트북을 보관·게시하고(공개 링크, 판), 커널 없이 저장된 결과를 읽기 전용으로 보여 줍니다.
-3. 도메인은 역할로 나눕니다: "동적 기능은 서브 도메인으로 해놓고, 루트 darkpyonix.dev가 그걸 띄우도록 할건데? 역할 분담을 좀 시켜야지. ... 루트 darkpyonix.dev는 가이드가 아니야."
+3. 도메인은 역할로 나눕니다: "동적 기능은 서브 도메인으로 해놓고, 루트 darkpyonix.dev가 그걸 띄우도록 할건데? 역할 분담을 좀 시켜야지."
+4. 루트는 메인 페이지이고 가이드는 제자리입니다: "darkpyonix.dev/는 메인 페이지고 darkpyonix.dev/dioxus-compose는 가이드인거잖아." 가이드를 다른 호스트로 옮기지 않습니다.
+5. 루트 프런트는 darkpyonix-ash가 빌드하고 배포합니다("darkpyonix-ash").
 
 그래서 호스트를 이렇게 나눕니다(SPEC FR-H12).
 
 | 호스트 | 맡는 일 | 구현 | 배포 |
 |---|---|---|---|
-| `darkpyonix.dev`(루트) | **프런트.** 랜딩과 ash 웹 앱(노트북 보기·편집, 공유 링크 `/s/<id>#<token>`, 노트북 링크 `/n/<id>`, 기기 승인 `/link`). 정적 파일만 내고 아래 서브도메인의 API를 부릅니다 | darkpyonix-ash 웹 빌드 + 랜딩 | Cloudflare Workers 정적 자산(정적 전용 Worker, apex custom domain) |
+| `darkpyonix.dev/`(루트) | **메인 페이지(프런트).** 랜딩과 ash 웹 앱(노트북 링크 `/n/<id>`, 공유 링크 `/s/<id>#<token>`, 기기 승인 `/link`, 올리기 `/new`). 정적 파일만 내고 아래 서브도메인의 API와 릴레이를 부릅니다 | darkpyonix-ash 웹 빌드 | 조직 GitHub Pages 사이트 `DarkPyonix/DarkPyonix.github.io`(지금 그대로, custom domain `darkpyonix.dev`). ash CI가 빌드 결과를 그 저장소에 커밋합니다 |
+| `darkpyonix.dev/<저장소>/` | **프로젝트 가이드**(예: `/dioxus-compose/`) | 각 저장소 | 각 저장소의 GitHub Pages 프로젝트 사이트(지금 그대로) |
 | `api.darkpyonix.dev` | **허브 API.** GitHub 로그인, 기기, 주소 디렉터리, 공유, 이름, 노트북 보관 | `hub/worker/`(TypeScript, D1, R2) | Cloudflare Worker(custom domain) |
 | `relay.darkpyonix.dev` | iroh 릴레이와 QAD | `hub/server/`(Rust) | VPS, DNS only(FR-H3) |
-| `docs.darkpyonix.dev` | 프로젝트 가이드(`/<저장소>/`) | 각 저장소의 GitHub Pages | 조직 Pages 사이트(`DarkPyonix.github.io`)의 custom domain |
 
-- **루트는 가이드가 아닙니다.** 지금 루트는 조직 Pages 사이트이고 프로젝트 가이드가 `darkpyonix.dev/<저장소>/`에 붙습니다. 루트를 프런트로 바꾸면서 조직 Pages의 custom domain을 `docs.darkpyonix.dev`로 옮깁니다. 그러면 GitHub가 프로젝트 가이드를 `docs.darkpyonix.dev/<저장소>/`로 함께 옮기고, 루트 프런트는 옛 가이드 주소를 새 주소로 영구 이동(301)합니다.
-- **루트를 GitHub Pages가 아니라 Workers 정적 자산으로 냅니다.** 프런트에는 GitHub Pages가 못 하는 것이 필요합니다. `/n/<id>`, `/s/<id>` 같은 경로를 200으로 SPA에 넘기기(Pages는 `404.html` 우회뿐이라 상태가 404), 응답 헤더(CSP, `X-Frame-Options`, 필요하면 Pyodide를 위한 COOP/COEP), 프런트 경로와 저장소 이름이 한 이름공간에서 부딪히지 않기입니다. Workers 정적 자산은 `_headers`·`_redirects`와 SPA 처리를 그대로 지원하고, DNS와 같은 Cloudflare 계정에서 배포됩니다.
-- **동적인 것은 모두 서브도메인입니다.** 프런트는 쿠키도 서버 코드도 갖지 않습니다. 브라우저 세션 쿠키는 `api.darkpyonix.dev`가 호스트 전용(`__Host-`)으로 두고, 프런트는 자격 증명을 실은 CORS 요청으로 API를 부릅니다. 두 호스트는 같은 사이트(site)라 `SameSite=Lax` 쿠키가 그대로 실리고, 서드파티 쿠키 차단에 걸리지 않습니다. GitHub OAuth 콜백도 API 호스트(`https://api.darkpyonix.dev/auth/callback`)입니다(SPEC FR-H13).
-- **노트북 본문은 R2, 목록과 권한은 D1입니다.** D1의 행·값 상한(약 2 MB)과 데이터베이스 크기 때문에 실행 기록(`.ipynb`, 출력 포함 수 MiB)을 D1에 넣을 수 없습니다. 본문은 Worker 뒤의 비공개 R2 버킷에 두고, 접근 판단은 언제나 Worker가 합니다. R2 공개 버킷이나 별도 콘텐츠 호스트(`nb.darkpyonix.dev`)는 두지 않습니다. 비공개 노트북의 권한 검사를 우회하게 되고, 지금 얻는 것이 없습니다(SPEC FR-H14).
-- **남의 노트북 내용은 프런트 출처에서 실행하지 않습니다.** 저장된 출력의 `text/html`·스크립트와 ash가 브라우저에서 돌리는 코드는 남이 쓴 것입니다. 프런트 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로, 그 내용은 출처가 없는(opaque) 샌드박스 iframe에서만 돌립니다(SPEC NFR-H3).
+- **루트는 정적이고, 동적인 것은 모두 서브도메인입니다.** 루트에는 서버 코드, 쿠키, 비밀값이 없습니다. 메인 페이지와 ash 웹 앱은 브라우저에서 `api.darkpyonix.dev`와 `relay.darkpyonix.dev`를 불러 동적인 일을 띄웁니다. 그래서 루트는 정적 호스팅이면 충분하고, 지금처럼 조직 Pages 사이트로 둡니다. DNS(apex의 GitHub Pages A/AAAA, `www`)도 바꾸지 않습니다.
+- **가이드와 메인 페이지는 한 호스트의 경로를 나눠 씁니다.** GitHub Pages는 `darkpyonix.dev/<저장소>/`를 그 저장소의 프로젝트 사이트로 먼저 보내고, 나머지 경로를 조직 사이트(메인 페이지)가 받습니다. 그래서 메인 페이지는 프로젝트 사이트가 있는 저장소 이름을 최상위 경로로 쓰지 않고, 조직은 메인 페이지의 최상위 경로(`n`, `s`, `link`, `new`, `assets`)와 같은 이름의 저장소에 Pages를 켜지 않습니다(SPEC FR-H12).
+- **배포는 ash 저장소 하나가 끝냅니다.** darkpyonix-ash CI가 웹 빌드를 만들고, `DarkPyonix.github.io`에 쓰기 권한이 있는 배포 키로 그 저장소의 `main`에 빌드 결과를 커밋해 올립니다(Pages는 지금처럼 `main`의 루트에서 냅니다). 조직 사이트 저장소에는 워크플로가 없고 빌드 결과만 있습니다. 빌드 결과에는 `CNAME`, `.nojekyll`, Flathub 검증 파일(FR-H7)이 함께 들어갑니다.
+- **GitHub Pages로 둘 때의 대가와 처리.** (1) `/n/<id>`, `/s/<id>` 같은 동적 경로에는 파일이 없으므로 `404.html`(앱 HTML과 같은 내용)이 받습니다. 앱은 뜨지만 HTTP 상태는 404라 검색 엔진과 링크 미리보기는 그 페이지를 못 씁니다. `/`, `/link`, `/new`는 실제 파일을 둬서 200입니다. (2) 응답 헤더를 정할 수 없습니다. CSP는 `<meta http-equiv>`로 두고(`frame-ancestors`는 meta로 안 되므로 빠짐), 클릭재킹은 API 세션 쿠키의 `SameSite=Lax`(남의 사이트 안에 끼워진 프런트의 요청에는 쿠키가 실리지 않음)와 앱의 프레임 검사로 막습니다. (3) COOP/COEP 헤더가 없으므로 교차 출처 격리(`SharedArrayBuffer`)가 필요하면 서비스 워커로 헤더를 덧붙입니다. ash(Starboard)는 이미 그 서비스 워커를 갖고 있고, 없으면 Pyodide를 메인 스레드에서 돌립니다. 호스팅한 노트북 보기(FR-H16)와 라이브 커널 열기(FR-H17)는 Pyodide를 쓰지 않으므로 격리가 필요 없습니다(SPEC FR-H12).
+- **브라우저 세션은 API 호스트에 있습니다.** 세션 쿠키는 `api.darkpyonix.dev`가 호스트 전용(`__Host-`)으로 두고, 메인 페이지는 자격 증명을 실은 CORS 요청으로 API를 부릅니다. 두 호스트는 같은 사이트(site)라 `SameSite=Lax` 쿠키가 그대로 실리고, 서드파티 쿠키 차단에 걸리지 않습니다. GitHub OAuth 콜백도 API 호스트(`https://api.darkpyonix.dev/auth/callback`)이고, 끝나면 메인 페이지의 경로로 돌아옵니다(SPEC FR-H13).
+- **노트북 본문은 R2, 목록과 권한은 D1입니다.** D1의 행·값 상한(약 2 MB)과 데이터베이스 크기 때문에 실행 기록(`.ipynb`, 출력 포함 수 MiB)을 D1에 넣을 수 없습니다. 본문은 Worker 뒤의 비공개 R2 버킷에 두고, 접근 판단은 언제나 Worker가 합니다. 본문을 R2 공개 버킷이나 별도 호스트에서 직접 내지 않습니다. 비공개 노트북의 권한 검사를 우회하게 되기 때문입니다(SPEC FR-H14).
+- **남의 노트북 내용은 메인 페이지 출처에서 실행하지 않습니다.** 저장된 출력의 `text/html`·스크립트와 ash가 브라우저에서 돌리는 코드는 남이 쓴 것입니다. 메인 페이지 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로, 그 내용은 출처가 없는(opaque) 샌드박스 iframe에서만 돌립니다(SPEC NFR-H3). 그 iframe을 별도 등록 도메인(사용자 콘텐츠 도메인)에서 띄울지는 열린 질문입니다(PROJECT Q10).
 - **노트북 호스팅은 커널 호스팅이 아닙니다.** 허브는 노트북을 보관하고 보여 줄 뿐 코드를 실행하지 않습니다. 살아 있는 커널은 언제나 사용자의 기기에 있고, 노트북 페이지가 공유 토큰(URL 조각)으로 그 기기의 전용 매니저에 릴레이·P2P로 붙습니다(FR-H4, FR-H17). 허브는 그 토큰을 보지 않습니다.
 
 ## 4. 폐기한 대안
@@ -155,9 +159,10 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 | workers-rs로 허브 API 작성 | wasm 빌드 도구와 큰 번들, 덜 성숙한 D1 바인딩. iroh에서 재사용할 부분이 작습니다(D15) |
 | 주소 디렉터리를 키마다 Durable Object로 | D1의 조건부 upsert 한 문장으로 "더 새 것만"이 원자적입니다. 객체를 늘릴 이유가 없습니다(D15) |
 | 릴레이는 Cloudflare Container, QAD만 따로 VPS | iroh에서 QAD는 릴레이 목록의 항목마다 붙어서 QAD 호스트도 릴레이 항목이 되고 릴레이를 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 됩니다(SPEC FR-H3) |
-| 루트 `darkpyonix.dev`에 허브 API와 ash를 함께(D15 처음 안) | 사용자 결정(2026-10-03): 동적 기능은 서브도메인, 루트는 그것을 띄우는 프런트. API는 `api.darkpyonix.dev`로 옮깁니다(D15 개정) |
-| 루트를 프로젝트 가이드 사이트로 유지 | 사용자 지적(2026-10-03): "루트 darkpyonix.dev는 가이드가 아니야." 가이드는 `docs.darkpyonix.dev/<저장소>/`로 옮깁니다(D15 개정) |
-| 루트 프런트를 조직 GitHub Pages로 | 동적 경로가 404 상태로만 되고, 응답 헤더(CSP, COOP/COEP)를 둘 수 없으며, 프런트 경로와 가이드 경로가 한 이름공간을 나눠 씁니다(D15 개정) |
+| 루트 `darkpyonix.dev`에 허브 API와 ash를 함께(D15 처음 안) | 사용자 결정(2026-10-03): 동적 기능은 서브도메인, 루트는 그것을 띄우는 메인 페이지. API는 `api.darkpyonix.dev`로 옮깁니다(D15 개정) |
+| 프로젝트 가이드를 `docs.darkpyonix.dev`로 옮기고 루트를 Workers 정적 자산으로(D15 개정의 첫 제안) | 사용자 지적(2026-10-03): "darkpyonix.dev/는 메인 페이지고 darkpyonix.dev/dioxus-compose는 가이드인거잖아." 시키지 않은 이동이었습니다. 가이드 주소가 바뀌고 apex DNS를 옮겨야 하며, 루트가 정적이라 Workers가 더 줄 것이 헤더와 200 상태뿐입니다. 그 둘은 meta CSP, 쿠키 `SameSite`, `404.html`로 대신합니다(D15 개정) |
+| 조직 사이트 저장소가 ash 릴리스를 받아 자체 워크플로로 배포 | 저장소 둘에 워크플로 둘이 생기고 트리거(repository_dispatch)를 이어야 합니다. ash CI가 빌드 결과를 바로 커밋하는 쪽이 비밀값 하나, 파이프라인 하나입니다(D15 개정) |
+| 동적 경로를 쿼리로(`/n/?id=…`) 바꿔 Pages에서도 200 받기 | 이미 합의한 링크 모양 `/s/<share_id>#<token>`(FR-H4)을 바꿉니다. 404 상태의 대가(색인·미리보기 불가)가 지금은 작습니다(D15 개정) |
 | 노트북 본문을 D1에 저장 | 행·값 상한(약 2 MB)과 DB 크기 상한에 실행 기록이 걸립니다. 본문은 R2, 메타데이터는 D1(D15 개정) |
-| 노트북을 R2 공개 버킷 또는 별도 콘텐츠 호스트로 직접 서빙 | 비공개 노트북의 권한 검사를 우회하고 응답 헤더를 통제하기 어렵습니다. 본문은 Worker를 거쳐서만 나갑니다(D15 개정) |
-| 노트북 출력과 ash 코드를 프런트 출처에서 실행 | 남이 쓴 스크립트가 프런트 출처의 자격 증명으로 API를 부를 수 있습니다. 출처 없는 샌드박스 iframe에서만 돌립니다(NFR-H3) |
+| 노트북 본문을 R2 공개 버킷 또는 별도 호스트에서 직접 서빙 | 비공개 노트북의 권한 검사를 우회하고 응답 헤더를 통제하기 어렵습니다. 본문은 Worker를 거쳐서만 나갑니다(D15 개정). 렌더링 iframe을 어느 도메인에서 띄울지는 이것과 다른 질문입니다(PROJECT Q10) |
+| 노트북 출력과 ash 코드를 메인 페이지 출처에서 실행 | 남이 쓴 스크립트가 메인 페이지 출처의 자격 증명으로 API를 부를 수 있습니다. 출처 없는 샌드박스 iframe에서만 돌립니다(NFR-H3) |
