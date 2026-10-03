@@ -315,7 +315,7 @@ paths:
         "400":
           description: Malformed endpoint id, name or role.
         "409":
-          description: This endpoint id is registered (or was removed; removed keys are not reused).
+          description: This endpoint id is registered, or was removed and its owner has not re-admitted it (FR-H11).
         "429":
           description: Too many link requests from this address.
         "503":
@@ -471,7 +471,7 @@ paths:
         "401":
           description: No valid session or device token.
         "403":
-          description: A computer's device token; a device token approving a `main_server` link; or a cross-origin cookie request.
+          description: A computer's device token; a device token approving a `main_server` link or a re-admitted key's link (FR-H11); a session of another account for a re-admitted key; or a cross-origin cookie request.
         "404":
           description: Unknown, decided or expired code.
         "429":
@@ -568,6 +568,40 @@ paths:
           description: Another device's token without account rights, or a cross-origin cookie request.
         "404":
           description: No such device in the account.
+
+  /v1/devices/{endpoint_id}/readmit:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+    post:
+      tags: [Devices]
+      operationId: readmitDevice
+      summary: Let a removed key join again through a device link (FR-H11, provisional)
+      description: |
+        A signed-in browser session of the account the device was removed from; device
+        tokens (even the main server's) get 403. For 15 minutes the key may start a device
+        link; that link must also be approved by a session of this account. Claiming it
+        restores the device with new tokens.
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Re-admission open.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [endpoint_id, expires_at]
+                properties:
+                  endpoint_id: {type: string}
+                  expires_at: {type: integer, description: Unix seconds; start the device link before this.}
+        "401":
+          description: No valid session or device token.
+        "403":
+          description: A device token, or a cross-origin cookie request.
+        "404":
+          description: No device with this key was ever in the caller's account.
+        "409":
+          description: The device is not removed.
 
   # ------------------------------------------------------------------ directory (FR-H2)
 
