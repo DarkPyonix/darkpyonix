@@ -81,6 +81,25 @@ paths:
                   status: {type: string, const: ok}
                   version: {type: string}
 
+  /.well-known/org.flathub.VerifiedApps.txt:
+    get:
+      tags: [System]
+      operationId: getFlathubVerifiedApps
+      summary: Flathub website verification (FR-H7)
+      description: |
+        The token Flathub issues to verify app ids under this domain (`dev.darkpyonix.Ember`),
+        as plain text. Its content is the Worker's `FLATHUB_VERIFICATION_TOKEN` var or secret;
+        when that is unset or empty the file does not exist.
+      security: []
+      responses:
+        "200":
+          description: The verification token.
+          content:
+            text/plain:
+              schema: {type: string}
+        "404":
+          description: No token configured.
+
   # ------------------------------------------------------------------ accounts (FR-H6)
 
   /auth/login:

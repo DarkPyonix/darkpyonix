@@ -35,12 +35,28 @@ interface Route {
 const SEGMENT = "([^/]+)";
 
 function route(path: string, methods: Partial<Record<string, Handler>>): Route {
-  const pattern = new RegExp(`^${path.replace(/\{[a-z_]+\}/g, SEGMENT)}$`);
+  // Literal parts are escaped (e.g. the dots of `/.well-known/...`); `{param}` matches one segment.
+  const literal = path.split(/\{[a-z_]+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`^${literal.join(SEGMENT)}$`);
   return { path, pattern, methods };
 }
 
 async function health(): Promise<Response> {
   return json(200, { status: "ok", version: VERSION });
+}
+
+/**
+ * `GET /.well-known/org.flathub.VerifiedApps.txt` (FR-H7): Flathub's website verification file,
+ * the token Flathub shows for dev.darkpyonix.Ember. A plain text file, as a static asset would be,
+ * but its content is the FLATHUB_VERIFICATION_TOKEN var/secret so no token lives in the repository.
+ */
+function flathubVerifiedApps(_request: Request, env: Env): Response {
+  const token = (env.FLATHUB_VERIFICATION_TOKEN ?? "").trim();
+  if (!token) return json(404, { error: "not found" });
+  return new Response(token, {
+    status: 200,
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300" },
+  });
 }
 
 /** `GET /link?code=...`: the approval page; signs the browser in with GitHub first. */
@@ -65,6 +81,7 @@ async function linkLanding(request: Request, env: Env, deps: Deps): Promise<Resp
 
 export const ROUTES: Route[] = [
   route("/health", { GET: health }),
+  route("/.well-known/org.flathub.VerifiedApps.txt", { GET: flathubVerifiedApps }),
   // FR-H6 GitHub sign-in
   route("/auth/login", { GET: login }),
   route("/auth/callback", { GET: callback }),

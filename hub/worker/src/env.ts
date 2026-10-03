@@ -32,6 +32,12 @@ export interface Env {
   /** The Cloudflare zone id of ZONE. */
   CF_ZONE_ID?: string;
 
+  /**
+   * Flathub website verification token for app ids under this domain (dev.darkpyonix.Ember),
+   * served as `/.well-known/org.flathub.VerifiedApps.txt` (SPEC FR-H7). Unset or empty = 404.
+   */
+  FLATHUB_VERIFICATION_TOKEN?: string;
+
   /** Optional Workers rate limiter for unauthenticated writes. */
   WRITE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }

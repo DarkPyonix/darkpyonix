@@ -84,6 +84,8 @@ export interface Call {
   origin?: string | null;
   json?: unknown;
   body?: BodyInit;
+  /** Bindings to override for this call (e.g. a var the test config leaves unset). */
+  env?: Partial<Env>;
 }
 
 export function call(deps: Deps, method: string, path: string, c: Call = {}): Promise<Response> {
@@ -100,7 +102,9 @@ export function call(deps: Deps, method: string, path: string, c: Call = {}): Pr
     headers.set("content-type", "application/json");
     body = JSON.stringify(c.json);
   }
-  return handle(new Request(`${ORIGIN}${path}`, { method, headers, body }), hubEnv, deps);
+  // Define (not assign) the overrides: assigning would go through `env`'s own setter and leak.
+  const env = c.env ? (Object.create(hubEnv, Object.getOwnPropertyDescriptors(c.env)) as Env) : hubEnv;
+  return handle(new Request(`${ORIGIN}${path}`, { method, headers, body }), env, deps);
 }
 
 export function cookieValue(response: Response, name: string): string | null {

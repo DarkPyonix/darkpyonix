@@ -20,6 +20,8 @@ GITHUB_ALLOWED_IDS = ""
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET   GitHub OAuth App (FR-H6)
 #   RELAY_SHARED_SECRET                      shared with the relay host (FR-H3)
 #   CF_API_TOKEN, CF_ZONE_ID                 Zone -> DNS -> Edit on darkpyonix.dev only (FR-H5)
+#   FLATHUB_VERIFICATION_TOKEN               Flathub website verification of dev.darkpyonix.Ember
+#                                            (FR-H7; a secret or a dashboard var, unset = 404)
 
 [[d1_databases]]
 binding = "DB"
