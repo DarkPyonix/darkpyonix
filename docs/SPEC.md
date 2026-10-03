@@ -126,18 +126,24 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 | `__runs__.list(limit=20)` | 최신순 요약 목록 |
 | `__runs__.dir` | 기록 폴더 경로(str) |
 
-목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다.
-- `run.run_id`, `run.status`, `run.params`, `run.cells`
-- `run.cells[i].outputs`, `run.cells[i].text`: 스트림 출력 문자열을 이어 붙인 것
-- `run.cells[i].result`: `execute_result`의 `text/plain`
-- `run.cell("cell_id 또는 제목")`
-- `run.path`
-- `run.notebook`: 원본 nbformat dict
-- 수용 기준:
-  - 두 번째 실행의 셀에서 `__runs__.latest.run_id`가 첫 번째 실행의 ID입니다.
-  - `__runs__.latest.cells[1].text`가 그 셀의 표준 출력입니다.
-  - 반환값은 `json.dumps`로 직렬화됩니다.
-- 테스트: `test_fr_r3_runs_magic_exposes_logs_as_json`
+목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다. 실행 하나(`RunRecord`)와 셀 하나(`CellRecord`)는 `dict`의 하위 클래스이고, 그 안의 dict와 list도 같은 방식으로 속성 접근이 됩니다.
+- 속성 이름은 먼저 dict의 키에서, 없으면 `metadata.darkpyonix`의 필드에서 찾습니다. 둘 다 없으면 `AttributeError`입니다. 그래서 `run.run_id`, `run.status`, `run.params`, `run.mode`, `run.started_at`, `run.cells`, `cell.index`, `cell.title`, `cell.status`, `cell.source`, `cell.outputs`가 됩니다.
+- `run.cells`: 기록에 남은 셀의 목록입니다(실행된 셀만, 실행 순서). `run.cells[i]`는 이 목록의 위치이고, 파일 안의 셀 번호는 `cell.index`입니다.
+- `cell.text`: 그 셀의 `stdout` 스트림 출력을 순서대로 이어 붙인 문자열(없으면 `""`). `cell.stderr`: 같은 방식의 `stderr`.
+- `cell.result`: 그 셀의 마지막 `execute_result`의 `text/plain` 문자열, 없으면 `None`.
+- `run.cell(key)`: 문자열이면 셀 ID(`metadata.darkpyonix.id`), 그다음 제목(`title`)이 같은 첫 셀, 정수면 파일 셀 번호(`index`)가 같은 첫 셀. 없으면 `KeyError`.
+- `run.path`: 그 실행 기록 `.ipynb`의 절대 경로(str). 진행 중인 실행도 기록이 쓰이는 경로입니다.
+- `run.notebook`: 원본 nbformat dict(속성 접근이 없는 순수 `dict`/`list`). `json.load`로 그 파일을 읽은 것과 같습니다.
+- `__runs__.list()`의 요약도 속성 접근이 됩니다(`s.run_id`, `s.path`).
+- `text`, `stderr`, `result`, `path`, `notebook`은 dict의 키가 아니므로 `json.dumps(run)`의 결과는 노트북 그대로입니다. 반환값을 바꿔도 기록은 바뀌지 않습니다.
+- 수용 기준(실제 커널 셀 안에서, 사용 가능한 모든 인터프리터에서, NFR-K1):
+  - 두 번째 실행의 셀에서 `__runs__.latest.run_id`가 첫 번째 실행의 ID이고, `__runs__.latest.status`가 `"ok"`입니다.
+  - `__runs__.latest.cells[1].text`가 첫 실행에서 기록된 둘째 셀의 표준 출력이고, `.stderr`는 표준 오류입니다. 결과 값을 남긴 셀의 `.result`는 그 `repr`이고, 결과가 없는 셀은 `None`입니다.
+  - `run.cell("제목")`과 `run.cell(파일 셀 번호)`가 그 셀을 돌려주고, 없는 키는 `KeyError`입니다.
+  - `run.path`의 파일을 `json.load`한 값이 `run.notebook`과 같고, `type(run.notebook) is dict`입니다.
+  - `__runs__.current.run_id`는 지금 실행의 ID이고, `__runs__.current.path`는 그 실행의 기록 경로입니다.
+  - `json.dumps(__runs__.latest)`가 성공하고, `json.loads`한 값이 `run.notebook`과 같습니다.
+- 테스트: `test_fr_r3_runs_magic_exposes_logs_as_json`, `test_fr_r3_runs_magic_attribute_access_in_kernel_cell`
 - 상태 메모 (2026-10-03 감사): dict로서의 `__runs__`(`current`, `latest`, `[run_id]`, `[-1]`, `list()`, `dir`, `json.dumps`)는 검증했습니다. 속성 접근(`run.run_id`, `run.cells[i].text`, `.result`, `run.cell(...)`, `run.path`, `run.notebook`)은 아직 구현되지 않았고, 커널 셀 안에서 `__runs__.latest.run_id`와 `__runs__.latest.cells[1].text`를 읽는 시험도 없습니다.
 
 ### FR-R4 기록과 셀 맵핑 — `Done`
