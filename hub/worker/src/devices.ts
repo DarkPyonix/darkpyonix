@@ -481,6 +481,36 @@ export async function readmitDevice(request: Request, env: Env, deps: Deps, endp
   return json(200, { endpoint_id: endpointId, expires_at: expiresAt });
 }
 
+/** Most removed devices `GET /v1/removed-devices` lists (FR-H11). */
+export const MAX_REMOVED_LISTED = 100;
+
+/** `GET /v1/removed-devices`: the account's removed devices, newest first, for re-admission (FR-H11). */
+export async function listRemovedDevices(request: Request, env: Env, deps: Deps): Promise<Response> {
+  const now = nowSecs(deps.nowMs());
+  const p = await principal(request, env, now);
+  if (p.kind !== "session") throw ApiError.forbidden("only a signed-in session may list removed devices");
+  const { results } = await env.DB.prepare(
+    `SELECT endpoint_id, name, role, created_at, revoked_at, readmit_until FROM devices
+     WHERE account_id = ? AND revoked_at IS NOT NULL ORDER BY revoked_at DESC, endpoint_id LIMIT ?`,
+  )
+    .bind(p.accountId, MAX_REMOVED_LISTED)
+    .all<{ endpoint_id: string; name: string; role: string; created_at: number; revoked_at: number; readmit_until: number | null }>();
+  return json(
+    200,
+    {
+      devices: results.map((d) => ({
+        endpoint_id: d.endpoint_id,
+        name: d.name,
+        role: d.role,
+        created_at: d.created_at,
+        removed_at: d.revoked_at,
+        readmit_until: d.readmit_until !== null && d.readmit_until > now ? d.readmit_until : null,
+      })),
+    },
+    { "cache-control": "private, no-store" },
+  );
+}
+
 /** Tells the relay host to drop a removed device's connections (best effort; SPEC FR-H3). */
 async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Promise<void> {
   if (!env.RELAY_ADMIN_URL || !env.RELAY_SHARED_SECRET) return;

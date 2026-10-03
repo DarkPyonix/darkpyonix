@@ -368,6 +368,60 @@ describe("re-admitting removed keys (FR-H11)", () => {
     expect(late.status).toBe(409);
   });
 
+  type Removed = {
+    endpoint_id: string;
+    name: string;
+    role: string;
+    created_at: number;
+    removed_at: number;
+    readmit_until: number | null;
+  };
+  const removedList = async (deps: ReturnType<typeof makeDeps>, cookie: string) => {
+    const response = await call(deps, "GET", "/v1/removed-devices", { cookie });
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { devices: Removed[] }).devices;
+  };
+
+  it("test_fr_h11_owner_lists_removed_devices", async () => {
+    let now = Date.now();
+    const deps = makeDeps({ nowMs: () => now });
+    const { cookie, device } = await removed(deps, 26);
+    now += 10_000;
+    const phone = await newDevice();
+    await linkDevice(deps, { cookie }, phone, "client", "phone");
+    expect((await call(deps, "DELETE", `/v1/devices/${phone.endpointId}`, { cookie })).status).toBe(204);
+    const stranger = await signIn(deps, { id: 27, login: "stranger" });
+    await linkDevice(deps, { cookie: stranger }, await newDevice());
+
+    const listed = await removedList(deps, cookie);
+    expect(listed.map((d) => d.endpoint_id)).toEqual([phone.endpointId, device.endpointId]);
+    expect(listed[1]).toMatchObject({ name: "mac mini", role: "main_server", readmit_until: null });
+    expect(listed[0]!.removed_at).toBeGreaterThan(listed[1]!.removed_at);
+    expect(listed[1]!.removed_at).toBeGreaterThanOrEqual(listed[1]!.created_at);
+    expect(await removedList(deps, stranger)).toEqual([]);
+
+    const opened = (await (await call(deps, "POST", `/v1/devices/${device.endpointId}/readmit`, { cookie })).json()) as {
+      expires_at: number;
+    };
+    expect((await removedList(deps, cookie))[1]!.readmit_until).toBe(opened.expires_at);
+    // Re-admitted and claimed: back in the device list, gone from this one.
+    await linkDevice(deps, { cookie }, device, "computer", "mac mini");
+    expect((await removedList(deps, cookie)).map((d) => d.endpoint_id)).toEqual([phone.endpointId]);
+    // An expired re-admission shows as null.
+    expect((await call(deps, "POST", `/v1/devices/${phone.endpointId}/readmit`, { cookie })).status).toBe(200);
+    now += 901_000;
+    expect((await removedList(deps, cookie))[0]!.readmit_until).toBeNull();
+  });
+
+  it("test_fr_h11_only_a_session_lists_removed_devices", async () => {
+    const deps = makeDeps();
+    const { main } = await removed(deps, 28);
+    const byToken = await call(deps, "GET", "/v1/removed-devices", { token: main });
+    expect(byToken.status).toBe(403);
+    const none = await call(deps, "GET", "/v1/removed-devices");
+    expect(none.status).toBe(401);
+  });
+
   it("test_fr_h11_readmit_needs_a_removed_device_of_the_account", async () => {
     const deps = makeDeps();
     const { cookie, device } = await removed(deps, 23);

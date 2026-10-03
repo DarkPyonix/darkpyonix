@@ -9,6 +9,7 @@ import {
   getLink,
   getLinkCode,
   listDevices,
+  listRemovedDevices,
   me,
   readmitDevice,
   removeDevice,
@@ -120,6 +121,7 @@ export const ROUTES: Route[] = [
   route("/v1/devices", { GET: listDevices }),
   route("/v1/devices/{endpoint_id}", { GET: getDevice, PATCH: updateDevice, DELETE: removeDevice }),
   route("/v1/devices/{endpoint_id}/readmit", { POST: readmitDevice }),
+  route("/v1/removed-devices", { GET: listRemovedDevices }),
   // FR-H2 directory
   route("/v1/devices/{endpoint_id}/addresses", { GET: deviceAddresses }),
   route("/pkarr/{key}", { PUT: pkarrPut, GET: pkarrGet }),

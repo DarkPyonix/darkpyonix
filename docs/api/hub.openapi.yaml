@@ -630,6 +630,38 @@ paths:
         "409":
           description: The device is not removed.
 
+  /v1/removed-devices:
+    get:
+      tags: [Devices]
+      operationId: listRemovedDevices
+      summary: Removed devices of the caller's account, to pick one to re-admit (FR-H11, provisional)
+      description: |
+        A signed-in browser session only; device tokens (even the main server's) get 403.
+        Newest removal first, at most 100. A re-admitted device that claimed its link is back
+        in `GET /v1/devices` and no longer here.
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Removed devices, most recently removed first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    maxItems: 100
+                    items: {$ref: "#/components/schemas/RemovedDevice"}
+        "401":
+          description: No valid session or device token.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "403":
+          description: A device token.
+
   # ------------------------------------------------------------------ directory (FR-H2)
 
   /v1/devices/{endpoint_id}/addresses:
@@ -1130,6 +1162,18 @@ components:
           oneOf:
             - {$ref: "#/components/schemas/DeviceApp"}
             - {type: "null"}
+    RemovedDevice:
+      type: object
+      required: [endpoint_id, name, role, created_at, removed_at, readmit_until]
+      properties:
+        endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+        name: {type: string, description: Its name when it was removed.}
+        role: {type: string, enum: [main_server, computer, client], description: Its role when it was removed.}
+        created_at: {type: integer, description: Unix seconds it first joined.}
+        removed_at: {type: integer, description: Unix seconds it was removed.}
+        readmit_until:
+          type: [integer, "null"]
+          description: While a re-admission is open (`POST /v1/devices/{endpoint_id}/readmit`), its expiry in Unix seconds; else null.
     DeviceApp:
       type: object
       required: [kind, version, services]
