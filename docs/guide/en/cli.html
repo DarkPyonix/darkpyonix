@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The darkpyonix CLI &middot; darkpyonix guide</title>
+<meta name="description" content="darkpyonix run, stop, status, ps, logs, attach, vars, restart, shutdown, kernel, share and manager, with exit codes and what each command does.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/cli.html">
+<link rel="alternate" hreflang="en" href="cli.html">
+<link rel="alternate" hreflang="ko" href="../ko/cli.html">
+<link rel="alternate" hreflang="x-default" href="../en/cli.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="cli.html" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/cli.html" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="Guide">
+      <h2>Guide</h2>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="getting-started.html">Install and first run</a></li>
+        <li><a href="notebook-format.html">Notebook files</a></li>
+        <li><a href="cli.html" aria-current="page">The darkpyonix CLI</a></li>
+        <li><a href="run-logs.html">Run logs</a></li>
+        <li><a href="manager-api.html">Manager HTTP API</a></li>
+        <li><a href="clients.html">Editors, ash and agents</a></li>
+        <li><a href="hub.html">darkpyonix.dev hub</a></li>
+      </ul>
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#commands">Commands</a></li>
+        <li><a href="#exit">Exit codes</a></li>
+        <li><a href="#busy">When the file is busy</a></li>
+        <li><a href="#stop">Stop, restart, shut down</a></li>
+        <li><a href="#agents">For agents</a></li>
+        <li><a href="#manager">Which manager</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">The CLI</p>
+    <h1>The <code>darkpyonix</code> CLI</h1>
+    <p class="lede">Every command takes the notebook file, not a kernel id. The CLI finds or starts a manager, and the manager finds or starts the file's kernel.</p>
+
+    <h2 id="commands">Commands</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>darkpyonix run FILE [--cells 1,3] [--param k=v]… [--python PATH] [--queue] [--detach]</code></td><td>Runs the file or the listed cells and follows the output. The exit code follows the run: <code>0</code> ok, <code>1</code> error, <code>130</code> interrupted. Ctrl-C interrupts the run; a second Ctrl-C detaches and the run continues.</td></tr>
+          <tr><td><code>darkpyonix stop FILE</code></td><td>Interrupts the running cell. The namespace and the process stay.</td></tr>
+          <tr><td><code>darkpyonix status [FILE]</code>, <code>darkpyonix ps</code></td><td>Status of one kernel, or the list of running kernels.</td></tr>
+          <tr><td><code>darkpyonix logs FILE [--run latest|ID] [--follow]</code></td><td>Prints a run log. <code>--follow</code> replays the running run and keeps following it.</td></tr>
+          <tr><td><code>darkpyonix attach FILE</code></td><td>Follows the kernel's live events.</td></tr>
+          <tr><td><code>darkpyonix vars FILE</code></td><td>Lists user variables with name, type and a short summary. While a cell runs, only name and type are shown, so no user <code>__repr__</code> runs.</td></tr>
+          <tr><td><code>darkpyonix restart FILE [--hard]</code></td><td>Soft restart clears the namespace. <code>--hard</code> re-executes the process with the same interpreter; the kernel id stays.</td></tr>
+          <tr><td><code>darkpyonix shutdown FILE [--force]</code></td><td>Interrupts, finishes the run log and exits cleanly. Only <code>--force</code> kills the process.</td></tr>
+          <tr><td><code>darkpyonix kernel FILE [--python PATH]</code></td><td>Starts the kernel without running anything.</td></tr>
+          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>Issues a share token for the file's kernel. Needs a dedicated manager. Becomes <code>--capabilities read,history,...</code> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></td></tr>
+          <tr><td><code>darkpyonix manager [--ephemeral|--dedicated] [--host H] [--port P] [--idle-timeout S]</code></td><td>Runs a manager. The default is ephemeral: loopback only, exits when idle. Giving both modes is an error.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><code>--cells</code> takes indexes and ranges (<code>1,3</code>, <code>2-4</code>); the preamble is
+      <code>0</code>. <code>--param name=value</code> parses the value as JSON, otherwise it is a string.
+      <code>--json</code> prints machine-readable output.</p>
+
+    <h2 id="exit">Exit codes</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Code</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>0</code></td><td>The run finished <code>ok</code>.</td></tr>
+          <tr><td><code>1</code></td><td>A cell raised. The traceback is printed, without kernel frames.</td></tr>
+          <tr><td><code>130</code></td><td>The run was interrupted.</td></tr>
+          <tr><td><code>75</code></td><td>The file's kernel is already running something. Nothing was started.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+
+    <h2 id="busy">When the file is busy</h2>
+    <p>A second <code>run</code> of the same file is refused by default and prints the current run's id,
+      start time and cells, plus a hint. Add <code>--queue</code> to wait in line instead. Queued runs start
+      in arrival order.</p>
+
+    <h2 id="stop">Stop, restart, shut down</h2>
+    <p><code>stop</code> raises <code>KeyboardInterrupt</code> in the running cell, typically within a second.
+      The run ends as <code>interrupted</code>, the queue stays, and every variable is still there for the
+      next run. No DarkPyonix command kills a kernel to stop a run.</p>
+    <p><code>restart</code> clears the namespace. <code>restart --hard</code> re-executes the process with the
+      same interpreter and arguments; the kernel id stays. <code>shutdown</code> interrupts, finishes writing
+      the run log and exits. Only <code>shutdown --force</code> kills the process.</p>
+
+    <h2 id="agents">For agents</h2>
+    <p>The CLI replaces the shell habits that lose work:</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Before</th><th scope="col">With DarkPyonix</th></tr></thead>
+        <tbody>
+          <tr><td><code>python train.py &gt; log.txt &amp;</code></td><td><code>darkpyonix run train.py --detach</code> (the log is written for you)</td></tr>
+          <tr><td><code>pkill -f train.py</code></td><td><code>darkpyonix stop train.py</code> (interrupt, state kept)</td></tr>
+          <tr><td><code>tail -f log.txt</code></td><td><code>darkpyonix logs train.py --follow</code></td></tr>
+          <tr><td>running the same file again by mistake</td><td>exit code <code>75</code> with the current run</td></tr>
+          <tr><td>forgetting what was computed</td><td><code>darkpyonix vars train.py</code>, or <code>__runs__</code> in the kernel</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+
+    <h2 id="manager">Which manager</h2>
+    <p>Today the CLI picks a live manager from <code>~/.darkpyonix/managers/*.json</code> and starts an
+      ephemeral one when there is none. An agent does not need to know another manager's token; the same OS
+      user is enough. The ephemeral manager exits after 120 idle seconds by default; the kernels stay.</p>
+        <div class="warn">
+      <span class="label">Changing</span>
+      <p>Registry files are being removed <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>. The CLI will use <code>DARKPYONIX_MANAGER_URL</code> and <code>DARKPYONIX_TOKEN</code> when they are set, and otherwise start its own ephemeral manager and read its address and token from that process. The commands and their behavior above do not change.</p>
+    </div>
+
+    <nav class="pagenav" aria-label="Pagination">
+      <a class="prev" href="notebook-format.html"><span>Previous</span>&larr; Notebook files</a>
+      <a class="next" href="run-logs.html"><span>Next</span>Run logs &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT License (Apache-2.0 proposed, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notebook files &middot; darkpyonix guide</title>
+<meta name="description" content="The DarkPyonix notebook format: plain .py or .pynb files with # %% cell markers, cell metadata, markdown and parameters, valid Python under python file.py.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/notebook-format.html">
+<link rel="alternate" hreflang="en" href="notebook-format.html">
+<link rel="alternate" hreflang="ko" href="../ko/notebook-format.html">
+<link rel="alternate" hreflang="x-default" href="../en/notebook-format.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="notebook-format.html" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/notebook-format.html" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="Guide">
+      <h2>Guide</h2>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="getting-started.html">Install and first run</a></li>
+        <li><a href="notebook-format.html" aria-current="page">Notebook files</a></li>
+        <li><a href="cli.html">The darkpyonix CLI</a></li>
+        <li><a href="run-logs.html">Run logs</a></li>
+        <li><a href="manager-api.html">Manager HTTP API</a></li>
+        <li><a href="clients.html">Editors, ash and agents</a></li>
+        <li><a href="hub.html">darkpyonix.dev hub</a></li>
+      </ul>
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#example">An example</a></li>
+        <li><a href="#markers">Cell markers</a></li>
+        <li><a href="#metadata">Cell metadata</a></li>
+        <li><a href="#types">Cell types</a></li>
+        <li><a href="#params">Parameters</a></li>
+        <li><a href="#markdown">Markdown</a></li>
+        <li><a href="#api">Runtime API</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">Notebook files</p>
+    <h1>A notebook is a Python file</h1>
+    <p class="lede">Cells are comments and markdown is a function call, so <code>python file.py</code> runs the same code a kernel runs. Outputs never go into the file; they go into the run logs.</p>
+
+    <h2 id="example">An example</h2>
+    <figure class="codeblock" data-copy="Copy" data-copied="Copied">
+      <figcaption>train.py</figcaption>
+<pre><code><span class="s">"""Train a small model."""</span>
+<span class="k">import</span> darkpyonix                      <span class="c"># preamble: runs once, before any cell</span>
+
+
+<span class="c"># %% Parameters [argparse]</span>
+LR = darkpyonix.params.get(<span class="s">"lr"</span>, default=<span class="n">0.01</span>, range=(<span class="n">0.001</span>, <span class="n">0.1</span>, <span class="n">0.001</span>))
+MODEL = darkpyonix.params.get(<span class="s">"model"</span>, default=<span class="n">0</span>, choices=[<span class="s">"small"</span>, <span class="s">"large"</span>])
+
+
+<span class="c"># %% [markdown]</span>
+darkpyonix.markdown(<span class="s">"""
+## Training
+The loop below prints one line per epoch.
+"""</span>, silent=<span class="k">True</span>)
+
+
+<span class="c"># %% Train [code]</span>
+<span class="c"># @width: 1fr</span>
+<span class="k">for</span> epoch <span class="k">in</span> range(<span class="n">3</span>):
+    print(<span class="s">f"epoch {epoch} lr={LR} model={MODEL}"</span>)
+epoch</code></pre>
+    </figure>
+
+    <p>Lines before the first marker are the <strong>preamble</strong>. The kernel runs it once, before any
+      cell, in every run. Keep imports and the docstring there.</p>
+    <p><code>.pynb</code> has the same syntax as <code>.py</code>. The extension only tells an editor to open the
+      file as a notebook instead of as code. The kernel treats both the same.</p>
+
+    <h2 id="markers">Cell markers</h2>
+    <ul>
+      <li>A line starting with <code># %%</code> opens a cell. The cell runs to the next marker or the end of the file.</li>
+      <li><code>[type]</code> sets the cell type. Without it the cell is <code>code</code>.</li>
+      <li>A title may come before the type: <code># %% Load data [code]</code>.</li>
+      <li>The boundary syntax matches Jupytext's percent format. The difference is markdown: here it is a <code>darkpyonix.markdown()</code> call, not a comment.</li>
+      <li>The parser works line by line, like Jupytext, so a <code># %%</code> line inside a triple-quoted string is still a marker.</li>
+    </ul>
+
+    <h2 id="metadata">Cell metadata</h2>
+    <p>Lines of the form <code># @key: value</code> right after a marker are that cell's metadata. A value that
+      parses as JSON is used as JSON; otherwise it is a string. Unknown keys are kept and ignored.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Key</th><th scope="col">Meaning</th><th scope="col">Example</th></tr></thead>
+        <tbody>
+          <tr><td><code>width</code></td><td>Cell width in a horizontal layout (a CSS grid track)</td><td><code>1fr</code>, <code>320px</code></td></tr>
+          <tr><td><code>layout</code></td><td>Layout starting at this cell</td><td><code>horizontal</code>, <code>vertical</code>, <code>grid</code></td></tr>
+          <tr><td><code>collapsed</code></td><td>Shown collapsed at first</td><td><code>true</code></td></tr>
+          <tr><td><code>auto_run</code></td><td>Runs when a client connects to the kernel</td><td><code>true</code></td></tr>
+          <tr><td><code>id</code></td><td>A stable id a client may assign</td><td><code>"c-3f2a"</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Layout is display only. Cells in a horizontal layout still run one after another.</p>
+
+    <h2 id="types">Cell types</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Type</th><th scope="col">Status</th><th scope="col">What a run does</th></tr></thead>
+        <tbody>
+          <tr><td><code>code</code></td><td><span class="pill works">implemented</span></td><td>Runs the body. The value of a last expression becomes the result and is stored in <code>_</code>.</td></tr>
+          <tr><td><code>markdown</code></td><td><span class="pill works">implemented</span></td><td>Runs the <code>darkpyonix.markdown(...)</code> call.</td></tr>
+          <tr><td><code>argparse</code></td><td><span class="pill works">implemented</span></td><td>Runs <code>darkpyonix.params.get(...)</code> calls; clients show a form.</td></tr>
+          <tr><td><code>binding</code></td><td><span class="pill works">implemented</span></td><td>Re-evaluates definitions decorated with <code>@darkpyonix.binding</code> without access to <code>code</code> cell variables.</td></tr>
+          <tr><td><code>shell</code></td><td><span class="pill works">implemented</span></td><td>Runs <code>darkpyonix.run_command(...)</code> and streams its output.</td></tr>
+          <tr><td><code>parallel</code>, <code>concurrent</code></td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/7">#7</a></span></td><td>Accepted and kept; runs like <code>code</code> for now.</td></tr>
+          <tr><td><code>cinterop</code>, <code>cppinterop</code>, <code>rustinterop</code></td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/5">#5</a></span></td><td>Accepted and kept; the API raises <code>NotImplementedError</code>.</td></tr>
+          <tr><td><code>sql</code>, <code>toml</code>, <code>yaml</code>, <code>json</code></td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/5">#5</a></span></td><td>Accepted and kept; runs like <code>code</code> for now.</td></tr>
+          <tr><td>anything else</td><td></td><td>Runs like <code>code</code>; the original type is kept.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+
+    <h2 id="params">Parameters</h2>
+    <p><code>darkpyonix.params.get(name, default=..., choices=..., range=(min, max, step), type=..., help=...)</code>
+      reads a parameter. With <code>choices</code>, <code>default</code> is an <strong>index</strong> into the list.
+      The value comes from the run request's <code>params</code> first, then from <code>--name value</code> on
+      the command line, then from <code>default</code>. A value outside <code>range</code> or not in
+      <code>choices</code> fails the cell with <code>ValueError</code>.</p>
+    <p>That is why the same file works both ways: <code>darkpyonix run train.py --param lr=0.02</code> and
+      <code>uv run train.py --lr 0.02</code> set the same parameter.</p>
+
+    <h2 id="markdown">Markdown</h2>
+    <p><code>darkpyonix.markdown(text, silent=False)</code> emits <code>text/markdown</code> in a kernel. With
+      <code>silent=True</code> the text is shown but not written to the run log. Under <code>python file.py</code>
+      it prints nothing, so the script's output does not change.</p>
+
+    <h2 id="api">Runtime API</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Call</th><th scope="col">In a kernel</th><th scope="col">Under <code>python file.py</code></th></tr></thead>
+        <tbody>
+          <tr><td><code>darkpyonix.markdown(text, silent=False)</code></td><td><code>text/markdown</code> output</td><td>nothing</td></tr>
+          <tr><td><code>darkpyonix.params.get(...)</code></td><td>run request <code>params</code> first</td><td>command-line arguments</td></tr>
+          <tr><td><code>@darkpyonix.binding</code></td><td>isolated re-evaluation</td><td>the same</td></tr>
+          <tr><td><code>darkpyonix.run_command(cmd, check=False)</code></td><td>output as a stream</td><td>standard output</td></tr>
+          <tr><td><code>darkpyonix.display(obj)</code></td><td><code>display_data</code> output</td><td><code>print(repr(obj))</code></td></tr>
+          <tr><td><code>darkpyonix.uv.add</code>, <code>darkpyonix.uv.remove</code></td><td>installs into the kernel's interpreter</td><td>the same</td></tr>
+          <tr><td><code>darkpyonix.run_parallel(*aws)</code></td><td>gathers coroutines</td><td>the same</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Outputs also come from <code>print</code>, from writes to file descriptors 1 and 2 (C extensions,
+      subprocesses), from <code>_repr_html_</code>-style methods, and from matplotlib figures, which become PNG
+      outputs when matplotlib is installed in the kernel's interpreter.</p>
+    <nav class="pagenav" aria-label="Pagination">
+      <a class="prev" href="getting-started.html"><span>Previous</span>&larr; Install and first run</a>
+      <a class="next" href="cli.html"><span>Next</span>The darkpyonix CLI &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT License (Apache-2.0 proposed, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

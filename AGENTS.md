@@ -43,7 +43,7 @@ The root holds exactly these entries:
 - `.github/`: CI workflows (when present).
 - `AGENTS.md`: these working agreements.
 - `CLAUDE.md`: a pointer to `AGENTS.md`.
-- `LICENSE`: MIT.
+- `LICENSE`: Apache-2.0 (user decision 2026-10-03: core and ember are Apache-2.0, ash stays MPL-2.0).
 - `PROJECT.md`: scope, milestones, open questions.
 - `README.md`: what the project is and how it is laid out.
 - `darkpyonix.mermaid`: the class diagram of the object model.

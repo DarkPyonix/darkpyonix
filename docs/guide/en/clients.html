@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editors, ash and agents &middot; darkpyonix guide</title>
+<meta name="description" content="How VS Code, IntelliJ, the ash shared notebook, Ember and coding agents connect to a DarkPyonix kernel through the manager API and the CLI.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/clients.html">
+<link rel="alternate" hreflang="en" href="clients.html">
+<link rel="alternate" hreflang="ko" href="../ko/clients.html">
+<link rel="alternate" hreflang="x-default" href="../en/clients.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="clients.html" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/clients.html" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="Guide">
+      <h2>Guide</h2>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="getting-started.html">Install and first run</a></li>
+        <li><a href="notebook-format.html">Notebook files</a></li>
+        <li><a href="cli.html">The darkpyonix CLI</a></li>
+        <li><a href="run-logs.html">Run logs</a></li>
+        <li><a href="manager-api.html">Manager HTTP API</a></li>
+        <li><a href="clients.html" aria-current="page">Editors, ash and agents</a></li>
+        <li><a href="hub.html">darkpyonix.dev hub</a></li>
+      </ul>
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#agents">Agents and the shell</a></li>
+        <li><a href="#editors">VS Code and IntelliJ</a></li>
+        <li><a href="#ash">ash</a></li>
+        <li><a href="#ember">Ember</a></li>
+        <li><a href="#together">Several clients at once</a></li>
+        <li><a href="#permissions">Share permissions</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">Clients</p>
+    <h1>Editors, ash and agents</h1>
+    <p class="lede">Every client reaches a kernel the same way: through a manager on the same machine, or through a dedicated manager from outside. Because the kernel is bound to the file, they all meet in one kernel.</p>
+
+    <h2 id="agents">Agents and the shell</h2>
+    <p>Coding agents use the <a href="cli.html">CLI</a>. It needs no token and no setup beyond the binary,
+      because it finds or starts a manager of the same OS user. <code>--detach</code> and
+      <code>logs --follow</code> fit agents that poll; exit codes tell them how a run ended.</p>
+
+    <h2 id="editors">VS Code and IntelliJ <span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/22">#22</a></span></h2>
+    <p>The notebook renderers live in <code>vscode-darkpyonix</code> and <code>intellij-darkpyonix</code>. They show
+      <code>.py</code> and <code>.pynb</code> files as cells, map the latest run log onto them, and talk to the
+      manager on the same machine. The work starts after the manager milestone (M2) and is tracked in
+      <a href="https://github.com/DarkPyonix/darkpyonix/issues/22">#22</a>. Until then, open the file as code and use the CLI in the terminal.</p>
+
+    <h2 id="ash">ash <span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/20">#20</a></span></h2>
+    <p><code>darkpyonix-ash</code> is the shared browser notebook, a fork of Starboard. A share link lets someone
+      open a kernel from a browser with the permission the link carries. The manager does not serve ash; it only
+      gives kernel access. ash is hosted on darkpyonix.dev (see <a href="hub.html">the hub</a>). Opening a kernel
+      through a share token is tracked in <a href="https://github.com/DarkPyonix/darkpyonix/issues/20">#20</a>.</p>
+
+    <h2 id="ember">Ember</h2>
+    <p><code>darkpyonix-ember</code> is the conversation-first workbench. Its server calls each machine's manager
+      API to show run status and the latest output. The kernel stack does not know about conversations, accounts
+      or switching machines.</p>
+
+    <h2 id="together">Several clients at once</h2>
+    <p>Several managers can attach to one kernel, and each gets the same events. The kernel holds the shared
+      document: cells, versions, locks and who is present. When a client edits a cell, the change is saved to the
+      file. When the file changes on disk (an agent's edit, <code>git checkout</code>), the kernel reloads it within
+      a second and tells every client.</p>
+        <div class="warn">
+      <span class="label">Changing</span>
+      <p>Collaboration is moving to the 2025 WebSocket sync over a socket handed to the kernel <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>.</p>
+    </div>
+
+    <h2 id="permissions">Share permissions <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></h2>
+    <p>A dedicated manager issues share tokens per kernel with <code>darkpyonix share FILE --permission ...</code>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Permission</th><th scope="col">Code</th><th scope="col">Run logs and outputs</th><th scope="col">Run and interrupt</th><th scope="col">Shut down, manage shares</th></tr></thead>
+        <tbody>
+          <tr><td><code>viewer1</code></td><td>yes</td><td></td><td></td><td></td></tr>
+          <tr><td><code>viewer2</code></td><td>yes</td><td>yes</td><td></td><td></td></tr>
+          <tr><td><code>viewer3</code></td><td>yes</td><td>yes</td><td>yes</td><td></td></tr>
+          <tr><td><code>admin</code> (master)</td><td>yes</td><td>yes</td><td>yes</td><td>yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>These tiers, and today's <code>editor</code> tier for cell editing, are being replaced by five capabilities
+      that a token carries as a set, with no order: <code>read</code> (view code), <code>history</code> (run logs and outputs),
+      <code>execute</code> (run and interrupt), <code>edit</code> (edit code, lock cells) and <code>manage</code> (share settings).
+      Running code and editing code become separate capabilities <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
+    <nav class="pagenav" aria-label="Pagination">
+      <a class="prev" href="manager-api.html"><span>Previous</span>&larr; Manager HTTP API</a>
+      <a class="next" href="hub.html"><span>Next</span>darkpyonix.dev hub &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT License (Apache-2.0 proposed, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

@@ -56,7 +56,7 @@ info:
     `device_removed` when the device token belongs to a removed device (stop retrying, drop
     the token), `invalid_credentials` for anything else (missing, unknown or expired).
   license:
-    name: MIT
+    name: Apache-2.0
     url: https://github.com/DarkPyonix/darkpyonix/blob/main/LICENSE
 servers:
   - url: https://darkpyonix.dev

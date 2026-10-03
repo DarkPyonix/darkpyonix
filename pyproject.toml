@@ -8,7 +8,7 @@ name = "darkpyonix"
 dynamic = ["version"]
 description = "File-bound, manager-independent Python kernel for AI/ML work by people and agents"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{name = "DarkPyonix"}]
 maintainers = [{name = "DarkPyonix"}]

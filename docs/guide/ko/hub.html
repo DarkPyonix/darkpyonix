@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>darkpyonix.dev 허브 &middot; darkpyonix 가이드</title>
+<meta name="description" content="darkpyonix.dev 허브는 컴퓨터를 서로 잇고, 공유 링크와 HTTPS 이름을 발급하고, ash를 호스팅합니다. 역할 배치는 초안입니다.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/ko/hub.html">
+<link rel="alternate" hreflang="ko" href="hub.html">
+<link rel="alternate" hreflang="en" href="../en/hub.html">
+<link rel="alternate" hreflang="x-default" href="../en/hub.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>가이드</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">메뉴</button>
+  <nav class="langswitch" aria-label="언어">
+    <a href="../en/hub.html" hreflang="en">EN</a>
+    <a href="hub.html" aria-current="true" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="어둡게" data-light="밝게" aria-pressed="false">어둡게</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="가이드">
+      <h2>가이드</h2>
+      <ul>
+        <li><a href="index.html">개요</a></li>
+        <li><a href="getting-started.html">설치와 첫 실행</a></li>
+        <li><a href="notebook-format.html">노트북 파일</a></li>
+        <li><a href="cli.html">darkpyonix CLI</a></li>
+        <li><a href="run-logs.html">실행 기록</a></li>
+        <li><a href="manager-api.html">매니저 HTTP API</a></li>
+        <li><a href="clients.html">편집기, ash, 에이전트</a></li>
+        <li><a href="hub.html" aria-current="page">darkpyonix.dev 허브</a></li>
+      </ul>
+      <h2>이 페이지</h2>
+      <ul>
+        <li><a href="#roles">하는 일</a></li>
+        <li><a href="#hosts">호스트</a></li>
+        <li><a href="#privacy">허브가 보는 것</a></li>
+        <li><a href="#today">지금 되는 것</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">허브</p>
+    <h1>darkpyonix.dev</h1>
+    <p class="lede">허브는 내 컴퓨터끼리, 그리고 공유받은 사람과 내 컴퓨터를 이어 줍니다. 연결을 전달할 뿐 커널을 돌리지 않습니다. 이 페이지의 내용은 모두 계획입니다.</p>
+
+    <h2 id="roles">하는 일 <span class="pill planned">계획 <a href="https://github.com/DarkPyonix/darkpyonix/issues/21">#21</a></span></h2>
+    <ul>
+      <li>GitHub <strong>로그인</strong>과 내 기기 목록.</li>
+      <li>컴퓨터 사이의 <strong>연결 중개와 중계</strong>: 가능하면 NAT를 넘어 직접 잇고, 안 되면 중계합니다.</li>
+      <li>공유 커널을 ash로 여는 <strong>공유 링크</strong>.</li>
+      <li>전용 매니저의 <strong>HTTPS 이름</strong>.</li>
+      <li>공유 노트북 <strong>ash 호스팅</strong>.</li>
+    </ul>
+
+    <h2 id="hosts">호스트 <span class="pill planned">계획 <a href="https://github.com/DarkPyonix/darkpyonix/pull/41">#41</a></span></h2>
+    <p>역할을 호스트에 어떻게 나눌지는 PR <a href="https://github.com/DarkPyonix/darkpyonix/pull/41">#41</a>의 초안이며, 관리자 승인을 기다립니다. 초안은 다음과
+      같습니다.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">호스트</th><th scope="col">내용</th></tr></thead>
+        <tbody>
+          <tr><td><code>darkpyonix.dev/</code></td><td>메인 페이지와 ash 웹 앱. <code>darkpyonix-ash</code>가 빌드합니다.</td></tr>
+          <tr><td><code>darkpyonix.dev/&lt;repo&gt;/</code></td><td>이 가이드 같은 프로젝트 가이드. 옮기지 않습니다.</td></tr>
+          <tr><td><code>api.darkpyonix.dev</code></td><td>허브 API: 로그인, 기기, 주소 디렉터리, 공유, 이름.</td></tr>
+          <tr><td><code>relay.darkpyonix.dev</code></td><td>컴퓨터 사이 연결의 중계 서버.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+
+    <h2 id="privacy">허브가 보는 것</h2>
+    <p>허브는 두 끝을 이어 줍니다. 내용은 두 끝 사이에서 암호화하도록 설계하고 있어서(SPEC NFR-H1) 허브는 코드나
+      출력을 읽지 않습니다. 초안에서 공유 링크는 토큰을 URL 프래그먼트에 둡니다. 브라우저는 프래그먼트를 서버에
+      보내지 않습니다.</p>
+
+    <h2 id="today">지금 되는 것</h2>
+    <p>허브는 아직 운영하지 않습니다. 지금 다른 컴퓨터의 커널에 닿으려면 그 컴퓨터에서 전용 매니저를 띄우고
+      (<code>darkpyonix manager --dedicated --host ... --port ...</code>), VPN처럼 이미 믿을 수 있는 네트워크로
+      접근합니다.</p>
+    <nav class="pagenav" aria-label="페이지 이동">
+      <a class="prev" href="clients.html"><span>이전</span>&larr; 편집기, ash, 에이전트</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; MIT 라이선스 (Apache-2.0 전환 제안, <a href="https://github.com/DarkPyonix/darkpyonix/issues/51">#51</a>)</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>2026-10-03 저장소 기준으로 검토한 가이드입니다</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>
