@@ -173,6 +173,106 @@ async fn fr_m2_start_kernel_is_idempotent_on_every_interpreter() {
     }
 }
 
+/// FR-M2: `ensure()` for a file without a kernel starts the interpreter at once. It used to
+/// send a targeted discovery query first and wait its whole 200 ms timeout (a kernel that does
+/// not exist never answers), which was most of the ~250 ms between `ensure()` and the
+/// kernel's own first announce. The interpreter is a wrapper that touches a mark file before
+/// exec'ing the real Python; a watcher thread notes when the mark appears.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait() {
+    let dir = scratch("m2-fast");
+    let home = dir.join("home");
+    let be = backend(&home, true);
+    let reaper = Reaper::default();
+    let nb = write_notebook(&dir, "nb.py");
+    let mark = dir.join("exec.mark");
+    let wrapper = dir.join("python-wrapper.sh");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n: > '{}'\nexec '{}' \"$@\"\n",
+            mark.display(),
+            venv_python().display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // Warm the runtime extraction so that only ensure()'s own path is measured.
+    be.runtime_root().unwrap();
+    // macOS scans a newly written executable on its first exec (~170 ms); run the wrapper
+    // once so that cost is not counted as ensure()'s.
+    let warm = std::process::Command::new(&wrapper)
+        .args(["-c", "pass"])
+        .status()
+        .unwrap();
+    assert!(warm.success());
+    std::fs::remove_file(&mark).unwrap();
+
+    let t = Instant::now();
+    let watch = {
+        let mark = mark.clone();
+        std::thread::spawn(move || {
+            let deadline = t + Duration::from_secs(10);
+            while !mark.exists() {
+                if Instant::now() > deadline {
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Some(t.elapsed())
+        })
+    };
+    let e = be.ensure(start(&nb, Some(&wrapper))).await.unwrap();
+    let total = t.elapsed();
+    reaper.add(e.kernel.pid);
+    assert!(e.launched);
+    assert_eq!(e.kernel.status, "idle");
+    let to_exec = watch.join().unwrap().expect("the wrapper never ran");
+    eprintln!(
+        "MEASURE ensure() call to interpreter exec: {to_exec:?}; exec to ready: {:?}; total {total:?}",
+        total.saturating_sub(to_exec)
+    );
+    // The removed wait alone was 200 ms; spawning a shell is a few ms even on a busy machine.
+    assert!(
+        to_exec < Duration::from_millis(150),
+        "ensure() waited {to_exec:?} before starting the interpreter"
+    );
+}
+
+/// FR-M2 with no discovery query up front: a live kernel whose registry entry has gone
+/// missing is still attached to, not duplicated. Our launch loses the file lock (FR-K3) and
+/// exits; `ensure()` then asks the group and returns the live kernel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry() {
+    let dir = scratch("m2-noreg");
+    let home = dir.join("home");
+    let be = backend(&home, true);
+    let reaper = Reaper::default();
+    let nb = write_notebook(&dir, "nb.py");
+    let first = be.ensure(start(&nb, None)).await.unwrap();
+    reaper.add(first.kernel.pid);
+    assert!(first.launched);
+    let entry = home
+        .join("kernels")
+        .join(format!("{}.json", first.kernel.kernel_id));
+    std::fs::remove_file(&entry).unwrap();
+
+    let other = backend(&home, true); // fresh discovery cache
+    let t = Instant::now();
+    let again = other.ensure(start(&nb, None)).await.unwrap();
+    eprintln!("MEASURE ensure() of a live kernel without registry entry: {:?}", t.elapsed());
+    assert!(!again.launched);
+    assert_eq!(again.kernel.pid, first.kernel.pid);
+    for p in kernel_pids_for(&nb) {
+        reaper.add(p);
+    }
+    assert_eq!(kernel_pids_for(&nb), vec![first.kernel.pid]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn fr_m2_two_managers_starting_one_file_get_one_kernel() {
     let dir = scratch("m2-race");

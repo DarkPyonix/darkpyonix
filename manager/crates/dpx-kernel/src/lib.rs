@@ -301,7 +301,16 @@ impl RealBackend {
             let now = tokio::time::Instant::now();
             if !process::pid_alive(pid) {
                 // Lost a start race (exit 3) or crashed: give a winner's announce a moment.
-                let since = *child_gone_since.get_or_insert(now);
+                if child_gone_since.is_none() {
+                    // The winner may be a live kernel whose registry entry is missing (it is
+                    // rewritten only every 5 s); ask it directly once.
+                    self.discovery
+                        .query(Some(kernel_id), discovery::QUERY_TIMEOUT, &Default::default())
+                        .await;
+                    child_gone_since = Some(now);
+                    continue;
+                }
+                let since = child_gone_since.unwrap_or(now);
                 if now - since > Duration::from_millis(500) {
                     let log = self
                         .cfg
@@ -372,7 +381,15 @@ impl KernelBackend for RealBackend {
             .clone();
         let _guard = lock.lock().await;
 
-        if let Some(entry) = self.discovery.find(&kernel_id).await {
+        // Listen before launching so that the child's first announce is never missed.
+        self.discovery.ensure_listening();
+        // Cache + registry only, no multicast query: every announce is mirrored to the
+        // registry (PROTOCOL §2.4), so a live kernel of this home is already visible here.
+        // A targeted query would cost its full QUERY_TIMEOUT (200 ms) on every real launch,
+        // because a kernel that does not exist never answers. The rare live kernel without a
+        // registry entry is still found: our child then loses the file lock (FR-K3) and
+        // `wait_ready` queries for the winner.
+        if let Some(entry) = self.discovery.snapshot(Some(&kernel_id)).pop() {
             return Ok(Ensured {
                 kernel: self.info_with_status(entry).await,
                 launched: false,
@@ -403,7 +420,6 @@ impl KernelBackend for RealBackend {
             cwd: req.cwd.as_deref(),
             env: &req.env,
         })?;
-        self.discovery.ensure_listening();
         self.wait_ready(&kernel_id, &mut child).await
     }
 
