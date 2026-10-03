@@ -1,4 +1,4 @@
-"""Shared fixtures. All runtime state lives under .scratch/ (CLAUDE.md "Where files go")."""
+"""Shared fixtures. All runtime state lives under .scratch/ (AGENTS.md "Where files go")."""
 from __future__ import annotations
 
 import glob
