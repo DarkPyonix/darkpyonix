@@ -50,7 +50,7 @@ flowchart LR
 | **kernel** | 이 저장소 `kernel/darkpyonix/kernel` | 파일 하나에 묶인 실행 프로세스. 표준 라이브러리만 씁니다 |
 | **manager** | 이 저장소 `kernel/darkpyonix/manager` | 커널을 찾고 띄우는 HTTP 앞단. 임시/전용 두 모드 |
 | **runtime API** | 이 저장소 `kernel/darkpyonix` | 노트북 파일이 `import darkpyonix`로 쓰는 API |
-| **hub** | 이 저장소 `hub/worker/`, `hub/server/` | darkpyonix.dev(Cloudflare Worker): GitHub 계정, 기기 등록, iroh 주소 디렉터리, 공유 링크, HTTPS 이름, ash 호스팅. relay.darkpyonix.dev(Rust): iroh 릴레이와 QUIC 주소 발견(INTENT D14) |
+| **hub** | 이 저장소 `hub/worker/`, `hub/server/` | darkpyonix.dev(Cloudflare Worker): GitHub 계정, 기기 등록, iroh 주소 디렉터리, 공유 링크, HTTPS 이름, ash 호스팅. relay.darkpyonix.dev(Rust): iroh 릴레이와 QUIC 주소 발견(INTENT D15) |
 | ember server / ember node / 클라이언트 | `darkpyonix-ember` | 대화 우선 워크벤치, 셸 래핑, 컴퓨터 전환, A2A, 원격 브라우저 |
 | ash | `darkpyonix-ash` | Starboard 포크. 공유 토큰으로 공유된 커널에 접근 |
 | 노트북 렌더러 | `vscode-darkpyonix`, `intellij-darkpyonix` | `.py`/`.pynb` 셀 표시와 실행 기록 맵핑. 그 컴퓨터의 매니저에 붙습니다 |

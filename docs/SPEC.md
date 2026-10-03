@@ -116,7 +116,17 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 | `__runs__.list(limit=20)` | 최신순 요약 목록 |
 | `__runs__.dir` | 기록 폴더 경로(str) |
 
-- 수용 기준: 두 번째 실행의 셀에서 `__runs__.latest["metadata"]["darkpyonix"]["run_id"]`가 첫 번째 실행의 ID입니다. 반환값은 `json.dumps`로 직렬화됩니다.
+목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다.
+- `run.run_id`, `run.status`, `run.params`, `run.cells`
+- `run.cells[i].outputs`, `run.cells[i].text`: 스트림 출력 문자열을 이어 붙인 것
+- `run.cells[i].result`: `execute_result`의 `text/plain`
+- `run.cell("cell_id 또는 제목")`
+- `run.path`
+- `run.notebook`: 원본 nbformat dict
+- 수용 기준:
+  - 두 번째 실행의 셀에서 `__runs__.latest.run_id`가 첫 번째 실행의 ID입니다.
+  - `__runs__.latest.cells[1].text`가 그 셀의 표준 출력입니다.
+  - 반환값은 `json.dumps`로 직렬화됩니다.
 - 테스트: `test_fr_r3_runs_magic_exposes_logs_as_json`
 
 ### FR-R4 기록과 셀 맵핑 — `Agreed`
@@ -151,13 +161,14 @@ FORMAT §2의 문법(프리앰블, 셀 표식, 제목, 타입, 메타데이터, 
 ### FR-F2 `darkpyonix.markdown` — `Agreed`
 FORMAT §3.2. 커널 안에서는 `text/markdown` `display_data`를 내고(`silent=True`이면 기록에 남기지 않음), 커널 밖에서는 아무것도 하지 않습니다. 모르는 키워드 인자는 경고만 남깁니다.
 - 테스트: `test_fr_f2_markdown_in_kernel_and_plain_python`
+- 상태 메모: 커널 밖 동작과 `darkpyonix.kernel.hostctx` 계약까지는 검증했습니다. 실제 커널이 `display_data`로 내보내는 경로는 실행기(executor)와 합친 뒤 검증하고 `Done`으로 바꿉니다.
 
-### FR-F3 `darkpyonix.params` — `Agreed`
+### FR-F3 `darkpyonix.params` — `Done`
 FORMAT §3.3. 값의 우선순위는 실행 요청 `params` → 명령줄 `--name` → `default`입니다.
 - 수용 기준: `choices`와 정수 `default`면 인덱스로 고르고, `range`를 벗어난 값은 `ValueError`입니다. `python file.py --model_id swin_t`가 `"swin_t"`를 냅니다.
 - 테스트: `test_fr_f3_params_precedence_and_validation`
 
-### FR-F4 `darkpyonix.binding` — `Agreed`
+### FR-F4 `darkpyonix.binding` — `Done`
 FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터만 벗기고 다른 데코레이터는 보존합니다.
 - 수용 기준: `[code]` 셀 변수를 참조하는 binding 클래스 본문은 `NameError`를 냅니다. import한 이름과 앞선 binding은 보입니다.
 - 테스트: `test_fr_f4_binding_cannot_see_code_cell_variables`
@@ -166,7 +177,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다.
 - 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유)
 
-### FR-F6 `darkpyonix.run_command` — `Agreed`
+### FR-F6 `darkpyonix.run_command` — `Done`
 셸 명령을 하위 프로세스로 실행하고 출력을 줄 단위로 스트림 출력으로 보냅니다. `check=True`이면 실패 시 `CalledProcessError`입니다. 인터럽트가 오면 하위 프로세스 그룹에 SIGINT를 전달합니다.
 - 테스트: `test_fr_f6_run_command_streams_and_forwards_interrupt`
 
@@ -234,16 +245,59 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 | `viewer1` | ✓ | | | |
 | `viewer2` | ✓ | ✓ | | |
 | `viewer3` | ✓ | ✓ | ✓ | |
+| `editor` | ✓ (편집·잠금 포함, FR-S8) | ✓ | ✓ | |
 | `admin`(마스터) | ✓ | ✓ | ✓ | ✓ |
 
 작업별 최소 권한: 커널·실행 기록 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다.
 - 테스트: `test_fr_a3_permission_matrix`
 
+## 10a. 협업 문서 (S)
+
+한 커널(=파일)에 여러 클라이언트가 동시에 붙습니다. VS Code 확장, IntelliJ, ash, Ember 대화 화면, 에이전트가 함께 붙을 수 있습니다. 2025 설계의 셀 동기화, 셀 잠금, 포커스, 실행 알림, 알람을 이어받습니다(`설계초안/`의 WS 명세). 커널이 이 상태를 들고 있습니다. 매니저는 언제든 사라질 수 있고, 같은 파일에 서로 다른 매니저(로컬 임시 매니저와 전용 매니저)로 붙은 클라이언트도 같은 상태를 봐야 하기 때문입니다.
+
+### FR-S1 공유 문서 상태 — `Agreed`
+커널은 파일을 파싱한 문서(셀 목록)를 메모리에 두고 문서 버전 `doc_version`(편집마다 1 증가)을 관리합니다. 셀마다 커널 수명 동안 바뀌지 않는 `cell_id`를 둡니다. 파일에 `# @id`가 있으면 그 값을 쓰고, 없으면 `c_<hex>`를 만들되 파일에는 쓰지 않습니다. 첫 동기화 스냅숏(`GET /kernels/{id}/document`)에는 셀(`cell_id`, 셀별 `version`, 소스, 최신 출력), 잠금, 접속자, `doc_version`, 그리고 그 스냅숏 직후의 이벤트 `seq`가 함께 들어 있습니다. 클라이언트는 그 `seq`부터 이벤트를 구독하면 빠짐없이 이어집니다.
+- 수용 기준: 두 클라이언트가 같은 스냅숏을 받은 뒤 한쪽이 편집하면, 다른 쪽은 이벤트만으로 같은 문서 상태에 도달합니다(셀 순서, 소스, 버전이 같음).
+- 테스트: `test_fr_s1_snapshot_plus_events_converge`
+
+### FR-S2 셀 편집 — `Agreed`
+셀 생성(위치는 `after`/`before` `cell_id` 또는 끝, 타입, 소스, 메타데이터), 소스·타입·메타데이터 수정, 삭제, 이동을 지원합니다. 수정은 `base_version`(그 셀의 버전)을 받고, 다르면 `409 conflict`와 현재 셀을 돌려줍니다. 다른 클라이언트가 잠근 셀의 수정·삭제는 `409 locked`입니다. 편집마다 `doc.cell.*` 이벤트를 모든 구독자에게 보내고, 이벤트에는 누가 했는지(`by`)가 들어갑니다.
+- 수용 기준: 버전이 맞지 않는 수정은 거절되고 문서는 바뀌지 않습니다. 생성·수정·삭제·이동이 이벤트로 퍼집니다.
+- 테스트: `test_fr_s2_edit_ops_and_version_conflict`
+
+### FR-S3 셀 잠금 — `Agreed`
+편집을 시작하는 클라이언트는 그 셀을 잠급니다(2025 설계의 `start_typing`). 잠금은 셀마다 하나이고 `locked_by`(클라이언트), 사용자 이름, `locked_at`, `last_activity`를 가집니다. 잠근 클라이언트가 수정할 때마다 `last_activity`가 갱신됩니다. 잠금은 세 경우에 풀립니다. 잠근 클라이언트가 해제할 때(최종 소스를 함께 보낼 수 있음, 2025 `cell_unlocked_with_code`), 3분 동안 활동이 없을 때, 그 클라이언트가 접속을 끊을 때입니다. 잠금과 해제는 `doc.lock`/`doc.unlock` 이벤트로 퍼집니다.
+- 수용 기준: 잠긴 셀을 다른 클라이언트가 잠그면 `409 locked`와 `locked_by`를 받습니다. 3분 무활동 뒤에는 자동으로 풀립니다(테스트에서는 시간을 줄임). 접속이 끊긴 클라이언트의 잠금도 풀립니다.
+- 테스트: `test_fr_s3_lock_exclusive_idle_release_and_disconnect`
+
+### FR-S4 접속자, 포커스, 커서 — `Agreed`
+클라이언트는 접속할 때 `client_id`(기기마다 고유)와 `nickname`(기기 이름, 2025 `?nickname=`)을 알립니다. 사용자 이름과 아바타는 토큰에서 정해지고, 없으면 클라이언트가 준 값을 씁니다. 접속자 목록은 다음을 담습니다: 사용자, 기기, 권한, 포커스한 셀(`focused_cell_id`, `focused_at`), 커서(`cell_id`, `line`, `column`, 선택 범위). 포커스, 블러, 커서 변경은 `presence.update` 이벤트로 퍼집니다(커서는 클라이언트마다 초당 최대 20회로 합칩니다). 이벤트 스트림이 끊기고 30초가 지나면 그 클라이언트는 `presence.leave`가 됩니다.
+- 테스트: `test_fr_s4_presence_focus_cursor_and_leave`
+
+### FR-S5 디스크 파일과의 동기화 — `Agreed`
+- 클라이언트 편집은 300ms 디바운스 뒤 파일에 원자적으로 저장합니다(FORMAT 직렬화, 손대지 않은 셀은 바이트 그대로).
+- 바깥에서 파일이 바뀌면(에이전트의 Edit 도구, `git checkout`, 다른 편집기) 커널이 1초 안에 알아채고 다시 파싱합니다. 셀을 `cell_id` → `source_sha256` → 순서로 맞추고 `doc.reloaded` 이벤트를 보냅니다.
+- 그때 잠긴 셀이 바깥에서도 바뀌었으면, 잠근 쪽의 내용을 지우지 않습니다. 그 셀을 `conflict`로 표시하고 두 버전을 모두 이벤트에 담습니다. 잠근 클라이언트가 해제하거나 다시 수정하면 충돌이 풀립니다.
+- 수용 기준: 커널이 붙어 있는 동안 파일을 밖에서 고치면 모든 클라이언트에 반영됩니다. 클라이언트 편집이 파일에 저장되고, 고치지 않은 셀의 바이트는 그대로입니다.
+- 테스트: `test_fr_s5_external_edit_reloads_and_locked_cell_conflicts`, `test_fr_s5_client_edit_is_saved_byte_exact`
+
+### FR-S6 실행한 사람 표시 — `Agreed`
+`run.queued`, `run.started`, `run.finished`, `cell.*` 이벤트와 실행 기록 메타데이터에 실행을 요청한 클라이언트(`started_by`: client_id, 사용자, 기기)를 넣습니다. 인터럽트하면 `interrupted_by`도 넣습니다(2025 `execution_started.started_by`, `execution_interrupted.interrupted_by`). 셀을 실행하는 요청에는 `cell_ids`를 쓸 수 있습니다(인덱스 `cells`와 둘 중 하나).
+- 테스트: `test_fr_s6_runs_are_attributed`
+
+### FR-S7 알람 — `Agreed`
+SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, 웹훅 대체)를 위해 롱폴링을 둡니다. `GET /kernels/{id}/runs/{run_ref}/wait?timeout=`는 그 실행이 끝나면 바로, 아니면 `timeout`(기본 60초, 최대 300초) 뒤에 돌려줍니다. 응답은 끝났을 때 실행 요약, 아직이면 `status: running`과 진행 정보이고, 다시 부를 때 쓸 `next` 정보가 들어 있습니다(2025 `executions/{cell_id}/wait`의 timeout·재폴링 모델). 실행이 끝나면 `run.finished` 이벤트가 모든 구독자에게 가므로, Ember는 이 이벤트로 휴대폰 푸시를 보냅니다.
+- 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`
+
+### FR-S8 권한 — `Agreed`
+셀 편집(FR-S2)과 잠금(FR-S3)은 `editor` 이상만 할 수 있습니다. `editor`는 `viewer3`(실행 가능)에 셀 편집을 더한 공유 권한이고, 2025 설계의 `user_permission: "write"`에 해당합니다. 접속자 표시와 포커스(FR-S4)는 `viewer1`부터 할 수 있습니다. FR-A3 표에 `editor`를 더합니다.
+- 테스트: `test_fr_a3_permission_matrix` (FR-A3과 공유)
+
 ## 10. 허브 (H)
 
 전송은 iroh 1.x로 정했습니다(PROJECT Q1, 2026-10-03, 조건부: ember SPEC NFR-N1을 못 맞추면 직접 구현을 검토). 그래서 허브는 직접 만든 랑데부·중계 대신 iroh가 이미 쓰는 프로토콜을 그대로 받습니다. 기기는 iroh 엔드포인트이고, 기기 ID는 그 엔드포인트 ID(ed25519 공개 키, 소문자 hex 64자)입니다.
 
-**두 호스트(INTENT D14, 2026-10-03).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다.
+**두 호스트(INTENT D15, 2026-10-03).** darkpyonix.dev의 DNS는 Cloudflare이고, 허브는 가벼운 부분을 Cloudflare Workers에서 돌립니다(사용자 결정). Workers와 Containers는 들어오는 UDP를 받지 못하므로 iroh 릴레이만 따로 둡니다.
 
 | 호스트 | 구현 | 맡는 일 |
 |---|---|---|
@@ -252,7 +306,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 
 - Worker는 apex(`darkpyonix.dev`)에만 붙습니다(custom domain). `relay.darkpyonix.dev`는 Cloudflare 프록시를 끈(DNS only) A/AAAA 레코드로 릴레이 호스트를 가리킵니다. 프록시는 UDP 7842를 넘기지 않고, QAD는 릴레이 호스트 자신의 TLS 인증서를 쓰기 때문입니다.
 - Worker의 부하: iroh `PkarrPublisher`는 5분마다(그리고 주소가 바뀔 때) 다시 올립니다. 기기 10대면 하루 약 3,000번의 `PUT /pkarr`와 그만큼의 D1 쓰기 두 번이고, 요청마다 ed25519 검증 한 번과 D1 질의 몇 개입니다. Workers 무료 한도(하루 10만 요청, D1 쓰기 10만)의 몇 % 수준이라 "가볍다"는 조건을 만족합니다. 운영은 CPU 한도 여유를 위해 Workers Paid를 권합니다.
-- 언어는 TypeScript입니다. 근거는 INTENT D14에 있습니다.
+- 언어는 TypeScript입니다. 근거는 INTENT D15에 있습니다.
 
 계약은 [api/hub.openapi.yaml](api/hub.openapi.yaml) 하나이고, 릴레이 호스트가 답하는 연산은 경로 단위 `servers: relay.darkpyonix.dev`로 표시합니다. Worker 테스트가 Worker의 모든 연산이 문서의 상태 코드로만 답하고 Worker의 라우트와 문서의 연산이 정확히 같음을 확인합니다(`test_hub_every_operation_answers_with_a_documented_status`, `test_hub_every_worker_route_is_documented_and_vice_versa`). 릴레이 호스트의 같은 이름 테스트(`hub/server/tests/hub/openapi.rs`)는 `servers`가 붙은 연산만 확인합니다.
 
@@ -287,9 +341,9 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
   - (C) **둘 다(Container 릴레이 + QAD 전용 VPS)**: iroh에서 QAD는 릴레이 목록(`RelayMap`)의 항목마다 붙고(`RelayConfig::quic`), 그 호스트는 릴레이 URL의 호스트입니다. 그래서 "QAD만 하는 VPS"도 릴레이 항목으로 올라가야 하고, 기기가 그것을 홈 릴레이로 고를 수 있으니 결국 릴레이도 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 되므로 이득이 없습니다.
 - **권장: (A)로 시작하고, ember NFR-N1 측정으로 (B)로 옮길지 정합니다.** ember NFR-N1의 기준은 대칭 NAT를 뺀 조합에서 직접 경로 성공률 85% 이상입니다. iroh가 말하는 약 90% 직접 연결은 QAD를 전제로 한 수치라, QAD 없이 이 기준을 맞춘다는 근거가 아직 없습니다. 측정은 (A) 위에서 두 번 합니다. 클라이언트 `RelayMap`에 QAD를 켠 경우(`quic: Some(7842)`)와 끈 경우(`quic: None`, (B)와 같은 조건)입니다. QAD를 끈 경우도 85%를 넘으면 릴레이를 Container로 옮기고 VPS를 없앱니다(`hub/worker/wrangler.toml`에 주석으로 둔 컨테이너 바인딩). 못 넘으면 (A)를 유지합니다. 사용자 확인 전이라 `Draft`입니다.
 - 입장 정책: 릴레이 핸드셰이크가 증명한 엔드포인트 ID와 클라이언트가 낸 인증 토큰(있으면)을 릴레이 호스트가 `POST https://darkpyonix.dev/internal/v1/relay/admit`로 묻습니다(공유 비밀 `RELAY_SHARED_SECRET`). 폐기되지 않은 등록 기기면 허용(`cache_secs` 60초 동안 새 연결에 재사용 가능), 유효한 손님 통행권(FR-H4가 발급, 그 공유가 아직 게시 중)이 있으면 허용(캐시 안 함), 그 밖에는 거절입니다. 릴레이 호스트는 엔드포인트의 첫 연결이 열리고 마지막 연결이 닫힐 때 `POST /internal/v1/relay/presence`로 알려 기기 목록의 `online`을 갱신합니다. 기기를 지우면 Worker가 `POST https://relay.darkpyonix.dev/admin/v1/disconnect`로 끊습니다.
-- 릴레이 호스트 상태: `hub/server`는 지금 D14 이전 구현(API·SQLite 포함)이고, 릴레이 전용으로 줄이는 작업(위 입장 API 사용, `/admin/v1/disconnect` 추가, API·DB 제거)은 빌드가 필요한 별도 변경입니다(`hub/server/src/lib.rs` 머리 주석).
+- 릴레이 호스트 상태: `hub/server`는 지금 D15 이전 구현(API·SQLite 포함)이고, 릴레이 전용으로 줄이는 작업(위 입장 API 사용, `/admin/v1/disconnect` 추가, API·DB 제거)은 빌드가 필요한 별도 변경입니다(`hub/server/src/lib.rs` 머리 주석).
 - 수용 기준: 두 등록 기기가 IP 전송을 끈 릴레이 전용 모드로 우리 릴레이를 거쳐 연결하고 데이터를 주고받습니다(선택된 경로가 릴레이). 같은 두 기기가 루프백에서 직접 경로로도 연결합니다. 등록되지 않은 엔드포인트는 릴레이가 거절해 연결하지 못하고, 지운 기기의 연결은 끊깁니다. Worker 쪽: 등록 기기는 허용, 지운 기기와 통행권 없는 엔드포인트는 거절, 비밀이 틀리면 401, presence가 `online`을 바꿉니다. 루프백 처리량과 왕복 지연, NFR-N1의 QAD 켬/끔 직접 연결 비율을 측정해 여기에 적습니다.
-- 테스트: Worker `test_fr_h3_relay_admits_registered_and_refuses_removed_devices`, `test_fr_h3_relay_callbacks_need_the_shared_secret`, `test_fr_h3_presence_marks_devices_online`(`hub/worker/test/shares.test.ts`). 릴레이 호스트 `test_fr_h3_relay_only_connection_through_hub`, `test_fr_h3_direct_connection_on_loopback`, `test_fr_h3_relay_rejects_unregistered_endpoint`, `test_fr_h3_relay_throughput_and_latency`(지금은 D14 이전 구현 기준, 릴레이 축소 때 스텁 입장 API로 바꿈)
+- 테스트: Worker `test_fr_h3_relay_admits_registered_and_refuses_removed_devices`, `test_fr_h3_relay_callbacks_need_the_shared_secret`, `test_fr_h3_presence_marks_devices_online`(`hub/worker/test/shares.test.ts`). 릴레이 호스트 `test_fr_h3_relay_only_connection_through_hub`, `test_fr_h3_direct_connection_on_loopback`, `test_fr_h3_relay_rejects_unregistered_endpoint`, `test_fr_h3_relay_throughput_and_latency`(지금은 D15 이전 구현 기준, 릴레이 축소 때 스텁 입장 API로 바꿈)
 - 측정 기록: (구현 후 기입)
 
 ### FR-H4 ash 호스팅과 공유 링크 — `Agreed`
@@ -328,7 +382,7 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
 
 ### NFR-K3 출력 오버헤드 — `Agreed`
 `print`를 100,000번 하는 셀의 실행 시간이 같은 인터프리터의 일반 실행 대비 1.5배를 넘지 않습니다. 구독자가 느려도 메인 스레드가 막히지 않습니다(출력 큐 상한을 넘으면 기록은 계속하되 실시간 이벤트를 합칩니다).
-- 측정 기록: (구현 후 기입)
+- 측정 기록 (2026-10-03, macOS arm64, `test_nfr_k3_print_overhead`): 셀 안 100,000번 `print`를 파이프로 출력하는 일반 실행과 비교, 5회 중 최솟값의 프로세스 CPU 시간 비율은 3.9 1.08, 3.11 1.17, 3.13 1.24, 3.14 1.42, 3.15 1.21입니다. 측정 당시 머신의 부하 평균이 100을 넘어 벽시계 시간은 같은 측정 안에서도 0.7~8배로 흔들렸으므로 판정에 쓰지 않았습니다. 한가한 머신에서 벽시계 시간을 다시 재야 `Done`이 됩니다.
 
 ### NFR-K4 시작 시간 — `Agreed`
 커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다.
@@ -344,7 +398,7 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다.
 
 ### NFR-H1 종단 간 암호화 — `Agreed`
-허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D14). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
+허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
 - 수용 기준: 릴레이 전용 연결로 알려진 평문 표식을 보낼 때, 클라이언트와 허브 사이의 바이트(허브까지 TLS 없이 평문 HTTP 릴레이로 둔 경우에도)에 그 표식이 나타나지 않고, 상대 끝단에서는 그대로 받습니다.
 - 테스트: `test_nfr_h1_relay_sees_only_ciphertext`
 

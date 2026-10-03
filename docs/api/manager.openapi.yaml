@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: DarkPyonix Kernel Manager API
-  version: 1.0.0-draft.2
+  version: 1.0.0-draft.3
   summary: Discover, launch and drive file-bound DarkPyonix kernels.
   description: 'The HTTP API every DarkPyonix client uses: IDE extensions (VS Code, IntelliJ), the Ember
 
@@ -626,7 +626,9 @@ paths:
       description: "Each SSE message has `id: <seq>`, `event: <type>` and `data: <JSON>` where type and data\nare\
         \ those of `docs/PROTOCOL.md` §3.4. Because `EventSource` cannot set headers, this\nendpoint also accepts\
         \ `?token=`. Output events are omitted for `viewer1`.\n A `replay_truncated` message carries no SSE `id`,\
-        \ so it does not move the client's `Last-Event-ID`."
+        \ so it does not move the client's `Last-Event-ID`. With `client_id` the stream also makes the client present;\
+        \ it leaves 30 s after the stream closes. Document events `doc.*` and `presence.*` (PROTOCOL §4) are delivered\
+        \ here too."
       security:
       - bearerAuth: []
       - tokenQuery: []
@@ -639,6 +641,15 @@ paths:
           minimum: 0
       - name: Last-Event-ID
         in: header
+        schema:
+          type: string
+      - name: client_id
+        in: query
+        schema:
+          type: string
+        description: Joins presence while the stream is open (FR-S4).
+      - name: nickname
+        in: query
         schema:
           type: string
       responses:
@@ -768,6 +779,348 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
+  /api/v1/kernels/{kernel_id}/cells:
+    parameters:
+    - &id001
+      $ref: '#/components/parameters/KernelId'
+    - &id002
+      $ref: '#/components/parameters/ClientId'
+    - &id003
+      $ref: '#/components/parameters/Nickname'
+    post:
+      tags:
+      - Documents
+      operationId: createCell
+      summary: Create a cell
+      description: Inserted after/before a cell or at the end; saved to the file within 300 ms and broadcast as
+        `doc.cell.created` (SPEC FR-S2, FR-S5). `editor` or `admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/CellEdit'
+              - type: object
+                properties:
+                  after:
+                    type: string
+                  before:
+                    type: string
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '201': &id004
+          description: The cell after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentCell'
+  /api/v1/kernels/{kernel_id}/cells/{cell_id}:
+    parameters:
+    - *id001
+    - &id005
+      $ref: '#/components/parameters/CellId'
+    - *id002
+    - *id003
+    patch:
+      tags:
+      - Documents
+      operationId: updateCell
+      summary: Edit a cell
+      description: Requires `base_version`; refused with `409 conflict` when stale and `409 locked` when another
+        client holds the lock (SPEC FR-S2, FR-S3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/CellEdit'
+              - type: object
+                required:
+                - base_version
+                properties:
+                  base_version:
+                    type: integer
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200': *id004
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags:
+      - Documents
+      operationId: deleteCell
+      summary: Delete a cell
+      parameters:
+      - name: base_version
+        in: query
+        required: true
+        schema:
+          type: integer
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '204':
+          description: Deleted.
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kernels/{kernel_id}/cells/{cell_id}/move:
+    parameters:
+    - *id001
+    - *id005
+    - *id002
+    - *id003
+    post:
+      tags:
+      - Documents
+      operationId: moveCell
+      summary: Move a cell
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - to_index
+              properties:
+                to_index:
+                  type: integer
+                  minimum: 1
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200': *id004
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kernels/{kernel_id}/cells/{cell_id}/lock:
+    parameters:
+    - *id001
+    - *id005
+    - *id002
+    - *id003
+    put:
+      tags:
+      - Documents
+      operationId: lockCell
+      summary: Lock a cell for editing (or renew the lock)
+      description: One lock per cell; released by unlock, after 3 minutes without activity, or when the client disconnects
+        (SPEC FR-S3).
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200':
+          description: The lock.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lock'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags:
+      - Documents
+      operationId: unlockCell
+      summary: Release a lock, optionally saving the final source
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source:
+                  type: string
+                base_version:
+                  type: integer
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200': *id004
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kernels/{kernel_id}/presence:
+    parameters:
+    - *id001
+    - *id002
+    - *id003
+    put:
+      tags:
+      - Documents
+      operationId: updatePresence
+      summary: Report focus and cursor
+      description: Broadcast as `presence.update`; cursor updates are coalesced to 20 per second per client (SPEC
+        FR-S4). `viewer1` and up.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                focused_cell_id:
+                  type:
+                  - string
+                  - 'null'
+                cursor:
+                  oneOf:
+                  - $ref: '#/components/schemas/Cursor'
+                  - type: 'null'
+                avatar:
+                  type:
+                  - string
+                  - 'null'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200':
+          description: Current presence list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - presence
+                properties:
+                  presence:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Presence'
+    delete:
+      tags:
+      - Documents
+      operationId: leavePresence
+      summary: Leave (also implied 30 s after the client's event stream closes)
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '204':
+          description: Left.
+  /api/v1/kernels/{kernel_id}/runs/{run_ref}/wait:
+    parameters:
+    - *id001
+    - name: run_ref
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Runs
+      operationId: waitRun
+      summary: Long-poll until a run finishes (alarm)
+      description: 'Returns as soon as the run finishes, or after `timeout` seconds with `status: running` and a
+        `next` URL (SPEC FR-S7, the 2025 alarm long-poll).'
+      parameters:
+      - name: timeout
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 60
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200':
+          description: Finished or still running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitResult'
 components:
   securitySchemes:
     bearerAuth:
@@ -793,6 +1146,30 @@ components:
         type: string
         pattern: ^k_[0-9a-f]{20}$
         example: k_3f9a0c1b2d4e5f607182
+    ClientId:
+      name: X-DarkPyonix-Client
+      in: header
+      required: false
+      description: Stable per-device client id (SPEC FR-S4). Required for edits, locks and presence; the events
+        stream may pass it as `?client_id=` instead.
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9_-]{8,64}$
+    Nickname:
+      name: X-DarkPyonix-Nickname
+      in: header
+      required: false
+      description: Device name shown to other clients (2025 `?nickname=`).
+      schema:
+        type: string
+        maxLength: 64
+    CellId:
+      name: cell_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9_.:-]{1,64}$
   responses:
     BadRequest:
       description: The request is malformed.
@@ -827,6 +1204,13 @@ components:
     KernelUnreachable:
       description: The kernel was discovered but its control channel could not be reached or authenticated (`kernel_unreachable`),
         or it is shutting down (`shutting_down`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: '`conflict` (base_version is stale; `data.cell` is the current cell) or `locked` (another client
+        holds the lock; `data.locked_by`).'
       content:
         application/json:
           schema:
@@ -878,12 +1262,14 @@ components:
       type: string
       enum:
       - admin
+      - editor
       - viewer3
       - viewer2
       - viewer1
       description: '`admin` is the master token. Share permissions follow SPEC FR-A3:
 
-        `viewer1` code only; `viewer2` code and run logs; `viewer3` code, run logs and execution.
+        `viewer1` code only; `viewer2` code and run logs; `viewer3` code, run logs and execution; `editor` adds
+        cell editing and locks (FR-S8).
 
 
         A share token is scoped to one kernel: addressing any other kernel answers `404 not_found`, never `403`.
@@ -894,6 +1280,7 @@ components:
       - viewer1
       - viewer2
       - viewer3
+      - editor
     KernelStatus:
       type: string
       enum:
@@ -1014,6 +1401,11 @@ components:
           - reject
           - queue
           default: reject
+        cell_ids:
+          type: array
+          items:
+            type: string
+          description: 'Alternative to `cells`: run these cells by cell_id (FR-S6).'
     RunAccepted:
       type: object
       required:
@@ -1081,6 +1473,17 @@ components:
         path:
           type: string
           description: Absolute path of the run log file.
+        started_by:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: '{client_id, user, nickname} (FR-S6).'
+        interrupted_by:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
     RunNotebook:
       type: object
       description: 'An nbformat 4.5 notebook. `metadata.darkpyonix` holds the run fields of SPEC FR-R1 and
@@ -1157,6 +1560,8 @@ components:
               - start_timeout
               - kernel_unreachable
               - internal
+              - conflict
+              - locked
             message:
               type: string
             data:
@@ -1224,10 +1629,12 @@ components:
     DocumentCell:
       type: object
       required:
+      - cell_id
       - index
       - type
       - source
       - source_sha256
+      - version
       - metadata
       properties:
         index:
@@ -1272,11 +1679,29 @@ components:
           oneOf:
           - $ref: '#/components/schemas/RunId'
           - type: 'null'
+        cell_id:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        lock:
+          oneOf:
+          - $ref: '#/components/schemas/Lock'
+          - type: 'null'
+        conflict:
+          type:
+          - object
+          - 'null'
+          description: 'Set when the file changed on disk while this cell was locked (FR-S5): {disk_source}.'
+          additionalProperties: true
     Document:
       type: object
       required:
       - path
       - cells
+      - doc_version
+      - seq
+      - presence
       properties:
         path:
           type: string
@@ -1292,6 +1717,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DocumentCell'
+        doc_version:
+          type: integer
+          minimum: 0
+        seq:
+          type: integer
+          minimum: 0
+          description: Subscribe to events from here to stay in sync (FR-S1).
+        presence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Presence'
     KernelEvent:
       type: object
       description: The `data` of one SSE message. Types and fields follow PROTOCOL §3.4.
@@ -1315,6 +1751,16 @@ components:
           - output
           - output.clear
           - replay_truncated
+          - doc.cell.created
+          - doc.cell.updated
+          - doc.cell.deleted
+          - doc.cell.moved
+          - doc.lock
+          - doc.unlock
+          - doc.reloaded
+          - doc.conflict
+          - presence.update
+          - presence.leave
         time:
           type: string
           format: date-time
@@ -1364,3 +1810,129 @@ components:
             description: Share link `<share_base>/<share_id>#<token>`; `share_base` is dedicated-manager configuration,
               default `https://darkpyonix.dev/s`. The token is in the fragment so it never reaches the hub.
             e.g. `https://darkpyonix.dev/s/<share_id>#<token>`.: null
+    Cursor:
+      type: object
+      required:
+      - cell_id
+      - line
+      - column
+      properties:
+        cell_id:
+          type: string
+        line:
+          type: integer
+          minimum: 0
+        column:
+          type: integer
+          minimum: 0
+        selection:
+          type:
+          - array
+          - 'null'
+          items:
+            type: array
+            items:
+              type: integer
+            minItems: 2
+            maxItems: 2
+          minItems: 2
+          maxItems: 2
+    Presence:
+      type: object
+      required:
+      - client_id
+      - nickname
+      - user
+      - permission
+      - last_seen
+      properties:
+        client_id:
+          type: string
+        nickname:
+          type: string
+        user:
+          type: string
+        avatar:
+          type:
+          - string
+          - 'null'
+        permission:
+          $ref: '#/components/schemas/Permission'
+        focused_cell_id:
+          type:
+          - string
+          - 'null'
+        focused_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        cursor:
+          oneOf:
+          - $ref: '#/components/schemas/Cursor'
+          - type: 'null'
+        last_seen:
+          type: string
+          format: date-time
+    Lock:
+      type: object
+      required:
+      - cell_id
+      - locked_by
+      - user
+      - locked_at
+      - last_activity
+      properties:
+        cell_id:
+          type: string
+        locked_by:
+          type: string
+          description: client_id
+        user:
+          type: string
+        nickname:
+          type: string
+        locked_at:
+          type: string
+          format: date-time
+        last_activity:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: 3 minutes after last_activity (FR-S3).
+    CellEdit:
+      type: object
+      properties:
+        type:
+          type: string
+        source:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+    WaitResult:
+      type: object
+      required:
+      - status
+      - run_id
+      properties:
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        run_id:
+          $ref: '#/components/schemas/RunId'
+        run:
+          oneOf:
+          - $ref: '#/components/schemas/RunSummary'
+          - type: 'null'
+        progress:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        next:
+          type:
+          - string
+          - 'null'
+          description: URL to poll again when still running.

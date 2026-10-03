@@ -1,6 +1,6 @@
 //! darkpyonix.dev, the DarkPyonix hub (SPEC §10, docs/api/hub.openapi.yaml).
 //!
-//! **Partly superseded (INTENT D14, 2026-10-03).** The hub API now runs on Cloudflare
+//! **Partly superseded (INTENT D15, 2026-10-03).** The hub API now runs on Cloudflare
 //! Workers (`hub/worker/`): GitHub accounts and device links (FR-H6, FR-H1), the address
 //! directory (FR-H2), shares (FR-H4) and names (FR-H5). This crate stays as the **relay
 //! host** at `relay.darkpyonix.dev`: the iroh relay with its probes and QUIC address
@@ -12,7 +12,7 @@
 //! `cache_secs`) plus `/internal/v1/relay/presence` reports, add `POST /admin/v1/disconnect`,
 //! and replace the `fr_h1`/`fr_h2`/`fr_h4`/`fr_h5` tests (now covered by `hub/worker/test/`)
 //! with relay tests against a stub admission endpoint. Until then the API code below is the
-//! pre-D14 implementation and is not deployed.
+//! pre-D15 implementation and is not deployed.
 
 mod api;
 mod db;

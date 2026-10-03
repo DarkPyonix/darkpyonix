@@ -25,7 +25,7 @@ Design is fixed (milestone M0); implementation starts with M1. See [PROJECT.md](
 | Document | Content |
 |---|---|
 | [PROJECT.md](PROJECT.md) | Scope, milestones with dates, open questions |
-| [docs/INTENT.md](docs/INTENT.md) | Why, decisions (D1–D13), rejected alternatives |
+| [docs/INTENT.md](docs/INTENT.md) | Why, decisions (D1–D15), rejected alternatives |
 | [docs/SPEC.md](docs/SPEC.md) | Requirements and acceptance criteria |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How kernel, manager, hub, Ember and ash fit together |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | DKP/1: discovery datagrams and the kernel control channel |

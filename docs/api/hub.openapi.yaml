@@ -7,7 +7,7 @@ info:
     The hub connects a user's machines (the main server and its branch computers) and lets
     shared notebooks reach a dedicated manager, **without seeing their traffic** (SPEC NFR-H1).
 
-    **Two hosts** (SPEC §10, INTENT D14):
+    **Two hosts** (SPEC §10, INTENT D15):
 
     - `https://darkpyonix.dev` is a **Cloudflare Worker** (`hub/worker/`, TypeScript, D1).
       It serves GitHub sign-in, the device registry, the address directory, share links, the

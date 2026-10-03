@@ -1,5 +1,5 @@
 //! The relay host's operations match docs/api/hub.openapi.yaml (CLAUDE.md: the OpenAPI file
-//! is the SPEC). Since INTENT D14 the hub API runs on Cloudflare Workers (hub/worker, which
+//! is the SPEC). Since INTENT D15 the hub API runs on Cloudflare Workers (hub/worker, which
 //! checks the rest); this binary serves only the operations with a path-level
 //! `servers: relay.darkpyonix.dev` entry.
 
