@@ -71,7 +71,7 @@
           <tr><td><code>darkpyonix restart FILE [--hard]</code></td><td>Soft restart clears the namespace. <code>--hard</code> re-executes the process with the same interpreter; the kernel id stays.</td></tr>
           <tr><td><code>darkpyonix shutdown FILE [--force]</code></td><td>Interrupts, finishes the run log and exits cleanly. Only <code>--force</code> kills the process.</td></tr>
           <tr><td><code>darkpyonix kernel FILE [--python PATH]</code></td><td>Starts the kernel without running anything.</td></tr>
-          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>Issues a share token for the file's kernel. Needs a dedicated manager.</td></tr>
+          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>Issues a share token for the file's kernel. Needs a dedicated manager. Becomes <code>--capabilities read,history,...</code> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></td></tr>
           <tr><td><code>darkpyonix manager [--ephemeral|--dedicated] [--host H] [--port P] [--idle-timeout S]</code></td><td>Runs a manager. The default is ephemeral: loopback only, exits when idle. Giving both modes is an error.</td></tr>
         </tbody>
       </table>

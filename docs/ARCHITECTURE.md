@@ -64,27 +64,24 @@ flowchart LR
 ```mermaid
 flowchart TB
   subgraph Home["~/.darkpyonix  (DARKPYONIX_HOME)"]
-    KEY["user.key (0600)"]
-    REG["kernels/&lt;kernel_id&gt;.json<br/>발견 보조 등록 (비밀값 없음)"]
     LOCK["locks/&lt;kernel_id&gt;.lock<br/>파일당 커널 하나 (OS 잠금)"]
-    MAN["managers/&lt;pid&gt;.json (0600)<br/>매니저 주소·토큰"]
   end
 
-  CLI["darkpyonix CLI<br/>(에이전트·사람)"] -->|managers/*.json 탐색, 없으면 띄움| M1
+  CLI["darkpyonix CLI<br/>(에이전트·사람)"] -->|토큰을 모르면 자기 매니저를 띄움<br/>주소·토큰은 표준 출력으로| M1
   IDE2["IDE 확장"] --> M1
   M1["manager (ephemeral)<br/>127.0.0.1:임의 포트"]
   M2["manager (dedicated)<br/>외부 접속용"]
-  M1 -->|DKP/1 + HMAC| K["kernel: train.py<br/>127.0.0.1:임의 포트"]
-  M2 -->|DKP/1 + HMAC| K
+  M1 -->|DKP/1, 같은 OS 계정만| K["kernel: train.py<br/>제어: 유닉스 소켓 / 이름 있는 파이프<br/>TCP 포트 없음"]
+  M1 -.->|스트림 소켓 넘김<br/>SCM_RIGHTS / WSADuplicateSocketW| K
+  M2 -->|DKP/1, 같은 OS 계정만| K
   M1 <-->|멀티캐스트 질의/공지| MC(("239.255.68.80:46880<br/>루프백"))
   K <--> MC
   K --- LOCK
-  K --- REG
   K -->|기록| RUNS["train.py 옆<br/>__runs__/train.py/&lt;run_id&gt;.ipynb"]
 ```
 
 - **커널은 누구의 자식도 아닙니다.** 매니저가 띄우더라도 새 세션으로 분리되어 시작합니다(INTENT D2). 매니저가 끝나도 커널은 남습니다.
-- **매니저는 여러 개가 동시에 떠 있어도 됩니다.** 모두 같은 커널을 발견하고, 같은 사용자 키로 인증합니다(INTENT D5). 에이전트가 기존 매니저의 토큰을 모르거나 떠 있는 매니저가 없으면 CLI가 새 임시 매니저를 띄웁니다.
+- **매니저는 여러 개가 동시에 떠 있어도 됩니다.** 모두 같은 커널을 발견하고 붙습니다. 커널은 OS가 알려 주는 상대 계정이 자기와 같을 때만 받습니다(INTENT D5, 사용자 결정 2026-10-04). 매니저는 파일로 자기를 알리지 않습니다. 토큰을 모르는 에이전트는 CLI로 자기 임시 매니저를 띄우고, 그 매니저가 표준 출력으로 알린 주소와 토큰을 씁니다(INTENT D4, SPEC FR-C1). 발견은 루프백 멀티캐스트 하나이고 등록 파일은 없습니다.
 - **파일당 커널 하나**는 커널이 `locks/<kernel_id>.lock`에 거는 OS 잠금이 보장합니다. 프로세스가 죽으면 OS가 잠금을 풀므로 남은 잠금 파일 때문에 막히는 일이 없습니다.
 
 ### 2.1 커널 내부 스레드
@@ -109,6 +106,42 @@ flowchart LR
 
 사용자 코드는 메인 스레드에서만 돕니다(INTENT D12). 출력은 큐에 넣고 바로 돌아오므로 느린 클라이언트나 디스크가 학습 루프를 붙잡지 않습니다. 인터럽트는 control 스레드가 `_thread.interrupt_main()`으로 메인 스레드에 `KeyboardInterrupt`를 일으킵니다. POSIX와 Windows가 같은 경로를 씁니다.
 
+### 2.2 스트림 넘김
+
+사용자 설계(2025)를 따릅니다. 매니저가 인증과 권한 검사를 하고, 오래 열린 스트림만 소켓째 커널에 넘깁니다(INTENT D6, SPEC FR-M6, PROTOCOL §3.7). 짧은 REST 호출은 매니저가 DKP/1 요청으로 처리합니다. 구현 대기(#47).
+
+```mermaid
+sequenceDiagram
+  participant C as 클라이언트 (IDE, ash, Ember)
+  participant M as manager
+  participant K as kernel
+
+  C->>M: GET /api/kernels/{id}/events (토큰)
+  M->>M: 토큰 확인, 권한 검사
+  alt 실패
+    M-->>C: 401 / 403 / 404
+  else 통과
+    M->>K: adopt {kind, request 바이트, label{capabilities, client_id, user, nickname, share_id}}
+    M->>K: FD (POSIX SCM_RIGHTS) 또는 share 바이트 (Windows)
+    K-->>M: response {stream_id}
+    Note over M: 매니저는 자기 FD를 닫고 연결에서 빠짐
+    K-->>C: HTTP/1.1 200 text/event-stream, 이벤트
+  end
+  Note over M,K: 매니저가 죽어도 C와 K 사이 연결은 이어짐
+  M->>K: (공유를 지울 때) streams.close {share_id}
+```
+
+| 연결 | 넘기는 방법 | 매니저가 죽으면 |
+|---|---|---|
+| 루프백·LAN 평문 HTTP | 날 소켓(POSIX `SCM_RIGHTS`, Windows `WSADuplicateSocketW` → `socket.fromshare`) | 이어짐 |
+| TLS(전용 모드), HTTP/2, P2P 터널 | 소켓 쌍의 한쪽을 넘기고 매니저가 바이트를 퍼 나름(내용 변환 없음) | 함께 끝남 |
+
+커널은 넘겨받은 연결에서 토큰을 보지 않습니다. 매니저가 붙인 권한 라벨로 보낼 내용만 거릅니다(SPEC FR-K9).
+
+### 2.3 Android와 iOS
+
+모바일에서는 이 절의 배치를 쓰지 않습니다. PyREPL 구현처럼 앱 안에 미리 정한 프로세스에서만 노트북을 실행합니다(INTENT D20). 앱이 자기 커널 프로세스를 알기 때문에 멀티캐스트 발견과 소켓 넘김이 없고, 매니저는 필요 없거나 앱 안에 들어갑니다. 이 경로는 Ember 모바일 앱이 다룹니다. 상태: 계획.
+
 ## 3. 커널 수명
 
 ```mermaid
@@ -122,18 +155,19 @@ sequenceDiagram
   M->>M: kernel_id = H(정규화 경로)
   M->>K: 멀티캐스트 query {kernel_id}
   alt 이미 살아 있음
-    K-->>M: announce {port, status}
+    K-->>M: announce {control, status}
   else 없음
     M->>K: 부트스트랩으로 실행 (분리 세션)
-    K->>FS: locks/<id>.lock 잠금, kernels/<id>.json 기록
-    K-->>M: announce {port, status: idle}
+    K->>FS: locks/<id>.lock 잠금
+    K-->>M: announce {control, status: idle}
   end
-  M->>K: TCP 연결, hello/auth(HMAC)/welcome
+  M->>K: 제어 소켓·파이프 연결, 상대 계정 확인, hello/auth/welcome
   M-->>A: 200 Kernel
   A->>M: POST /kernels/{id}/runs {mode: all}
   M->>K: request run
-  K-->>M: event run.started, cell.*, output…
-  M-->>A: SSE 스트림
+  A->>M: GET /kernels/{id}/events
+  M->>K: adopt (소켓 넘김, §2.2)
+  K-->>A: SSE 스트림 (run.started, cell.*, output…)
   Note over M: 클라이언트가 모두 떠나고 유휴 시간이 지나면<br/>임시 매니저는 끝남. 커널은 계속 실행
   A->>M: (나중에, 새 매니저) GET /kernels/{id}/runs/latest
 ```
@@ -163,11 +197,14 @@ experiments/
 flowchart LR
   ASH2["ash (브라우저)"] -->|https://darkpyonix.dev/s/&lt;share&gt;| HUB2["hub"]
   HUB2 -->|중계 또는 홀펀칭| DM2["dedicated manager<br/>(메인 서버 또는 지부)"]
-  DM2 -->|권한: viewer1·2·3| K3["kernel"]
+  DM2 -->|능력: read·history·execute·edit·manage| K3["kernel"]
 ```
 
-- 외부 접근은 항상 **전용 매니저**를 거칩니다. 커널은 루프백에만 열립니다.
-- 공유 토큰은 커널(=파일)마다 발급하며 권한은 2025년 설계를 따릅니다. `viewer1` 코드만, `viewer2` 코드와 실행 기록, `viewer3` 코드·실행 기록·실행, `admin` 전부입니다(SPEC FR-A3).
+- 외부 접근은 항상 **전용 매니저**를 거칩니다. 커널은 같은 계정만 붙는 유닉스 소켓·이름 있는 파이프에만 열립니다(INTENT D5).
+- 공유 토큰은 커널(=파일)마다 발급하며 권한은 등급이 아니라 능력의 집합입니다. `read` 코드 보기, `history` 실행 기록과 출력, `execute` 실행과 인터럽트, `edit` 코드 수정과 셀 잠금, `manage` 공유 설정입니다. 실행과 코드 수정은 다른 능력입니다(INTENT D18, SPEC FR-A3, 사용자 결정 2026-10-04).
+- 권한 검사는 매니저만 합니다. 커널은 매니저가 넘긴 능력 집합으로 보낼 내용만 거릅니다(INTENT D5).
+- 협업 동기화는 2025 WebSocket(`/api/ws/kernels/{kernel_id}`)이고, 매니저가 검사한 뒤 커널에 넘깁니다(INTENT D19, SPEC FR-S9). 구현 대기(#49).
+- 전용 매니저는 2025 비밀번호 인증을 그대로 씁니다. 비밀번호와 마스터 토큰은 매니저마다 하나입니다(`/api/auth…`, SPEC FR-A4). 커널 접근 토큰(초기, 로그인, 공유)은 커널이 들고 있고, 매니저는 제어 채널로 커널에 확인을 요청합니다. 그래서 어느 매니저로 들어와도 통합니다. 커널이 종료돼도 남으며 파일이 지워지면 지워집니다(INTENT D17, SPEC FR-A5·FR-A6·FR-K10, 구현 대기 #48).
 - 허브는 연결을 이어 줄 뿐이고, 내용은 끝단 사이에서 암호화합니다(SPEC NFR-H1, Draft).
 
 ## 6. ember와의 경계

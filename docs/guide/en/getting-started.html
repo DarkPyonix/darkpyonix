@@ -118,7 +118,7 @@ darkpyonix run train.py --param lr=0.02   <span class="c"># second run: same ker
       <table>
         <thead><tr><th scope="col">Path</th><th scope="col">What</th></tr></thead>
         <tbody>
-          <tr><td><code>user.key</code></td><td>The key kernels and managers of the same OS user authenticate with. Mode 0600, created on first use.</td></tr>
+          <tr><td><code>user.key</code></td><td>The key kernels and managers of the same OS user authenticate with. Mode 0600, created on first use. Being removed: the kernel will admit only the same OS account, checked by the peer identity the OS reports <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/55">#55</a></span></td></tr>
           <tr><td><code>locks/&lt;kernel_id&gt;.lock</code></td><td>The OS lock that keeps one kernel per file. The OS releases it when a kernel dies, so a stale file never blocks.</td></tr>
           <tr><td><code>runtime/</code></td><td>The kernel sources unpacked from the binary.</td></tr>
           <tr><td><code>kernels/&lt;kernel_id&gt;.json</code>, <code>managers/&lt;pid&gt;.json</code></td><td>Registry files for discovery and for the CLI to find a manager. Being removed <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>.</td></tr>

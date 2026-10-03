@@ -139,7 +139,7 @@ curl -s -X POST "$URL/api/kernels/$KID/interrupt" -H "Authorization: Bearer $TOK
     <h2 id="changing">바뀌는 것</h2>
         <div class="warn">
       <span class="label">변경 중</span>
-      <p>오래 열리는 스트림(이벤트, 실행 대기 롱폴링)은 매니저가 소켓째 커널에 넘기도록 바뀝니다. 그래서 매니저가 끝나도 스트림이 이어집니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>. 파일별 비밀번호, 초기 토큰, 공유 토큰 재발급을 2025 설계대로 되살리는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/48">#48</a></span>. 권한은 <code>editor</code> 없이 viewer1, viewer2, viewer3, admin으로 돌아가고, 협업은 2025 WebSocket 동기화로 옮깁니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>. <code>runs</code>, <code>interrupt</code> 같은 짧은 REST 호출의 모양은 그대로입니다.</p>
+      <p>오래 열리는 스트림(이벤트, 실행 대기 롱폴링)은 매니저가 소켓째 커널에 넘기도록 바뀝니다. 그래서 매니저가 끝나도 스트림이 이어집니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>. 2025 인증을 되살리는 중입니다. 비밀번호와 마스터 토큰은 매니저마다 하나(<code>/api/auth</code>)이고, 접근 토큰은 커널이 직접 들고 있어서 어느 매니저로든 통합니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/48">#48</a></span>. 권한은 viewer 등급 대신 능력 다섯(<code>read</code>, <code>history</code>, <code>execute</code>, <code>edit</code>, <code>manage</code>)의 집합이 되고, 협업은 2025 WebSocket 동기화로 옮깁니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>. 매니저와 커널 사이는 같은 OS 계정만 통과하게 됩니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/55">#55</a></span>. <code>runs</code>, <code>interrupt</code> 같은 짧은 REST 호출의 모양은 그대로입니다.</p>
     </div>
 
     <nav class="pagenav" aria-label="페이지 이동">

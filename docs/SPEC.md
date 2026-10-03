@@ -57,9 +57,29 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 테스트: `test_fr_k7_soft_restart_clears_namespace`, `test_fr_k7_hard_restart_stops_loop_and_sets_flag`(실행기 쪽), `test_fr_k7_hard_restart_keeps_kernel_id`(실제 커널 프로세스: 같은 커널 ID, 같은 인터프리터와 경로로 다시 announce하고 `started_at`이 늦어지며 이전 변수가 없음. POSIX에서는 `os.execv`라 `pid`는 그대로입니다)
 
 ### FR-K8 종료 — `Done`
-`shutdown`은 실행 중인 셀을 인터럽트하고, 실행 기록을 마저 쓰고, `bye`를 보내고, 등록 파일을 지우고, 코드 0으로 끝납니다.
-- 수용 기준: 종료 뒤 등록 파일과 잠금이 남지 않고 실행 기록의 상태는 `interrupted`입니다.
+`shutdown`은 실행 중인 셀을 인터럽트하고, 실행 기록을 마저 쓰고, `bye`를 보내고, 코드 0으로 끝납니다.
+- 수용 기준: 종료 뒤 잠금이 남지 않고 실행 기록의 상태는 `interrupted`입니다.
+- 상태 메모 (2026-10-03): 등록 파일을 지웠으므로(FR-D2) "종료 뒤 등록 파일 없음" 검사는 의미가 없어집니다. 테스트에서 그 검사를 빼는 일은 #50에서 합니다.
 - 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, 등록 파일 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
+
+### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+커널은 매니저가 `adopt`로 넘긴 연결(PROTOCOL §3.7)에 직접 응답합니다. `events`는 SSE, `ws`는 2025 WebSocket 동기화(PROTOCOL §5), `wait`는 실행 대기 응답입니다. 커널은 넘겨받은 요청 바이트를 소켓에서 읽은 것처럼 다루고, 인증하거나 토큰을 검사하지 않습니다. 능력 집합(`label.capabilities`, FR-A3)은 보낼 내용을 거르는 데만 씁니다. `history`가 없으면 출력과 실행 기록을 보내지 않습니다. `read`가 없으면 셀 소스를 비워 보냅니다. `edit`이 없으면 WebSocket 편집 메시지(`start_typing`)를 받지 않습니다. `streams.close {share_id}`가 오면 그 공유로 넘겨받은 스트림을 모두 닫습니다.
+- 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
+  - POSIX에서 `SCM_RIGHTS`로 넘긴 SSE 연결에 커널이 `200 text/event-stream`과 이벤트를 쓰고, 넘긴 매니저를 `SIGKILL`로 죽인 뒤에도 같은 연결로 이벤트가 계속 옵니다.
+  - Windows에서 `socket.share` 형식의 바이트로 넘긴 연결이 같은 결과를 냅니다.
+  - 넘겨받은 요청에 틀린 토큰이 들어 있어도 커널은 라벨대로 응답합니다(토큰을 보지 않음).
+  - `history`가 없는 라벨(`["read"]`)의 SSE에는 `output` 이벤트가 없습니다.
+  - `streams.close`가 그 `share_id`의 스트림만 닫고, 다른 스트림은 그대로입니다.
+- 테스트(계획): `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_adopted_socket_on_windows`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`
+
+### FR-K10 커널 접근 토큰 보관 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #48)
+INTENT D17, PROTOCOL §6. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널은 자기 접근 토큰(초기, 로그인, 공유, SPEC FR-A6)의 주인입니다. 매니저의 `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list` 요청에 답하고, 토큰은 SHA-256 해시와 능력 집합으로만 영속화합니다. 커널은 다시 뜨면 저장소를 읽어 옵니다. 자기 파일이 지워진 것을 알아채면 저장소를 지웁니다. 저장소는 커널만 읽고 쓰며, 위치는 [provisional]로 #48에서 정합니다. 표준 라이브러리(`secrets`, `hashlib`, `hmac`, `json`, `os.replace`)만 씁니다.
+- 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
+  - `tokens.issue`로 받은 토큰을 `tokens.verify`가 그 능력 집합과 함께 확인합니다. 저장소에는 토큰 값이 없습니다.
+  - 커널을 `shutdown`하고 다시 띄워도 같은 토큰이 확인됩니다.
+  - `tokens.revoke {share_id}` 뒤 그 토큰은 `valid: false, revoked: true`이고, 그 공유로 넘겨받은 스트림이 닫힙니다.
+  - 파일을 지우면 커널이 1초 안에 저장소를 지웁니다.
+- 테스트(계획): `test_fr_k10_issue_and_verify`, `test_fr_k10_tokens_survive_restart`, `test_fr_k10_revoke_closes_share_streams`, `test_fr_k10_store_is_deleted_with_the_file`, `test_fr_k10_store_holds_no_token_values`
 
 ## 3. 실행 (X)
 
@@ -203,14 +223,22 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ## 5. 발견 (D)
 
 ### FR-D1 멀티캐스트 발견 — `Done`
-PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다.
+PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다. 발견은 이 루프백 멀티캐스트 하나입니다(INTENT D4). 그룹 주소와 포트(`239.255.68.80:46880`)는 사용자 결정입니다(2026-10-04, "그대로 사용", PROJECT Q14).
 - 수용 기준: 커널 세 개를 띄우고 query 하나를 보내면 세 개의 announce를 받습니다. 다른 `user_tag`의 query에는 응답하지 않습니다.
 - 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-D2 등록 파일 보조 — `Done`
-커널은 announce 본문을 `kernels/<kernel_id>.json`에 둡니다. 매니저는 멀티캐스트 결과와 등록 파일을 합치되, `pid`가 살아 있지 않은 등록은 지웁니다. `DARKPYONIX_DISCOVERY=registry`이면 등록 파일만 씁니다.
-- 수용 기준: 멀티캐스트를 끈 상태에서도 매니저가 커널을 찾습니다. `kill -9`로 죽은 커널의 등록은 다음 발견에서 사라집니다.
-- 테스트: `test_fr_d2_registry_fallback_finds_kernels`, `test_fr_d2_stale_registry_is_pruned`, `test_fr_d2_registry_ignores_other_users`, Rust `fr_d2_registry_fallback_finds_kernels`, `fr_d2_stale_registry_is_pruned`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+### FR-D2 등록 파일 보조 — `Withdrawn` (사용자 지시 2026-10-03, 코드 제거 대기 #50)
+커널 등록 파일(`kernels/<kernel_id>.json`)과 `DARKPYONIX_DISCOVERY=registry`를 지웁니다. 리더가 사용자 승인 없이 더한 보조 발견입니다. 사용자(2026-10-03): "커널 등록 파일 써도 된다고 내가 말한 적이 절대 없고요"(INTENT D4, §5).
+- 코드: 커널은 등록 파일을 쓰지 않고, 매니저는 등록 파일을 읽지 않습니다. `test_fr_d2_*`와 Rust `fr_d2_*` 테스트는 코드와 함께 지웁니다(#50).
+- 수용 기준(#50): 커널을 띄우고 끈 뒤에도 `DARKPYONIX_HOME/kernels/` 아래에 `.json`이 생기지 않습니다(진단 로그 `.log`만 있음). `DARKPYONIX_DISCOVERY=registry`를 줘도 동작이 같습니다.
+- 테스트(계획): `test_fr_d2_kernel_writes_no_registry_file`
+
+### FR-D3 지원 범위 — `Agreed` (사용자 결정 2026-10-03)
+사용자 결정: "멀티캐스트가 막힌 특수한 이상한 상황은 가정하지 말고, wsl 안에서 돌고 있는거에 윈도우에서 연결해야 할 이유도 없어. 안드로이드랑 iOS의 경우 PyREPL 구현처럼 별도 미리 정의된 프로세스 내에서만 노트북이 실행 가능하도록 하면 되는거야."
+- 루프백 멀티캐스트가 막힌 환경(멀티캐스트 루프백이 없는 컨테이너 네트워크, 그것을 막는 방화벽·VPN 소프트웨어 등)은 지원 범위 밖입니다. 보조 발견(등록 파일, 커널 ID에서 정하는 결정적 포트)은 두지 않습니다.
+- WSL 안에서 도는 커널에 Windows 쪽 매니저나 클라이언트가 붙는 경우는 지원 범위 밖입니다. WSL 안에서는 WSL 안의 매니저를 씁니다.
+- Android와 iOS는 데스크톱 발견을 쓰지 않습니다. 앱 안에 미리 정한 프로세스(PyREPL 방식)에서만 노트북을 실행합니다(INTENT D20). 이 경로는 Ember 모바일 앱이 다루고, 이 저장소의 SPEC 범위 밖입니다. 상태: 계획.
+- 수용 기준: 이 요구사항은 범위를 정하는 것이라 테스트가 없습니다. FR-D1의 테스트가 지원 범위 안의 동작을 검증합니다.
 
 ## 6. 런타임 API와 파일 형식 (F)
 
@@ -293,31 +321,48 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ## 7. 매니저 (M)
 
-### FR-M1 HTTP API — `Done`
-매니저는 [api/manager.openapi.yaml](api/manager.openapi.yaml)의 경로를 모두, 그리고 그 경로만 냅니다. 이벤트 스트림은 SSE(`text/event-stream`)이고 SSE `id`는 커널의 `seq`입니다. `Last-Event-ID` 헤더나 `since` 쿼리로 이어 받습니다.
+### FR-M1 HTTP API — `Agreed` (스트림 넘김으로 바뀜, 구현 대기 #47)
+매니저는 [api/manager.openapi.yaml](api/manager.openapi.yaml)의 경로를 모두, 그리고 그 경로만 냅니다. 이벤트 스트림은 SSE(`text/event-stream`)이고 SSE `id`는 커널의 `seq`입니다. `Last-Event-ID` 헤더나 `since` 쿼리로 이어 받습니다. OpenAPI에 `x-darkpyonix-handoff: kernel`로 표시한 연산(이벤트 스트림, WebSocket 동기화, 실행 대기)은 매니저가 인증·권한 검사만 하고 연결을 커널에 넘깁니다(FR-M6). 응답은 커널이 씁니다.
+- 상태 메모 (2026-10-03): 아래 테스트는 매니저가 이벤트를 중계하던 구현을 검증합니다. 사용자 결정 "스트림만 넘김"(INTENT D6)으로 이벤트 스트림의 응답 주체가 커널로 바뀌므로, 넘김 구현(#47)과 함께 다시 통과해야 `Done`입니다.
 - 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), `test_fr_m1_events_stream_resumes_with_last_event_id`, `test_fr_m1_events_errors_and_keepalive`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`), 각 경로의 동작 테스트(`darkpyonix/manager/crates/dpx-server/tests/api.rs`). 파이썬 시제품 기준 `test_fr_m1_*`(`tests/test_fr_m_manager.py`)
 
 ### FR-M2 커널 시작은 멱등 — `Done`
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
 - 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-M3 임시 모드 수명 — `Done`
-임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. `managers/<pid>.json`(0600)에 주소와 토큰을 쓰고, 열린 SSE 스트림이 없고 HTTP 요청도 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 끝날 때 등록을 지우고 커널은 건드리지 않습니다.
-- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`, 파이썬 시제품), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`
+### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현 대기 #47)
+임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, 구현 대기 #50). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6, 구현 대기 #47). 끝날 때 커널은 건드리지 않습니다.
+- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`, 파이썬 시제품), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`(등록 파일을 지우므로 #50에서 `test_fr_m3_url_and_token_are_printed_on_stdout`, `test_fr_m3_writes_no_registry_file`로 바꿉니다)
 
 ### FR-M4 전용 모드 — `Done`
-`darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다.
+`darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다. 2025 비밀번호 로그인과 마스터·공유 토큰 재설정은 매니저 단위이고 전용 매니저가 맡습니다(FR-A4, 구현 대기 #48). 커널 접근 토큰(FR-A6)은 매니저가 아니라 커널에 묶입니다.
 - 테스트: Rust `test_fr_m4_dedicated_manager_never_idles_and_requires_token`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m4_shares_are_stored_hashed_and_survive_restart`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`)
 
 ### FR-M5 매니저 여러 개 공존 — `Done`
 같은 사용자의 매니저 여러 개가 같은 커널에 동시에 붙을 수 있고, 각자 같은 이벤트를 받습니다.
 - 테스트: `test_fr_m5_two_managers_share_one_kernel`(파이썬 시제품), Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
 
+### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는 이벤트 스트림(`GET /api/kernels/{kernel_id}/events`), WebSocket 동기화(`GET /api/ws/kernels/{kernel_id}`), 실행 대기(`GET /api/kernels/{kernel_id}/runs/{run_ref}/wait`)를 인증하고 권한을 검사한 뒤 연결을 커널에 넘깁니다. 이미 읽은 요청 바이트와 `{capabilities, client_id, user, nickname, share_id}`를 함께 보냅니다(FR-A3). 나머지 REST 호출은 매니저가 DKP/1 요청으로 처리합니다.
+- POSIX 날 소켓: 커널의 제어 채널인 유닉스 도메인 소켓(announce의 `control`, FR-A1)으로 `SCM_RIGHTS`. 넘긴 뒤 매니저는 자기 FD를 닫습니다.
+- Windows 날 소켓: `WSADuplicateSocketW`로 만든 `WSAPROTOCOL_INFOW`를 제어 파이프 위 `adopt`의 `share`로 보냅니다.
+- TLS, HTTP/2, P2P 터널: 소켓 쌍의 한쪽을 넘기고 바이트를 퍼 나릅니다. 본문은 바꾸지 않습니다. 이런 스트림은 매니저와 함께 끝납니다.
+- 공유를 지우거나 그 타입의 토큰을 다시 만들면 `streams.close {share_id}`를 보냅니다.
+- 인증이나 권한에서 실패한 요청은 넘기지 않고 매니저가 `401`/`403`/`404`로 답합니다.
+- 수용 기준:
+  - 평문 HTTP로 연 이벤트 스트림이 넘겨진 뒤 매니저를 `SIGKILL`로 죽여도, 다음 출력 이벤트가 같은 연결로 옵니다.
+  - TLS(전용 모드)로 연 이벤트 스트림은 넘겨진 뒤에도 이벤트가 오고, 매니저가 끝나면 함께 끝납니다.
+  - 틀린 토큰의 스트림 요청은 커널에 닿지 않고 `401`입니다.
+  - 공유를 지우면 그 공유 토큰으로 연 스트림이 1초 안에 닫히고, 마스터 토큰으로 연 스트림은 남습니다.
+- 테스트(계획): `test_fr_m6_plain_stream_survives_manager_kill`, `test_fr_m6_tls_stream_is_pumped_and_ends_with_manager`, `test_fr_m6_unauthenticated_stream_never_reaches_kernel`, `test_fr_m6_revoking_a_share_closes_its_streams`
+
 ## 8. CLI (C)
 
-### FR-C1 매니저 찾기 — `Done`
-`darkpyonix` CLI는 `managers/*.json`에서 살아 있는 매니저를 고르고, 없으면 임시 매니저를 띄웁니다. 에이전트가 기존 매니저의 토큰을 몰라도 같은 OS 사용자라면 그대로 동작합니다.
-- 테스트: Rust `test_fr_c1_cli_spawns_manager_when_none_is_running`, `test_fr_c1_skips_dead_and_unhealthy_registrations`, `test_fr_c1_spawn_failure_is_reported`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
+### FR-C1 매니저 찾기 — `Agreed` (사용자 지시, 구현 대기 #50)
+매니저의 주소와 토큰을 파일로 나누지 않습니다(INTENT D4). `darkpyonix` CLI는 `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN`이 있으면 그 매니저를 씁니다. 에이전트가 이미 아는 토큰입니다. 없으면 자기 임시 매니저를 자식 프로세스로 띄우고, 그 매니저가 표준 출력 첫 줄에 쓴 `{url, token, pid}`를 파이프로 읽어 씁니다. 토큰을 모르는 에이전트는 이렇게 자기 매니저를 씁니다. 커널은 모든 매니저가 멀티캐스트로 찾으므로 어느 매니저로 붙어도 같은 커널입니다(FR-M5).
+- `darkpyonix manager`를 직접 실행해도 같은 한 줄을 표준 출력에 씁니다. 에이전트는 그 값을 환경 변수로 두고 다음 호출에 쓸 수 있습니다. 두지 않으면 호출마다 새 임시 매니저가 뜨고, 각자 `idle_timeout` 뒤에 끝납니다.
+- 수용 기준: 환경 변수 없이 `darkpyonix run a.py`가 매니저를 띄워 동작하고, `DARKPYONIX_HOME/managers/`가 생기지 않습니다. 환경 변수를 주면 새 매니저를 띄우지 않습니다.
+- 테스트(계획): `test_fr_c1_cli_spawns_its_own_manager_and_reads_stdout`, `test_fr_c1_cli_uses_the_given_manager`, `test_fr_c1_spawn_failure_is_reported`. 지금의 `test_fr_c1_skips_dead_and_unhealthy_registrations`는 지웁니다.
 
 ### FR-C2 명령 — `Done`
 
@@ -331,8 +376,8 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 | `darkpyonix vars FILE` | 네임스페이스 |
 | `darkpyonix restart FILE [--hard]`, `darkpyonix shutdown FILE [--force]` | 재시작 / 종료. `--force`만 프로세스를 죽입니다 |
 | `darkpyonix kernel FILE [--python PATH]` | 실행 없이 커널만 띄움 |
-| `darkpyonix share FILE --permission viewer1\|viewer2\|viewer3` | 공유 토큰 발급(전용 매니저) |
-| `darkpyonix manager [--ephemeral\|--dedicated] [--host H] [--port P] [--idle-timeout S]` | 매니저 실행. 기본은 `--ephemeral`(FR-M3: 루프백, 유휴 시 종료, `managers/<pid>.json`에 토큰), `--dedicated`는 FR-M4. 둘을 함께 주면 오류입니다 |
+| `darkpyonix share FILE --capabilities read,history[,execute,edit,manage]` | 공유 토큰 발급(전용 매니저). 능력 이름은 FR-A3 |
+| `darkpyonix manager [--ephemeral\|--dedicated] [--host H] [--port P] [--idle-timeout S]` | 매니저 실행. 기본은 `--ephemeral`(FR-M3: 루프백, 유휴 시 종료, 주소와 토큰은 표준 출력으로), `--dedicated`는 FR-M4. 둘을 함께 주면 오류입니다 |
 
 - 수용 기준: `darkpyonix run a.py`를 두 번째로 실행하면 종료 코드 75와 함께 현재 실행 정보와 `--queue`/`stop` 안내를 출력합니다.
 - 테스트: Rust `test_fr_c2_cli_commands`, `test_fr_c2_second_run_exits_75_with_hint`, `test_fr_c2_run_follows_outputs_and_exits_0`, `test_fr_c2_run_error_exits_1_with_traceback`, `test_fr_c2_ctrl_c_interrupts_the_run_and_exits_130`, `test_fr_c2_second_ctrl_c_detaches_and_the_run_continues`, `test_fr_c2_detach_prints_the_run_id_and_does_not_follow`, `test_fr_c2_run_options_reach_the_api`, `test_fr_c2_logs_follow_replays_the_executing_run`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`), `test_fr_c2_every_command_parses`, `test_fr_c2_invalid_usage_is_rejected`(`darkpyonix/manager/crates/darkpyonix/src/args.rs`)
@@ -340,31 +385,93 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ## 9. 인증과 공유 (A)
 
-### FR-A1 커널 인증 — `Done`
-PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음 쓰는 쪽이 0600으로 원자적으로 만듭니다.
-- 테스트: `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`
+### FR-A1 커널 인증 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #55)
+INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 방법은 사용자가 고른 "OS가 알려 주는 상대 계정 확인"입니다. 커널의 제어 채널은 POSIX 유닉스 도메인 소켓과 Windows 이름 있는 파이프이고, 커널은 연결마다 상대 UID(POSIX)나 SID(Windows)가 자기 계정과 같은지 OS에 묻습니다. 매니저도 커널 쪽 계정을 같은 방법으로 확인합니다. 키 파일과 HMAC은 없습니다. 클라이언트의 인증과 권한 검사는 매니저가 하고, 커널은 매니저를 믿습니다.
+- 수용 기준(사용 가능한 모든 인터프리터, POSIX와 Windows):
+  - 다른 OS 계정의 프로세스가 커널의 소켓이나 파이프에 붙으면 커널은 프레임을 하나도 보내지 않고 닫습니다.
+  - 같은 계정의 프로세스는 키 없이 `welcome`까지 갑니다.
+  - 커널은 TCP 포트를 열지 않습니다.
+  - 매니저는 소켓이나 파이프 건너편이 다른 계정이면 요청을 보내지 않고 그 커널을 `kernel_unreachable`로 둡니다.
+  - 런타임 홈에 `user.key`가 생기지 않습니다.
+  - 다른 계정 시험은 두 번째 OS 계정을 만들 수 있는 CI에서 돕니다.
+- 테스트(계획): `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`. 지금의 `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`는 지웁니다(#55).
 
-### FR-A2 매니저 토큰 — `Done`
-모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`)와 공유 링크만 `?token=`을 받습니다. `/health`만 인증 없이 열립니다.
-- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
+### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
+모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 넷만 `Authorization: Bearer` 없이 열립니다. 초기 토큰 발급(FR-A6)은 인증이 없고, 매니저 로그인 `GET /api/auth`와 마스터 토큰 재설정 `PUT /api/auth/tokens/master`(FR-A4)는 `Authorization: Basic`의 비밀번호로, 커널 로그인 `POST /api/kernels/{kernel_id}/tokens/auth`(FR-A6)는 본문의 비밀번호로 인증합니다.
+- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`, 등록 파일 제거와 함께 #50에서 `test_fr_a2_cli_uses_the_token_from_stdout`으로 바꿈)
 
-### FR-A3 공유 권한 — `Done`
-공유 토큰은 커널(파일)마다 발급하고 권한은 아래와 같습니다(2025 설계 유지).
+### FR-A3 권한: 능력의 집합 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #49)
+INTENT D18. 사용자 결정(2026-10-04): "권한 이름 저따위 아니거든? 시멘틱하게 다시 추론해 … 실행 권한이랑 코드 수정 권한은 다른거야. 권한 등급 개념 아니니까 이상한 방향으로 가지 마." 승인한 능력은 다섯이고 등급이 아닙니다. 토큰은 능력의 집합을 가지고, 매니저는 작업마다 그 작업의 능력 하나가 집합에 있는지만 봅니다. 능력 사이에 순서나 포함 관계는 없습니다.
 
-| 권한 | 셀 코드 | 실행 기록·출력 | 실행·인터럽트 | 종료·공유 관리 |
+| 능력 | 뜻 | 이 능력이 필요한 작업 |
+|---|---|---|
+| `read` | 코드 보기 | 커널 목록·상태 조회, 문서(셀 코드) 조회, 이벤트 스트림과 WebSocket 연결, `request_code`, `request_locks`, 접속자 표시와 포커스(`PUT`/`DELETE …/presence`, `cell_focus`, `cell_blur`) |
+| `history` | 실행 기록과 출력 | 실행 기록 목록·내용, 문서와 스트림의 출력, `request_history`, 네임스페이스 조회, 실행 대기 결과 |
+| `execute` | 실행과 인터럽트 | 실행, 인터럽트, 대기 실행 취소, 커널 시작·재시작·종료·강제 종료 |
+| `edit` | 코드 수정, 셀 잠금 | 셀 생성·수정·삭제·이동, 잠금·잠금 갱신·해제(최종 소스 포함), `start_typing` |
+| `manage` | 공유 설정 | 공유 목록·발급·철회(`/shares`, `tokens/share`) |
+
+- 다섯을 모두 가진 토큰: 매니저 마스터 토큰(FR-A4), 커널 초기 토큰과 로그인 토큰(FR-A6). 공유 토큰은 발급할 때 고른 집합만 가집니다(비어 있으면 `400`). 매니저 인증 계열(`/api/auth…`)은 능력이 아니라 마스터 토큰이나 비밀번호로 엽니다(FR-A4).
+- 2025 `user_permission`: 실행의 `"write"`는 `execute`, 셀 잠금·해제·편집의 `"write"`는 `edit`, 공유 설정의 `"admin"`은 `manage`입니다. 요청은 `user_permission`에 그 작업의 능력 이름을 실을 수 있습니다. 다른 이름이면 `400`이고, 허락은 토큰의 집합이 정합니다. 능력이 없으면 `403 forbidden`(2025 `INSUFFICIENT_PERMISSION`)입니다.
+- 등급 이름 `viewer1`·`viewer2`·`viewer3`·`admin`·`editor`와 2025 `"write"`는 능력 이름이 아니라서 `400`입니다(INTENT D18).
+- 커널 하나에 묶인 토큰(FR-A6)은 다른 커널을 가리키면 `403`이 아니라 `404`입니다. 공유 토큰 발급은 전용 매니저만 합니다. 권한 검사는 매니저만 합니다(INTENT D5).
+- 커널 시작·재시작·종료를 `execute`에, 네임스페이스 조회를 `history`에 둔 것은 임시이고 사용자 재검토 예정입니다(2026-10-04, "일단 그렇게 해둬 나중에 내가 다시 볼게", PROJECT Q17).
+- 수용 기준: 작업마다 그 능력이 있는 토큰은 통과하고, 없는 토큰은 `403`입니다. `["read", "edit"]` 토큰은 잠그고 고칠 수 있지만 실행은 `403`입니다. `["read", "execute"]` 토큰은 실행할 수 있지만 잠금과 수정은 `403`입니다. `["manage"]` 토큰은 공유를 만들 수 있지만 문서 조회는 `403`입니다. `["read"]` 토큰의 이벤트 스트림에는 `output`이 없습니다. `viewer2`나 `editor`로 공유를 만들면 `400`입니다. 실행 요청에 `user_permission: "edit"`을 실으면 `400`입니다.
+- 테스트(계획): `test_fr_a3_each_operation_needs_its_capability`, `test_fr_a3_execute_and_edit_are_independent`, `test_fr_a3_capabilities_have_no_order`, `test_fr_a3_tier_names_are_refused`, `test_fr_a3_user_permission_names_the_needed_capability`, `test_fr_a3_read_only_events_omit_outputs`. 지금의 Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`)는 능력 집합으로 고칩니다(#49). 셋째는 이름 그대로 둡니다.
+- 상태 메모: 위 Rust 테스트는 `editor`가 있던 등급 표를 검증합니다. 능력 표로 고친 뒤 통과해야 `Done`입니다.
+
+### FR-A4 매니저 비밀번호와 마스터 토큰 (2025 복구) — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #48)
+INTENT D17. 사용자 결정(2026-10-03): "원 설계대로 복구". 범위는 사용자 확인(2026-10-04): "매니저 단위 맞아." 전용 매니저는 비밀번호 하나와 마스터 토큰 하나를 둡니다. 2025 API 명세서 요약표의 네 기능이고, 경로는 버전 없이 `/api` 아래입니다(INTENT D16). 임시 매니저는 이 넷에 `403 forbidden`으로 답합니다. 임시 매니저에는 비밀번호가 없고, 토큰은 자기를 띄운 프로세스에게 표준 출력으로만 알리기 때문입니다(FR-M3).
+
+| 2025 기능 | 2025 경로와 설명 | 이 API | 인증 | 결과 |
 |---|---|---|---|---|
-| `viewer1` | ✓ | | | |
-| `viewer2` | ✓ | ✓ | | |
-| `viewer3` | ✓ | ✓ | ✓ | |
-| `editor` | ✓ (편집·잠금 포함, FR-S8) | ✓ | ✓ | |
-| `admin`(마스터) | ✓ | ✓ | ✓ | ✓ |
+| 로그인 | `GET /auth`, "비밀번호를 세션에 넣어서 진행" | `GET /api/auth` | 비밀번호(`Authorization: Basic`, 사용자 이름은 비움) | `{token}`: 이 매니저의 마스터 토큰 |
+| 비밀번호 재설정 | `PUT /auth/password`, "토큰을 인증하고, 새 비밀번호 등록" | `PUT /api/auth/password` | 마스터 토큰. 비밀번호가 아직 없으면 초기 토큰(FR-A6)도 됨 | `{message}` |
+| 마스터 토큰 재설정 | `PUT /auth/tokens/master`, "비밀번호를 인증하고, 새 토큰 발행" | `PUT /api/auth/tokens/master` | 비밀번호(`Authorization: Basic`) | 새 마스터 토큰. 이전 마스터 토큰은 `401` |
+| 공유 토큰 재설정 | `PUT /auth/tokens/shared/{token_type}`, "마스터 토큰을 세션에 넣어 인증하고, 각 타입별 공유 토큰 생성" | `PUT /api/auth/tokens/shared/{token_type}` | 마스터 토큰 | 그 타입의 매니저 공유 토큰을 새로 만들고, 이전 것은 거둠. `token_type`은 능력 집합을 `+`로 이은 것(`read+history`, 순서는 `read`·`history`·`execute`·`edit`·`manage`) |
 
-작업별 최소 권한: 커널·실행 기록 조회 `viewer1`(실행 기록과 출력은 `viewer2`부터), 네임스페이스 조회 `viewer2`, 실행·인터럽트·대기 실행 취소 `viewer3`, 재시작·종료·공유 관리·새 커널 시작 `admin`. 공유 토큰은 한 커널에만 묶이며, 다른 커널을 가리키면 `403`이 아니라 `404`입니다.
-- 테스트: Rust `test_fr_a3_permission_matrix`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_fr_a3_viewer1_events_omit_outputs`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`)
+- 이 마스터 토큰이 전용 매니저의 마스터 토큰(FR-M4)입니다. 하나뿐이고 이 매니저의 모든 커널에 통합니다.
+- 매니저 공유 토큰은 이 매니저로 들어오는 모든 커널에 그 타입의 능력 집합(FR-A3)으로 통합니다. 이 매니저에만 있으므로 다른 매니저에서는 통하지 않습니다. 커널 하나에 묶여 어느 매니저로든 통하는 토큰은 커널 접근 토큰입니다(FR-A6).
+- 비밀번호는 솔트를 넣은 느린 해시로, 토큰은 해시로만 그 매니저의 `manager.db`에 둡니다. 커널은 비밀번호와 토큰을 모릅니다(INTENT D5).
+- 2026-10-03 초안의 "파일마다 비밀번호"와 파일 단위 경로(`/api/kernels/{kernel_id}/password`, `/tokens/master`, `/tokens/shared/{token_type}`)는 지웠습니다. 2025 상세 페이지의 `PASSWORD_NOT_SET: Password has not been set for this kernel`은 이제 "이 매니저에 비밀번호가 없음"으로 읽습니다.
+- 사용자 결정(2026-10-04, "이대로", PROJECT Q15): "세션에 넣어서"를 `Authorization: Basic`으로 읽은 것, 2025 `token_type`(`viewer1`…)을 능력 집합 표기로 읽은 것, 그리고 비밀번호가 이미 있는 매니저에서는 초기 토큰으로 비밀번호를 바꿀 수 없게 한 것(`403`). 뒤의 것이 없으면 인증 없이 받는 초기 토큰(FR-A6)으로 누구나 매니저 비밀번호를 바꿀 수 있습니다.
+- 오류 코드: 2025 `PASSWORD_NOT_SET` → `400 password_not_set`, `INVALID_TOKEN` → `401 unauthorized`, `TOKEN_BLACKLISTED` → `401 token_revoked`, `INSUFFICIENT_PERMISSION` → `403 forbidden`, `KERNEL_NOT_FOUND` → `404 not_found`.
+- 수용 기준: 비밀번호가 없는 전용 매니저에서 초기 토큰으로 비밀번호를 정하고, `GET /api/auth`로 마스터 토큰을 받습니다. `PUT /api/auth/tokens/master` 뒤 이전 마스터 토큰은 `401`입니다. 비밀번호가 있는 매니저에서 초기 토큰으로 `PUT /api/auth/password`는 `403`입니다. 비밀번호 전 로그인은 `400 password_not_set`입니다. 비밀번호는 매니저마다 하나라서, 같은 비밀번호로 그 매니저의 어느 커널에도 로그인합니다(FR-A6). 공유 토큰 재설정 뒤 그 타입의 이전 토큰은 `401 token_revoked`이고, 그 토큰으로 연 스트림은 닫힙니다(FR-M6). 임시 매니저는 넷 모두 `403`입니다.
+- 테스트(계획): `test_fr_a4_first_password_login_and_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_cannot_replace_an_existing_password`, `test_fr_a4_one_password_per_manager`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
+
+### FR-A5 토큰 수명 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
+2025 설계: "커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함", "공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요".
+- 커널을 종료하거나 재시작해도, 매니저를 다시 시작해도 그 커널의 접근 토큰(초기 토큰, 로그인 토큰, 공유 토큰, FR-A6)은 남습니다.
+- 토큰은 커널이 들고 있습니다. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널이 토큰을 해시로 영속화하고(FR-K10), 다시 뜨면 읽어 옵니다. 매니저는 토큰 파일을 읽거나 쓰지 않고, 제어 채널로 커널에 확인을 요청합니다(PROTOCOL §6). 같은 계정의 어느 매니저든 같은 커널에 묻기 때문에, 한 매니저에서 받은 토큰이 다른 매니저로도 통합니다. 사용자(2026-10-04): "매니저가 여러개잖아."
+- 커널이 떠 있지 않을 때 토큰을 확인해야 하면 매니저가 그 커널을 먼저 띄웁니다(FR-M2의 ensure). 커널이 10초 안에 뜨지 않으면 `504`입니다.
+- 파일이 지워지면 그 파일의 토큰을 모두 지웁니다. 커널은 자기 파일이 지워진 것을 알아채면(FR-S5, 1초 안) 저장소를 지웁니다. 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 저장소는 파일과 수명을 같이 하는 곳에 두고, 정확한 위치는 [provisional]로 #48에서 정합니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙을 따릅니다.
+- 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 커널 저장소에 거둔 표시(`revoked_at`, 2025 `blacklisted`)로 남고 되살리지 않습니다.
+- 매니저 비밀번호, 마스터 토큰, 매니저 공유 토큰(FR-A4)은 이 규칙 밖입니다. 그 매니저의 `manager.db`에 있고 매니저와 함께 갑니다.
+- 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 매니저 A에서 받은 초기 토큰, 로그인 토큰, 공유 토큰이 같은 계정의 매니저 B(임시 매니저 포함)에서도 통합니다. 커널이 꺼져 있을 때 토큰을 확인하면 매니저가 커널을 띄우고 확인합니다. 파일을 지우면 그 토큰이 통하지 않고 커널의 토큰 저장소가 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다. 매니저는 토큰 저장소를 열지 않습니다.
+- 테스트(계획): `test_fr_a5_tokens_survive_kernel_shutdown_and_manager_restart`, `test_fr_a5_token_from_one_manager_works_through_another`, `test_fr_a5_tokens_are_deleted_with_the_file`, `test_fr_a5_reshare_issues_a_new_token`, `test_fr_a5_manager_starts_the_kernel_to_verify_a_token`, `test_fr_a5_manager_never_opens_the_token_store`
+
+### FR-A6 커널 접근 토큰 (2025 복구) — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #48)
+INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 커널에 접근하는 토큰입니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아."
+
+| 2025 기능 | 2025 경로 | 이 API | 인증 | 결과 |
+|---|---|---|---|---|
+| 초기 토큰 | `POST /kernels/{kernel_id}/tokens/initial` | `POST /api/kernels/{kernel_id}/tokens/initial` | 없음 | `{token, capabilities: [다섯 모두], password_required: true}` |
+| 로그인 | `POST /kernels/{kernel_id}/tokens/auth` | `POST /api/kernels/{kernel_id}/tokens/auth` | 본문의 비밀번호(요청을 받은 매니저의 비밀번호, FR-A4) | `{token, kernel_id, capabilities}` |
+| 공유 토큰 발급 | `POST /kernels/{kernel_id}/tokens/share` | `POST /api/kernels/{kernel_id}/tokens/share`. 같은 일을 `POST /api/kernels/{kernel_id}/shares`도 함(이름표와 만료를 더 받음) | 그 커널의 `manage` | `{share_id, share_token, capabilities, share_url}` |
+| 토큰 확인 | `GET /kernels/{kernel_id}/tokens/{token}/verify` | `GET /api/kernels/{kernel_id}/tokens/{token}/verify` | 같은 토큰 | `{valid, kernel_id, capabilities, blacklisted, password_set}` |
+
+- 초기 토큰은 2025 명세 그대로입니다. 커널을 열 때 자격 증명 없이 받고(본문은 2025처럼 `{kernel_id}`를 실을 수 있음), 응답은 2025 `{token, permission: "admin", password_required: true}`에서 `admin`을 다섯 능력 모두로 적은 `{token, capabilities: ["read", "history", "execute", "edit", "manage"], password_required: true}`입니다(FR-A3). 커널 ID 형식이 틀리면 `400`(2025 `INVALID_KERNEL_ID`)입니다. 발급 횟수, 출발지(루프백), 쓰임새에 제한을 두지 않습니다. 사용자 결정(2026-10-04): "초기 토큰은 애초에 열 때 토큰을 발급했을건데 뭐가 문제야? 토큰이 없으면 연결이 안되잖아. 초기 토큰 발급은 건드리지 마." 리더가 더했던 "한 번만 발급"(`409 already_initialized`)과 "비밀번호 설정에만 씀"은 지웠습니다(PROJECT Q11).
+- 로그인은 비밀번호를 받아 그 커널의 접근 토큰을 줍니다. 비밀번호는 매니저마다 하나이므로(FR-A4) 요청을 받은 매니저의 비밀번호입니다.
+- `password_set`은 요청을 받은 매니저에 비밀번호가 있는지입니다.
+- 커널 접근 토큰은 그 커널 하나에만 묶입니다. 다른 커널을 가리키면 `403`이 아니라 `404`입니다(FR-A3).
+- 어느 매니저로 들어와도 통합니다. 토큰은 커널이 들고 있고, 매니저는 발급·확인·철회를 제어 채널로 커널에 요청합니다(FR-A5, FR-K10, PROTOCOL §6). 커널이 떠 있지 않으면 매니저가 먼저 띄웁니다(FR-M2). 초기 토큰과 확인은 임시 매니저에서도 됩니다. 공유 링크는 전용 매니저 설정(`share_base`)이 필요해서 공유 토큰 발급만 전용 매니저가 합니다(FR-A3).
+- 저장소 위치는 [provisional]이고 #48에서 정합니다. 원칙은 커널만 접근하고, 노트북 파일과 수명을 같이 한다는 것입니다(PROJECT Q16).
+- 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 전용 매니저에서 받은 토큰이 같은 커널의 임시 매니저에서도 통합니다. `POST /api/kernels/{kernel_id}/tokens/share`의 응답이 2025 필드(`share_token`, `share_url`)와 `capabilities`를 담습니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
+- 테스트(계획): `test_fr_a6_initial_token_is_issued_without_credentials_every_time`, `test_fr_a6_login_with_the_manager_password_returns_a_kernel_token`, `test_fr_a6_kernel_token_is_404_on_other_kernels`, `test_fr_a6_kernel_token_works_through_any_manager`, `test_fr_a6_tokens_share_returns_2025_fields`, `test_fr_a6_verify_reports_permission_and_revocation`
 
 ## 10a. 협업 문서 (S)
 
-한 커널(=파일)에 여러 클라이언트가 동시에 붙습니다. VS Code 확장, IntelliJ, ash, Ember 대화 화면, 에이전트가 함께 붙을 수 있습니다. 2025 설계의 셀 동기화, 셀 잠금, 포커스, 실행 알림, 알람을 이어받습니다(`설계초안/`의 WS 명세). 커널이 이 상태를 들고 있습니다. 매니저는 언제든 사라질 수 있고, 같은 파일에 서로 다른 매니저(로컬 임시 매니저와 전용 매니저)로 붙은 클라이언트도 같은 상태를 봐야 하기 때문입니다.
+한 커널(=파일)에 여러 클라이언트가 동시에 붙습니다. VS Code 확장, IntelliJ, ash, Ember 대화 화면, 에이전트가 함께 붙을 수 있습니다. 2025 설계의 셀 동기화, 셀 잠금, 포커스, 실행 알림, 알람을 이어받습니다(`설계초안/`의 WS 명세). 2025 WebSocket 동기화 자체도 되살립니다(FR-S9, 사용자 결정 2026-10-03). 커널이 이 상태를 들고 있습니다. 매니저는 언제든 사라질 수 있고, 같은 파일에 서로 다른 매니저(로컬 임시 매니저와 전용 매니저)로 붙은 클라이언트도 같은 상태를 봐야 하기 때문입니다.
 
 ### FR-S1 공유 문서 상태 — `Done`
 커널은 파일을 파싱한 문서(셀 목록)를 메모리에 두고 문서 버전 `doc_version`을 관리합니다. `doc_version`은 셀 생성·수정·삭제·이동과 바깥 편집으로 다시 읽기(`doc.reloaded`)에서만 1 늘어나고, 잠금·해제·충돌 표시·접속자 이벤트에서는 늘지 않습니다(그 이벤트들도 현재 `doc_version`을 담습니다, PROTOCOL §4). 셀마다 커널 수명 동안 바뀌지 않는 `cell_id`를 둡니다. 파일에 `# @id`가 있으면 그 값을 쓰고, 없으면 `c_<hex>`를 만들되 파일에는 쓰지 않습니다. 첫 동기화 스냅숏(`GET /kernels/{id}/document`)에는 셀(`cell_id`, 셀별 `version`, 소스, 최신 출력), 잠금, 접속자, `doc_version`, 그리고 `seq`가 함께 들어 있습니다. `seq`는 **스냅숏에 이미 반영된 마지막 이벤트의 번호**이고, 클라이언트는 `since=seq`로 구독해 `seq`보다 큰 이벤트만 적용합니다. 커널은 상태 변경·이벤트 발행·스냅숏을 한 잠금 안에서 하므로, 스냅숏과 경쟁한 편집은 빠지지도 두 번 적용되지도 않습니다. 셀의 `source`는 파서가 낸 본문 그대로(다음 표식 앞의 빈 줄 포함)이고, `type`은 정규 타입, `raw_type`은 표식에 쓰인 타입 원문(없으면 `null`)입니다.
@@ -385,7 +492,7 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 ### FR-S4 접속자, 포커스, 커서 — `Done`
 클라이언트는 접속할 때 `client_id`(기기마다 고유)와 `nickname`(기기 이름, 2025 `?nickname=`)을 알립니다. 사용자 이름과 아바타는 토큰에서 정해지고, 없으면 클라이언트가 준 값을 씁니다. 접속자 목록은 다음을 담습니다: 사용자, 기기, 권한, 포커스한 셀(`focused_cell_id`, `focused_at`), 커서(`cell_id`, `line`, `column`, 선택 범위). 포커스, 블러, 커서 변경은 `presence.update` 이벤트로 퍼집니다(커서는 클라이언트마다 초당 최대 20회로 합칩니다). 이벤트 스트림이 끊기고 30초가 지나면 그 클라이언트는 `presence.leave`가 됩니다.
 - 테스트: `test_fr_s4_presence_focus_cursor_and_leave`, `test_fr_s4_presence_and_leave_release_locks_through_kernel`
-- 상태 메모: 커널 쪽(`presence.update`/`presence.leave`, 30초 유예)을 검증했습니다. 이벤트 스트림이 열려 있는 동안 약 10초마다 `presence.update` 하트비트를 보내는 일은 매니저가 맡고, Rust `test_fr_s4_event_stream_with_client_id_heartbeats_presence`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+- 상태 메모: 커널 쪽(`presence.update`/`presence.leave`, 30초 유예)을 검증했습니다. 지금은 이벤트 스트림이 열려 있는 동안 매니저가 약 10초마다 `presence.update` 하트비트를 보냅니다(Rust `test_fr_s4_event_stream_with_client_id_heartbeats_presence`). 스트림 넘김(FR-M6) 뒤에는 커널이 넘겨받은 스트림으로 접속 여부를 직접 알므로 하트비트가 필요 없습니다. 스트림이 닫히고 30초 뒤 `presence.leave`입니다(PROTOCOL §3.7.5, 구현 대기 #47).
 
 ### FR-S5 디스크 파일과의 동기화 — `Done`
 - 클라이언트 편집은 300ms 디바운스 뒤 파일에 원자적으로 저장합니다(FORMAT 직렬화, 손대지 않은 셀은 바이트 그대로).
@@ -398,15 +505,27 @@ PROTOCOL §3.2의 HMAC 도전-응답입니다. 사용자 키가 없으면 처음
 `run.queued`, `run.started`, `run.finished`, `cell.*` 이벤트와 실행 기록 메타데이터에 실행을 요청한 클라이언트(`started_by`: client_id, 사용자, 기기)를 넣습니다. 인터럽트하면 `interrupted_by`도 넣습니다(2025 `execution_started.started_by`, `execution_interrupted.interrupted_by`). 셀을 실행하는 요청에는 `cell_ids`를 쓸 수 있습니다(인덱스 `cells`와 둘 중 하나). `run.started`는 `cells`와 나란한 `cell_ids`를, `cell.*`·`output`·`output.clear`는 공유 문서의 `cell_id`를 담아, 실행 중에 셀이 옮겨져도 출력이 맞는 셀로 갑니다.
 - 테스트: `test_fr_s6_runs_are_attributed`, `test_fr_s6_run_and_output_events_carry_cell_ids`, `test_fr_s6_output_clear_carries_cell_id`
 
-### FR-S7 알람 — `Done`
+### FR-S7 알람 — `Agreed` (2025 알람 필드 복구, 구현 대기 #47, #49)
 SSE를 계속 붙잡을 수 없는 클라이언트(모바일 백그라운드, 웹훅 대체)를 위해 롱폴링을 둡니다. `GET /kernels/{id}/runs/{run_ref}/wait?timeout=`는 그 실행이 끝나면 바로, 아니면 `timeout`(기본 60초, 최대 300초) 뒤에 돌려줍니다. 응답은 끝났을 때 실행 요약, 아직이면 `status: running`과 진행 정보이고, 다시 부를 때 쓸 `next` 정보가 들어 있습니다(2025 `executions/{cell_id}/wait`의 timeout·재폴링 모델). 실행이 끝나면 `run.finished` 이벤트가 모든 구독자에게 가므로, Ember는 이 이벤트로 휴대폰 푸시를 보냅니다.
-- 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`
-- 상태 메모: 커널의 `runs.wait`(끝나면 바로, 아니면 `timeout` 뒤)를 검증했습니다. HTTP 응답의 `next` 정보는 매니저가 붙이고, Rust `test_fr_s7_wait_returns_on_finish_or_timeout`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+- 2025 알람 필드(복구, 구현 대기 #49): 요청은 `client_id`와 `poll_sequence`(기본 1)를 받고, 응답은 `poll_sequence`, `next_poll_sequence`, `auto_repoll {enabled, next_poll_url, recommended_delay, max_polls}`를 담습니다. `poll_sequence`가 `max_polls`(2025 값 100)를 넘으면 `429 poll_limit_exceeded`(2025 `POLL_LIMIT_EXCEEDED`)입니다.
+- 테스트: `test_fr_s7_wait_returns_on_finish_or_timeout`, 계획 `test_fr_s7_wait_carries_2025_poll_fields`
+- 넘김: 이 롱폴링은 매니저가 인증한 뒤 커널에 넘깁니다(FR-M6, `kind: "wait"`). 커널이 응답과 `next` 정보를 직접 씁니다. 구현 대기(#47).
+- 상태 메모: 커널의 `runs.wait`(끝나면 바로, 아니면 `timeout` 뒤)를 검증했습니다. 지금 구현에서는 HTTP 응답의 `next` 정보를 매니저가 붙이고, Rust `test_fr_s7_wait_returns_on_finish_or_timeout`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
 
-### FR-S8 권한 — `Done`
-셀 편집(FR-S2)과 잠금(FR-S3)은 `editor` 이상만 할 수 있습니다. `editor`는 `viewer3`(실행 가능)에 셀 편집을 더한 공유 권한이고, 2025 설계의 `user_permission: "write"`에 해당합니다. 접속자 표시와 포커스(FR-S4)는 `viewer1`부터 할 수 있습니다. FR-A3 표에 `editor`를 더합니다.
-- 테스트: `test_fr_a3_permission_matrix` (FR-A3과 공유), `test_fr_s8_edit_and_lock_need_editor`, `test_fr_s1_s2_s3_s5_s8_two_clients_edit_converge_save_and_run`
-- 상태 메모: 커널의 권한 검사(`client.permission`)를 검증했습니다. 매니저 쪽은 Rust `test_fr_a3_permission_matrix`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`)와 `test_fr_s8_permission_matrix_for_collaboration`(`darkpyonix/manager/crates/dpx-server/tests/collab.rs`)가 검증합니다.
+### FR-S8 권한 — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #49)
+셀 편집(FR-S2)과 잠금(FR-S3)은 `edit`, 실행과 인터럽트는 `execute`, 접속자 표시와 포커스(FR-S4)는 `read`가 있어야 합니다(FR-A3). 실행과 코드 수정은 다른 능력입니다. 사용자(2026-10-04): "실행 권한이랑 코드 수정 권한은 다른거야." 이 검사는 매니저만 합니다. 커널은 능력을 검사하지 않고 `forbidden`을 내지 않습니다(INTENT D5, D18). 사용자(2026-10-03): "커널 매니저가 이미 권한 검사를 하고 넘겨줬는데 커널이 왜 검증해야 할게 많나".
+- 수용 기준: `edit`이 없는 토큰의 셀 수정·잠금은 매니저가 `403`으로 거절하고 커널에 닿지 않습니다. `execute`만 있고 `edit`이 없는 토큰도 마찬가지입니다. 커널에 `capabilities: ["read"]` 클라이언트로 `doc.cell.update`를 직접 보내도 커널은 권한 오류를 내지 않습니다.
+- 테스트(계획): `test_fr_s8_edit_is_checked_by_the_manager`, `test_fr_s8_execute_does_not_grant_edit`, `test_fr_s8_kernel_does_not_check_capabilities`. 지금의 `test_fr_s8_edit_and_lock_need_editor`(커널 쪽 검사)는 지웁니다.
+
+### FR-S9 2025 WebSocket 동기화 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #49)
+INTENT D19, PROTOCOL §5. 사용자 결정: "원 설계대로 복구". `GET /api/ws/kernels/{kernel_id}?token=&nickname=&client_id=`(2025 `/ws/kernels/{kernel_id}?token={token}`)는 매니저가 토큰과 권한을 확인한 뒤 커널에 넘깁니다(FR-M6). 커널은 `101`로 업그레이드하고 2025 메시지를 주고받습니다.
+- 받는 메시지: `request_code` → `code_data`, `request_history` → `history_data`, `request_locks` → `locks_data`, `start_typing` → 잠금과 `cell_locked`, `cell_focus` → `other_user_focus`, `cell_blur` → `other_user_blur`(2025에 송신 메시지가 없어 더함).
+- 보내는 메시지: 위 응답과 `users_focus_data`(접속 직후), `cell_unlocked_with_code`, `execution_started`, `execution_output`, `execution_complete`, `execution_error`, `execution_interrupted`. 2025 이름이 없는 이벤트는 `{"type": "event", "event": …}`로 그대로 싣습니다.
+- 2025 메시지의 `user_id`는 커널이 쓰지 않습니다. 누구인지는 매니저가 붙인 라벨(`client_id`, `user`, `nickname`)로 정합니다.
+- 능력 집합으로 거릅니다(FR-K9). `history`가 없으면 `history_data`가 빈 목록이고 `execution_output`과 출력이 담긴 필드를 받지 않습니다. `read`가 없으면 `code_data`의 `source`가 비어 있습니다. `edit`이 없으면 `start_typing`은 잠그지 않고 `{"type": "error", "error": "INSUFFICIENT_PERMISSION"}`를 돌려받습니다.
+- 편집, 잠금 해제(최종 소스), 실행, 인터럽트는 2025처럼 REST(매니저)이고, 결과는 WebSocket으로 퍼집니다.
+- 수용 기준: 두 클라이언트가 WebSocket으로 붙은 뒤 한쪽이 `start_typing`하면 다른 쪽이 `cell_locked`를 받고, REST로 잠금을 풀며 소스를 보내면 `cell_unlocked_with_code`를 받습니다. REST로 실행하면 두 쪽 모두 `execution_started`, `execution_output`, `execution_complete`를 받습니다. 매니저를 `SIGKILL`로 죽여도(평문 연결) 다음 실행의 메시지가 옵니다. `history`가 없는 클라이언트는 출력을 받지 않습니다. `edit` 없이 `execute`만 가진 클라이언트의 `start_typing`은 `INSUFFICIENT_PERMISSION`입니다.
+- 테스트(계획): `test_fr_s9_ws_initial_sync_code_history_locks`, `test_fr_s9_ws_typing_locks_and_unlock_with_code`, `test_fr_s9_ws_execution_broadcast`, `test_fr_s9_ws_survives_manager_kill`, `test_fr_s9_ws_without_history_gets_no_outputs`, `test_fr_s9_ws_typing_needs_edit`
 
 ## 10. 허브 (H)
 
@@ -559,8 +678,9 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 측정 기록 (2026-10-03, macOS arm64, `test_nfr_k3_print_overhead`): 셀 안 100,000번 `print`를 파이프로 출력하는 일반 실행과 비교, 5회 중 최솟값의 프로세스 CPU 시간 비율은 3.9 1.08, 3.11 1.17, 3.13 1.24, 3.14 1.42, 3.15 1.21입니다. 측정 당시 머신의 부하 평균이 100을 넘어 벽시계 시간은 같은 측정 안에서도 0.7~8배로 흔들렸으므로 판정에 쓰지 않았습니다. 한가한 머신에서 벽시계 시간을 다시 재야 `Done`이 됩니다.
 - 측정 기록 (2026-10-03 14:2x, 맥미니 M 시리즈, 부하 평균 약 4.5, `test_nfr_k3_print_overhead` 3회): 벽시계 시간 비율(5회 중 최솟값끼리)은 3.8 1.17~1.23, 3.9 1.07~1.23, 3.10 1.11~1.13, 3.11 1.12~1.24, 3.12 1.14~1.16, 3.13 1.06~1.15, 3.14 1.14~1.19, 3.15 1.08~1.14로 모두 1.5배 이하입니다. 100,000줄 일반 실행은 16~25 ms였습니다.
 
-### NFR-K4 시작 시간 — `Done`
-커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다.
+### NFR-K4 시작 시간 — `Agreed` (재측정 대기 #50)
+커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다. 측정점은 프로세스를 실행한 순간부터 멀티캐스트 그룹의 리스너가 그 커널의 첫 announce를 받은 순간까지입니다.
+- 상태 메모 (2026-10-03): 아래 기록은 등록 파일이 생긴 순간을 측정점으로 썼습니다. 등록 파일을 지우므로(FR-D2) 첫 announce 수신 시각으로 다시 재야 `Done`입니다.
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 4): `bootstrap_command`로 프로세스를 실행한 순간부터 등록 파일이 생길 때까지(등록 파일은 첫 멀티캐스트 announce 직전에 씁니다, `discovery.announce_now`) 7회 중앙값이 3.8 38 ms, 3.9 63 ms, 3.11 54 ms, 3.12 39 ms, 3.13 56 ms, 3.14 46 ms입니다. 같은 인터프리터의 `python -c pass`는 13~22 ms였습니다. 측정 스크립트는 `.scratch/k4/measure.py`(커밋하지 않음)입니다.
 - 참고: Rust 매니저의 `ensure()`는 처음에 300~344 ms였습니다. 커널을 띄우기 전에 보내는 표적 멀티캐스트 질의가 없는 커널을 기다리느라 늘 200 ms(`QUERY_TIMEOUT`)를 썼기 때문입니다. 질의를 없앤 뒤(FR-M2, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`) 호출부터 인터프리터 실행까지 5~8 ms, 전체 92~120 ms입니다(2026-10-03, 부하 평균 약 1.5, `/usr/bin/python3` 셈은 Xcode 셈 때문에 170~600 ms).
 
@@ -569,8 +689,8 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 테스트: Rust `test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널 20개, 캐시·`refresh=true`·새 매니저의 첫 조회)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 커널 20개에서 캐시 조회 p50 2.2 ms·p99 4.9 ms, `refresh=true` p50 3.9 ms·p99 5.1 ms, 새 매니저의 첫 조회 p50 4.6 ms·최대 4.7 ms입니다.
 
-### NFR-M2 이벤트 지연 — `Done`
-커널의 출력이 매니저 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함).
+### NFR-M2 이벤트 지연 — `Agreed` (재측정 대기 #47)
+커널의 출력이 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함). 스트림 넘김(FR-M6) 뒤에는 커널이 구독자 소켓에 직접 쓰므로 그 경로로 다시 잽니다. 아래 기록은 매니저가 중계하던 구현의 값입니다.
 - 테스트: Rust `test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널의 `print` 시각부터 SSE 수신까지)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 10 ms 간격 200줄에서 p50 31 ms, p99 61 ms, 최대 63 ms입니다(50 ms 병합 창 포함).
 
@@ -602,9 +722,9 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 PROTOCOL §3.1. 64 MiB를 넘는 프레임은 거절합니다.
 - 테스트: `test_pr_1_oversized_frame_is_refused`, `test_pr_1_frame_too_large_closes_connection`
 
-### PR-2 핸드셰이크 — `Done`
-PROTOCOL §3.2. 5초 제한, 상수 시간 비교.
-- 테스트: `test_pr_2_handshake_times_out`
+### PR-2 핸드셰이크 — `Agreed` (새 채널에서 다시 통과 대기 #55)
+PROTOCOL §3.2. 상대 계정 확인(FR-A1)이 먼저이고, 그다음 `hello`/`auth`/`welcome`입니다. 5초 제한. 비밀값이 없으므로 상수 시간 비교도 없습니다.
+- 테스트: `test_pr_2_handshake_times_out`(지금은 TCP 채널에서 통과. 소켓·파이프 채널로 옮긴 뒤 다시 통과해야 `Done`)
 
 ### PR-3 이벤트 재전송 — `Done`
 PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있어도 이벤트를 내는 쪽은 막히지 않습니다(클라이언트별 송신 버퍼, 64 MiB를 넘으면 그 클라이언트를 끊음).
@@ -614,3 +734,16 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 ### PR-4 호환성 — `Done`
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
 - 테스트: `test_pr_4_unknown_fields_are_ignored`
+
+### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
+- 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
+- 테스트(계획): `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_fd_over_a_windows_pipe_is_bad_request`, `test_pr_5_adopt_without_fd_is_bad_request`
+
+### PR-6 공유 철회 `streams.close` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.
+- 테스트(계획): `test_pr_6_streams_close_by_share_id`
+
+### PR-7 커널 토큰 메서드 `tokens.*` — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #48)
+PROTOCOL §3.3, §6. `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list`. 토큰 값은 `tokens.issue`의 응답에만 나오고, `tokens.list`는 토큰 값과 해시를 주지 않습니다. 모르는 `kind`나 능력 이름은 `bad_request`입니다.
+- 테스트(계획): `test_pr_7_issue_returns_the_token_once`, `test_pr_7_list_never_returns_tokens`, `test_pr_7_unknown_capability_is_bad_request`
