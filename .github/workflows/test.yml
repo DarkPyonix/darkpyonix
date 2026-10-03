@@ -32,16 +32,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - name: Install the interpreter under test
-        run: uv python install ${{ matrix.python }}
+      - name: Install the interpreters
+        run: uv python install ${{ matrix.python }} 3.13
       - name: Create the test environment
         run: |
-          uv venv --no-project -p ${{ matrix.python }} .scratch/venv
+          # The harness (pytest, the Python manager prototype) runs on 3.13; the matrix version
+          # is the interpreter the kernels run under (NFR-K1).
+          uv venv --no-project -p 3.13 .scratch/venv
           uv pip install -p .scratch/venv/bin/python -e ".[dev,manager]"
       - name: Run the suite
         run: |
           # Kernel tests run against the bare interpreter, where darkpyonix is not installed
-          # (FR-K1, NFR-K1); pytest itself runs in the venv with the test dependencies.
+          # (FR-K1, NFR-K1).
           export DARKPYONIX_TEST_PYTHONS="$(uv python find --no-project ${{ matrix.python }})"
           echo "kernel interpreter: $DARKPYONIX_TEST_PYTHONS"
           .scratch/venv/bin/python -m pytest -ra
@@ -60,6 +62,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Interpreter for the real-kernel tests
+        # manager_latency.rs looks for .venv/bin/python unless DPX_TEST_PYTHON is set.
+        run: echo "DPX_TEST_PYTHON=$(command -v python3)" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: darkpyonix/manager
