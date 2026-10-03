@@ -14,7 +14,7 @@ type Operation = { responses: Record<string, unknown> };
 type PathItem = Record<string, Operation> & { servers?: unknown };
 
 const spec = parse(specText) as { paths: Record<string, PathItem> };
-const METHODS = ["get", "put", "post", "delete"] as const;
+const METHODS = ["get", "put", "post", "patch", "delete"] as const;
 
 function workerPaths(): [string, PathItem][] {
   return Object.entries(spec.paths).filter(([, item]) => item.servers === undefined);

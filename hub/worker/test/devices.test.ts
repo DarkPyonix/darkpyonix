@@ -180,6 +180,24 @@ describe("device links", () => {
     expect((await call(deps, "POST", `/v1/link-codes/${link.user_code}`, { token, json: { approve: true } })).status).toBe(403);
   });
 
+  it("test_fr_h1_rename_by_the_device_or_the_account", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 13, login: "owner" });
+    const a = await newDevice();
+    const tokenA = await linkDevice(deps, { cookie }, a, "computer", "old");
+    const tokenB = await linkDevice(deps, { cookie }, await newDevice());
+    const self = await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token: tokenA, json: { name: "studio" } });
+    expect(self.status).toBe(200);
+    expect(((await self.json()) as { name: string }).name).toBe("studio");
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { cookie, json: { name: "studio mac" } })).status).toBe(200);
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { token: tokenB, json: { name: "mine" } })).status).toBe(403);
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { cookie, json: { name: "" } })).status).toBe(400);
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { cookie, json: { role: "main_server" } })).status).toBe(400);
+    expect((await call(deps, "PATCH", `/v1/devices/${a.endpointId}`, { cookie, json: {} })).status).toBe(400);
+    const shown = (await (await call(deps, "GET", `/v1/devices/${a.endpointId}`, { cookie })).json()) as { name: string; role: string };
+    expect(shown).toMatchObject({ name: "studio mac", role: "computer" });
+  });
+
   it("test_fr_h1_link_request_is_validated", async () => {
     const deps = makeDeps();
     const bad = [

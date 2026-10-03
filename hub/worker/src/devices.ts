@@ -292,6 +292,29 @@ export async function getDevice(request: Request, env: Env, deps: Deps, endpoint
   return json(200, deviceJson(await accountDevice(env, p, endpointId)));
 }
 
+/** The device itself, or account rights over it; else 403. Returns the caller's account. */
+function requireSelfOrAccountAdmin(p: Principal, endpointId: string): string {
+  return p.kind === "device" && p.endpointId === endpointId ? p.accountId : requireAccountAdmin(p);
+}
+
+/** `PATCH /v1/devices/{endpoint_id}` `{"name"?: string}`: the device itself or account rights. */
+export async function updateDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
+  const p = await principal(request, env, nowSecs(deps.nowMs()));
+  const body = await readJson<Record<string, unknown>>(request);
+  const fields = Object.keys(body);
+  if (fields.length === 0) throw ApiError.badRequest("nothing to change");
+  const unknown = fields.filter((f) => f !== "name");
+  if (unknown.length > 0) throw ApiError.badRequest(`unknown or read-only field: ${unknown.join(", ")}`);
+  if (!validDeviceName(body.name)) throw ApiError.badRequest("name must be 1 to 64 characters");
+  // 404 before 403: other accounts' devices are not acknowledged.
+  await accountDevice(env, p, endpointId);
+  const accountId = requireSelfOrAccountAdmin(p, endpointId);
+  await env.DB.prepare("UPDATE devices SET name = ? WHERE account_id = ? AND endpoint_id = ? AND revoked_at IS NULL")
+    .bind(body.name, accountId, endpointId)
+    .run();
+  return json(200, deviceJson(await accountDevice(env, p, endpointId)));
+}
+
 /** Tells the relay host to drop a removed device's connections (best effort; SPEC FR-H3). */
 async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Promise<void> {
   if (!env.RELAY_ADMIN_URL || !env.RELAY_SHARED_SECRET) return;
@@ -306,9 +329,8 @@ async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Pr
 
 export async function removeDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
-  const p = await principal(request, env, now);
   // A device may always leave by itself; removing another device needs account rights.
-  const accountId = p.kind === "device" && p.endpointId === endpointId ? p.accountId : requireAccountAdmin(p);
+  const accountId = requireSelfOrAccountAdmin(await principal(request, env, now), endpointId);
   const { results: names } = await env.DB.prepare("SELECT name FROM names WHERE endpoint_id = ?")
     .bind(endpointId)
     .all<{ name: string }>();

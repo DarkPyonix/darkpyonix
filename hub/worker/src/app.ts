@@ -11,6 +11,7 @@ import {
   me,
   removeDevice,
   rotateResolveToken,
+  updateDevice,
 } from "./devices";
 import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
 import type { Deps, Env } from "./env";
@@ -114,7 +115,7 @@ export const ROUTES: Route[] = [
   route("/v1/device-links/{link_id}/token", { POST: claimLink }),
   route("/v1/link-codes/{user_code}", { GET: getLinkCode, POST: decideLinkCode }),
   route("/v1/devices", { GET: listDevices }),
-  route("/v1/devices/{endpoint_id}", { GET: getDevice, DELETE: removeDevice }),
+  route("/v1/devices/{endpoint_id}", { GET: getDevice, PATCH: updateDevice, DELETE: removeDevice }),
   // FR-H2 directory
   route("/v1/devices/{endpoint_id}/addresses", { GET: deviceAddresses }),
   route("/pkarr/{key}", { PUT: pkarrPut, GET: pkarrGet }),
