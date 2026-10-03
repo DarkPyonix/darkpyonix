@@ -1,4 +1,4 @@
-"""The executor: runs notebook cells on the main thread (SPEC FR-K5..K8, FR-X1..X5, FR-F5).
+"""The executor: runs notebook cells on the main thread (SPEC FR-K5..K8, FR-X1..X6, FR-F5).
 
 Standard library only; Python 3.8+.
 
@@ -32,7 +32,7 @@ import types
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from darkpyonix import format as fmt
-from darkpyonix.kernel import hostctx
+from darkpyonix.kernel import figures, hostctx
 from darkpyonix.kernel.capture import FdCapture, OutputRouter, StreamCapture
 from darkpyonix.kernel.collab import by_of
 from darkpyonix.kernel.display import format_bundle
@@ -449,8 +449,10 @@ class Executor(object):
         except (ValueError, OSError):
             self._saved_sigint = None
         hostctx._install(self._display_hook)
+        figures.install()
 
     def _uninstall(self) -> None:
+        figures.uninstall()
         hostctx._uninstall()
         if self._saved_sigint is not None:
             try:
@@ -622,6 +624,7 @@ class Executor(object):
         self.router.begin_cell(run, rec, doc_cell_id)
         t0 = time.monotonic()
         status, error = self._exec_cell(run, cell, line_offset, count)
+        figures.flush(self._log)
         if error is not None:
             self.router.write_output(error)
         if self.fdcapture is not None:

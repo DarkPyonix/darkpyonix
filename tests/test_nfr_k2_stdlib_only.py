@@ -11,6 +11,8 @@ PKG = os.path.join(KERNEL_ROOT, "darkpyonix")
 # Code that must stay importable by a bare interpreter. The manager is excluded.
 GUARDED = [PKG]
 EXCLUDED = [os.path.join(PKG, "manager")]
+# FR-X6: the matplotlib backend is loaded by matplotlib itself, never by kernel code.
+MPLBACKEND = os.path.join(PKG, "kernel", "mplbackend.py")
 
 # sys.stdlib_module_names exists from 3.10; this fallback covers what kernel code may use on 3.8/3.9.
 _FALLBACK = set("""
@@ -52,5 +54,23 @@ def test_nfr_k2_kernel_imports_stdlib_only():
         for lineno, mod in _top_level_imports(path):
             if mod == "darkpyonix" or mod in STDLIB:
                 continue
+            if path == MPLBACKEND and mod == "matplotlib":
+                continue
             offenders.append("%s:%d imports %s" % (os.path.relpath(path, KERNEL_ROOT), lineno, mod))
     assert not offenders, "non-stdlib imports in kernel/runtime code:\n" + "\n".join(offenders)
+
+
+def test_nfr_k2_no_kernel_code_imports_the_matplotlib_backend():
+    assert os.path.isfile(MPLBACKEND)
+    offenders = []
+    for path in _python_files():
+        tree = ast.parse(open(path, encoding="utf-8").read(), path)
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module] + [node.module + "." + a.name for a in node.names]
+            if any(n.endswith("mplbackend") for n in names):
+                offenders.append("%s:%d" % (os.path.relpath(path, KERNEL_ROOT), node.lineno))
+    assert not offenders, "kernel code imports mplbackend: " + ", ".join(offenders)
