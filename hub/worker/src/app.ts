@@ -31,7 +31,7 @@ export const VERSION = "0.3.0";
 type Handler = (request: Request, env: Env, deps: Deps, ...params: string[]) => Promise<Response> | Response;
 
 interface Route {
-  /** The OpenAPI path template, e.g. `/v1/devices/{endpoint_id}`. */
+  /** The OpenAPI path template, e.g. `/devices/{endpoint_id}`. */
   path: string;
   pattern: RegExp;
   methods: Partial<Record<string, Handler>>;
@@ -50,15 +50,11 @@ async function health(): Promise<Response> {
   return json(200, { status: "ok", version: VERSION });
 }
 
-/** Bumped only for a breaking change under `/v1` (FR-H8). */
-export const API_VERSION = 1;
-
-/** `GET /v1/config` (FR-H8): where the relays and the pkarr directory are. */
+/** `GET /config` (FR-H8): where the relays and the pkarr directory are. No API version (D16). */
 function config(_request: Request, env: Env): Response {
   return json(
     200,
     {
-      api_version: API_VERSION,
       hub_version: VERSION,
       relay_urls: [env.RELAY_URL],
       pkarr_url: `${env.PUBLIC_URL}/pkarr`,
@@ -104,39 +100,39 @@ async function linkLanding(request: Request, env: Env, deps: Deps): Promise<Resp
 
 export const ROUTES: Route[] = [
   route("/health", { GET: health }),
-  route("/v1/config", { GET: config }),
+  route("/config", { GET: config }),
   route("/.well-known/org.flathub.VerifiedApps.txt", { GET: flathubVerifiedApps }),
   // FR-H6 GitHub sign-in
   route("/auth/login", { GET: login }),
   route("/auth/callback", { GET: callback }),
   route("/auth/logout", { POST: (r, e) => logout(r, e) }),
-  route("/v1/me", { GET: me }),
-  route("/v1/me/resolve-token", { POST: rotateResolveToken }),
+  route("/me", { GET: me }),
+  route("/me/resolve-token", { POST: rotateResolveToken }),
   // FR-H1 devices
   route("/link", { GET: linkLanding }),
-  route("/v1/device-links", { POST: createLink }),
-  route("/v1/device-links/{link_id}", { GET: getLink }),
-  route("/v1/device-links/{link_id}/token", { POST: claimLink }),
-  route("/v1/link-codes/{user_code}", { GET: getLinkCode, POST: decideLinkCode }),
-  route("/v1/devices", { GET: listDevices }),
-  route("/v1/devices/{endpoint_id}", { GET: getDevice, PATCH: updateDevice, DELETE: removeDevice }),
-  route("/v1/devices/{endpoint_id}/readmit", { POST: readmitDevice }),
-  route("/v1/removed-devices", { GET: listRemovedDevices }),
+  route("/device-links", { POST: createLink }),
+  route("/device-links/{link_id}", { GET: getLink }),
+  route("/device-links/{link_id}/token", { POST: claimLink }),
+  route("/link-codes/{user_code}", { GET: getLinkCode, POST: decideLinkCode }),
+  route("/devices", { GET: listDevices }),
+  route("/devices/{endpoint_id}", { GET: getDevice, PATCH: updateDevice, DELETE: removeDevice }),
+  route("/devices/{endpoint_id}/readmit", { POST: readmitDevice }),
+  route("/removed-devices", { GET: listRemovedDevices }),
   // FR-H2 directory
-  route("/v1/devices/{endpoint_id}/addresses", { GET: deviceAddresses }),
+  route("/devices/{endpoint_id}/addresses", { GET: deviceAddresses }),
   route("/pkarr/{key}", { PUT: pkarrPut, GET: pkarrGet }),
   // FR-H3 relay host callbacks
-  route("/internal/v1/relay/admit", { POST: admit }),
-  route("/internal/v1/relay/presence", { POST: presence }),
+  route("/internal/relay/admit", { POST: admit }),
+  route("/internal/relay/presence", { POST: presence }),
   // FR-H4 shares
-  route("/v1/shares", { POST: publishShare }),
-  route("/v1/shares/{share_id}", { GET: resolveShare, DELETE: unpublishShare }),
+  route("/shares", { POST: publishShare }),
+  route("/shares/{share_id}", { GET: resolveShare, DELETE: unpublishShare }),
   route("/s/{share_id}", { GET: sharePage }),
   route("/ash/", { GET: (r, e) => ashPage(r, e) }),
   // FR-H5 names
-  route("/v1/names", { GET: listNames }),
-  route("/v1/names/{name}", { PUT: reserveName, DELETE: releaseName }),
-  route("/v1/names/{name}/acme-challenge", { PUT: setAcmeChallenge, DELETE: clearAcmeChallenge }),
+  route("/names", { GET: listNames }),
+  route("/names/{name}", { PUT: reserveName, DELETE: releaseName }),
+  route("/names/{name}/acme-challenge", { PUT: setAcmeChallenge, DELETE: clearAcmeChallenge }),
 ];
 
 export async function handle(request: Request, env: Env, deps: Deps): Promise<Response> {

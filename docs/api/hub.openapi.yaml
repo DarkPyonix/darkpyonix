@@ -17,8 +17,8 @@ info:
       server crate). Workers cannot accept UDP, and iroh's QUIC address discovery (QAD) needs
       UDP 7842, so the relay runs where it can. Operations served there carry a path-level
       `servers` entry. The relay asks the Worker whom to admit
-      (`/internal/v1/relay/admit`), and the Worker tells the relay to drop removed devices
-      (`/admin/v1/disconnect`).
+      (`/internal/relay/admit`), and the Worker tells the relay to drop removed devices
+      (`/admin/disconnect`).
 
     The peer-to-peer transport is **iroh 1.x** (PROJECT Q1). A device *is* an iroh endpoint:
     its id is the endpoint id, the lowercase hex of its ed25519 public key.
@@ -35,7 +35,7 @@ info:
     phone; may not publish shares or hold names). The `client` role is provisional.
     An account has at most one active `main_server` (Ember INTENT D3); a new one joins only
     as an explicit replacement of the current one (`replace` on approval).
-    A device asks to join with `POST /v1/device-links`, a signed-in person
+    A device asks to join with `POST /device-links`, a signed-in person
     (or the account's main server) approves the user code, and the device claims a device
     token by signing the challenge with its iroh key.
 
@@ -46,6 +46,11 @@ info:
     a query (SPEC NFR-H2). The Worker never logs request URLs. Cookie-authenticated writes must come
     from `https://darkpyonix.dev` (`Origin`), else 403. Tokens and session ids are stored
     hashed. "Account rights" means a signed-in session or the account's `main_server` device.
+
+    **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
+    grows: fields, optional request fields, paths and error codes are added, never renamed,
+    retyped or removed. Clients ignore fields they do not know. A replaced field or path stays,
+    marked `deprecated: true`.
 
     **Errors.** Error bodies are `Error` objects. Every 401 carries a `code`:
     `device_removed` when the device token belongs to a removed device (stop retrying, drop
@@ -92,15 +97,15 @@ paths:
                   status: {type: string, const: ok}
                   version: {type: string}
 
-  /v1/config:
+  /config:
     get:
       tags: [System]
       operationId: getHubConfig
       summary: Where the relays and the pkarr directory are (FR-H8)
       description: |
         Public and cacheable (5 minutes). Clients read their relay map and pkarr URL from here
-        instead of building them in. `api_version` is bumped only for a breaking change under
-        `/v1`.
+        instead of building them in. There is no API version (INTENT D16): the API only grows,
+        and clients look for the fields they need. `hub_version` is informational.
       security: []
       responses:
         "200":
@@ -109,9 +114,8 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [api_version, hub_version, relay_urls, pkarr_url, link_url]
+                required: [hub_version, relay_urls, pkarr_url, link_url]
                 properties:
-                  api_version: {type: integer, const: 1}
                   hub_version: {type: string}
                   relay_urls:
                     type: array
@@ -208,7 +212,7 @@ paths:
         "403":
           description: Cross-origin request.
 
-  /v1/me:
+  /me:
     get:
       tags: [Accounts]
       operationId: getMe
@@ -232,7 +236,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
-  /v1/me/resolve-token:
+  /me/resolve-token:
     post:
       tags: [Accounts]
       operationId: rotateResolveToken
@@ -276,7 +280,7 @@ paths:
         "302":
           description: Not signed in; to `/auth/login?return_to=/link?code=...`.
 
-  /v1/device-links:
+  /device-links:
     post:
       tags: [Devices]
       operationId: createDeviceLink
@@ -284,7 +288,7 @@ paths:
       description: |
         Unauthenticated (rate-limited). Show `user_code` (or open `verification_uri_complete`)
         to a person who is signed in, or hand it to the account's main server. Poll
-        `POST /v1/device-links/{link_id}/token` every `interval` seconds until `expires_at`
+        `POST /device-links/{link_id}/token` every `interval` seconds until `expires_at`
         (15 minutes).
       security: []
       requestBody:
@@ -323,7 +327,7 @@ paths:
         "503":
           description: Could not allocate a user code.
 
-  /v1/device-links/{link_id}:
+  /device-links/{link_id}:
     parameters:
       - name: link_id
         in: path
@@ -360,7 +364,7 @@ paths:
         "404":
           description: Unknown link, or an expired one already deleted.
 
-  /v1/device-links/{link_id}/token:
+  /device-links/{link_id}/token:
     parameters:
       - name: link_id
         in: path
@@ -416,7 +420,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
-  /v1/link-codes/{user_code}:
+  /link-codes/{user_code}:
     parameters:
       - name: user_code
         in: path
@@ -471,7 +475,7 @@ paths:
 
         An account has one main server (FR-H1, Ember INTENT D3). If it has one, approving a
         `main_server` link must name it in `replace`; the claim then removes it (its token gets
-        401 `device_removed`, it is listed in `/v1/removed-devices`, its shares and address
+        401 `device_removed`, it is listed in `/removed-devices`, its shares and address
         record go, its relay connections drop) and moves its names to the new main server, in
         one transaction.
       requestBody:
@@ -506,7 +510,7 @@ paths:
         "429":
           description: Too many code lookups or decisions from this account.
 
-  /v1/devices:
+  /devices:
     get:
       tags: [Devices]
       operationId: listDevices
@@ -555,7 +559,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
-  /v1/devices/{endpoint_id}:
+  /devices/{endpoint_id}:
     parameters:
       - $ref: "#/components/parameters/EndpointId"
     get:
@@ -626,7 +630,7 @@ paths:
         "404":
           description: No such device in the account.
 
-  /v1/devices/{endpoint_id}/readmit:
+  /devices/{endpoint_id}/readmit:
     parameters:
       - $ref: "#/components/parameters/EndpointId"
     post:
@@ -660,7 +664,7 @@ paths:
         "409":
           description: The device is not removed.
 
-  /v1/removed-devices:
+  /removed-devices:
     get:
       tags: [Devices]
       operationId: listRemovedDevices
@@ -668,7 +672,7 @@ paths:
       description: |
         A signed-in browser session only; device tokens (even the main server's) get 403.
         Newest removal first, at most 100. A re-admitted device that claimed its link is back
-        in `GET /v1/devices` and no longer here.
+        in `GET /devices` and no longer here.
       security:
         - session: []
       responses:
@@ -694,7 +698,7 @@ paths:
 
   # ------------------------------------------------------------------ directory (FR-H2)
 
-  /v1/devices/{endpoint_id}/addresses:
+  /devices/{endpoint_id}/addresses:
     parameters:
       - $ref: "#/components/parameters/EndpointId"
     get:
@@ -789,10 +793,10 @@ paths:
       summary: iroh relay (WebSocket upgrade, iroh relay protocol), on the relay host
       description: |
         Served by the `iroh-relay` crate on the relay host. The relay handshake proves the
-        client's endpoint id; the relay then asks `POST https://darkpyonix.dev/internal/v1/relay/admit`
+        client's endpoint id; the relay then asks `POST https://darkpyonix.dev/internal/relay/admit`
         (with the auth token the client presented, if any) and may cache an allow for
         `cache_secs`. Admitted: registered, non-removed devices; or any endpoint presenting
-        a valid guest relay pass from `GET /v1/shares/{share_id}` as `Authorization: Bearer`
+        a valid guest relay pass from `GET /shares/{share_id}` as `Authorization: Bearer`
         or `?token=`.
       security: []
       responses:
@@ -827,7 +831,7 @@ paths:
         "204":
           description: No content.
 
-  /admin/v1/disconnect:
+  /admin/disconnect:
     servers:
       - url: https://relay.darkpyonix.dev
     post:
@@ -853,7 +857,7 @@ paths:
         "401":
           description: Relay secret missing or wrong.
 
-  /internal/v1/relay/admit:
+  /internal/relay/admit:
     post:
       tags: [Relay]
       operationId: relayAdmit
@@ -888,7 +892,7 @@ paths:
         "401":
           description: Relay secret missing or wrong.
 
-  /internal/v1/relay/presence:
+  /internal/relay/presence:
     post:
       tags: [Relay]
       operationId: relayPresence
@@ -915,7 +919,7 @@ paths:
 
   # ------------------------------------------------------------------ shares (FR-H4)
 
-  /v1/shares:
+  /shares:
     post:
       tags: [Shares]
       operationId: publishShare
@@ -950,7 +954,7 @@ paths:
         "409":
           description: The share id is published by another device.
 
-  /v1/shares/{share_id}:
+  /shares/{share_id}:
     parameters:
       - $ref: "#/components/parameters/ShareId"
     get:
@@ -1024,7 +1028,7 @@ paths:
 
   # ------------------------------------------------------------------ names (FR-H5)
 
-  /v1/names:
+  /names:
     get:
       tags: [Names]
       operationId: listNames
@@ -1044,7 +1048,7 @@ paths:
         "401":
           description: No valid session or device token.
 
-  /v1/names/{name}:
+  /names/{name}:
     parameters:
       - $ref: "#/components/parameters/Name"
     put:
@@ -1086,7 +1090,7 @@ paths:
         "404":
           description: Not reserved in the caller's reach.
 
-  /v1/names/{name}/acme-challenge:
+  /names/{name}/acme-challenge:
     parameters:
       - $ref: "#/components/parameters/Name"
     put:
@@ -1203,7 +1207,7 @@ components:
         removed_at: {type: integer, description: Unix seconds it was removed.}
         readmit_until:
           type: [integer, "null"]
-          description: While a re-admission is open (`POST /v1/devices/{endpoint_id}/readmit`), its expiry in Unix seconds; else null.
+          description: While a re-admission is open (`POST /devices/{endpoint_id}/readmit`), its expiry in Unix seconds; else null.
     DeviceApp:
       type: object
       required: [kind, version, services]

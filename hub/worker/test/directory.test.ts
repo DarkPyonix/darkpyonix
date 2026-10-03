@@ -23,7 +23,7 @@ describe("address directory", () => {
     expect(resolved.headers.get("content-type")).toBe("application/octet-stream");
     expect(new Uint8Array(await resolved.arrayBuffer())).toEqual(payload);
 
-    const json = (await (await call(deps, "GET", `/v1/devices/${a.endpointId}/addresses`, { token: tokenB })).json()) as Record<string, unknown>;
+    const json = (await (await call(deps, "GET", `/devices/${a.endpointId}/addresses`, { token: tokenB })).json()) as Record<string, unknown>;
     expect(json).toEqual({
       endpoint_id: a.endpointId,
       relay_urls: [RELAY],

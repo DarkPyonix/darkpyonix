@@ -24,7 +24,7 @@ export interface Env {
   /** Optional: comma-separated numeric GitHub user ids allowed to create accounts. Empty = anyone. */
   GITHUB_ALLOWED_IDS?: string;
 
-  /** Secret. Shared by this Worker and the relay host: /internal/v1/relay/* and the relay's admin API. */
+  /** Secret. Shared by this Worker and the relay host: /internal/relay/* and the relay's admin API. */
   RELAY_SHARED_SECRET?: string;
 
   /** Secret. Cloudflare API token limited to Zone → DNS → Edit on ZONE (SPEC FR-H5). */

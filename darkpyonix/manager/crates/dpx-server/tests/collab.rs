@@ -35,7 +35,7 @@ async fn test_fr_s1_document_combines_snapshot_and_outputs() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, path) = s.kernel("train.py");
     let a = s.admin();
-    let url = format!("/api/v1/kernels/{kid}/document");
+    let url = format!("/api/kernels/{kid}/document");
 
     let d = a.get(&url).await;
     assert_eq!(d.status, 200, "{}", d.text);
@@ -64,7 +64,7 @@ async fn test_fr_s1_document_combines_snapshot_and_outputs() {
         &a,
         Some(A),
         "PATCH",
-        &format!("/api/v1/kernels/{kid}/cells/c_preamble"),
+        &format!("/api/kernels/{kid}/cells/c_preamble"),
         Some(json!({"source": "print('bye')\n", "base_version": 1})),
     )
     .await;
@@ -122,7 +122,7 @@ async fn test_fr_s2_cell_edits_versions_and_events() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    let base = format!("/api/v1/kernels/{kid}");
+    let base = format!("/api/kernels/{kid}");
     let cells = format!("{base}/cells");
 
     let r = s.admin().req("GET", &format!("{base}/events")).send().await.unwrap();
@@ -201,7 +201,7 @@ async fn test_fr_s2_cell_edits_versions_and_events() {
     assert_eq!(ids, ["c_preamble".to_string(), new_id.clone()]);
 
     // Unknown kernels and kernel failures.
-    send_as(&a, Some(A), "POST", "/api/v1/kernels/k_00000000000000000000/cells", Some(json!({})))
+    send_as(&a, Some(A), "POST", "/api/kernels/k_00000000000000000000/cells", Some(json!({})))
         .await
         .error(404, "not_found");
     s.backend.fail_on("doc.cell.update", DpxError::new("kernel_unreachable", "lost"));
@@ -215,7 +215,7 @@ async fn test_fr_s3_locks_are_exclusive_and_unlock_saves() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    let cell = format!("/api/v1/kernels/{kid}/cells/c_second");
+    let cell = format!("/api/kernels/{kid}/cells/c_second");
     let lock = format!("{cell}/lock");
 
     send_as(&a, None, "PUT", &lock, None).await.error(400, "bad_request");
@@ -237,7 +237,7 @@ async fn test_fr_s3_locks_are_exclusive_and_unlock_saves() {
     send_as(&a, Some(B), "DELETE", &lock, None).await.error(409, "locked");
 
     // The document shows the lock.
-    let d = a.get(&format!("/api/v1/kernels/{kid}/document")).await;
+    let d = a.get(&format!("/api/kernels/{kid}/document")).await;
     assert_eq!(d.body["cells"][1]["lock"]["locked_by"], A);
 
     // Unlock with the final source (2025 cell_unlocked_with_code); a stale base is refused.
@@ -254,7 +254,7 @@ async fn test_fr_s3_locks_are_exclusive_and_unlock_saves() {
     send_as(&a, Some(A), "DELETE", &lock, Some(json!({"source": 1}))).await.error(400, "bad_request");
     // Now B may lock.
     assert_eq!(send_as(&a, Some(B), "PUT", &lock, None).await.status, 200);
-    send_as(&a, Some(A), "PUT", &format!("/api/v1/kernels/{kid}/cells/c_missing/lock"), None)
+    send_as(&a, Some(A), "PUT", &format!("/api/kernels/{kid}/cells/c_missing/lock"), None)
         .await
         .error(404, "not_found");
 }
@@ -264,7 +264,7 @@ async fn test_fr_s4_presence_update_and_leave() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    let url = format!("/api/v1/kernels/{kid}/presence");
+    let url = format!("/api/kernels/{kid}/presence");
 
     send_as(&a, None, "PUT", &url, Some(json!({}))).await.error(400, "bad_request");
     send_as(&a, Some(A), "PUT", &url, None).await.error(400, "bad_request");
@@ -318,10 +318,10 @@ async fn test_fr_s4_presence_update_and_leave() {
     let d = send_as(&a, Some(A), "DELETE", &url, None).await;
     assert_eq!(d.status, 204, "{}", d.text);
     assert_eq!(s.backend.calls_of(&kid, "presence.leave")[0]["client"]["client_id"], A);
-    let doc = a.get(&format!("/api/v1/kernels/{kid}/document")).await;
+    let doc = a.get(&format!("/api/kernels/{kid}/document")).await;
     let left: Vec<&str> = doc.body["presence"].as_array().unwrap().iter().map(|p| p["client_id"].as_str().unwrap()).collect();
     assert_eq!(left, [B]);
-    send_as(&a, Some(A), "PUT", "/api/v1/kernels/k_00000000000000000000/presence", Some(json!({})))
+    send_as(&a, Some(A), "PUT", "/api/kernels/k_00000000000000000000/presence", Some(json!({})))
         .await
         .error(404, "not_found");
 }
@@ -336,7 +336,7 @@ async fn test_fr_s4_event_stream_with_client_id_heartbeats_presence() {
     let s = TestServer::start_with(Mode::Ephemeral, |c| c.presence_heartbeat = Duration::from_millis(100)).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    let events = format!("/api/v1/kernels/{kid}/events");
+    let events = format!("/api/kernels/{kid}/events");
     a.get(&format!("{events}?client_id=bad")).await.error(400, "bad_request");
     a.get(&format!("{events}?client_id=tablet-0001&nickname={}", "n".repeat(65))).await.error(400, "bad_request");
 
@@ -351,7 +351,7 @@ async fn test_fr_s4_event_stream_with_client_id_heartbeats_presence() {
         first,
         json!({"client": {"client_id": "tablet-0001", "nickname": "Tab", "user": os_user(), "permission": "admin"}})
     );
-    let doc = a.get(&format!("/api/v1/kernels/{kid}/document")).await;
+    let doc = a.get(&format!("/api/kernels/{kid}/document")).await;
     assert_eq!(doc.body["presence"][0]["client_id"], "tablet-0001");
 
     // Closing the stream stops the heartbeats; the kernel expires the client by itself.
@@ -380,7 +380,7 @@ async fn test_fr_s6_runs_and_interrupts_carry_the_client() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    let runs = format!("/api/v1/kernels/{kid}/runs");
+    let runs = format!("/api/kernels/{kid}/runs");
     let r = send_as(&a, Some(A), "POST", &runs, Some(json!({"mode": "cells", "cell_ids": ["c_second"]}))).await;
     assert_eq!(r.status, 202, "{}", r.text);
     let (m, p) = s.backend.last_call(&kid).unwrap();
@@ -403,7 +403,7 @@ async fn test_fr_s6_runs_and_interrupts_carry_the_client() {
     assert!(client.get("client_id").is_none());
     assert_eq!(client["user"], os_user());
 
-    let i = send_as(&a, Some(B), "POST", &format!("/api/v1/kernels/{kid}/interrupt"), None).await;
+    let i = send_as(&a, Some(B), "POST", &format!("/api/kernels/{kid}/interrupt"), None).await;
     assert_eq!(i.status, 200, "{}", i.text);
     assert_eq!(s.backend.calls_of(&kid, "interrupt")[0]["client"]["client_id"], B);
 }
@@ -413,7 +413,7 @@ async fn test_fr_s7_wait_returns_on_finish_or_timeout() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    let base = format!("/api/v1/kernels/{kid}");
+    let base = format!("/api/kernels/{kid}");
     let run_id = a.post(&format!("{base}/runs"), json!({"mode": "all"})).await.body["run_id"].as_str().unwrap().to_string();
 
     // Still running after the timeout: status running and where to poll next.
@@ -458,7 +458,7 @@ async fn test_fr_s7_wait_returns_on_finish_or_timeout() {
     a.get(&format!("{base}/runs/bogus/wait")).await.error(404, "not_found");
     a.get(&format!("{base}/runs/current/wait?timeout=1")).await.error(404, "not_found");
     a.get(&format!("{base}/runs/20990101-000000-0000/wait?timeout=1")).await.error(404, "not_found");
-    a.get("/api/v1/kernels/k_00000000000000000000/runs/latest/wait").await.error(404, "not_found");
+    a.get("/api/kernels/k_00000000000000000000/runs/latest/wait").await.error(404, "not_found");
     s.backend.fail_on("runs.wait", DpxError::new("kernel_unreachable", "lost"));
     a.get(&format!("{base}/runs/latest/wait")).await.error(502, "kernel_unreachable");
 }
@@ -470,17 +470,17 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
     // A finished run so that waitRun on `latest` answers at once.
-    a.post(&format!("/api/v1/kernels/{kid}/runs"), json!({"mode": "all"})).await;
+    a.post(&format!("/api/kernels/{kid}/runs"), json!({"mode": "all"})).await;
     s.backend.finish_run(&kid);
 
     let mut tokens = vec![];
     for perm in ["viewer1", "viewer2", "viewer3", "editor"] {
-        let c = a.post(&format!("/api/v1/kernels/{kid}/shares"), json!({"permission": perm, "label": perm})).await;
+        let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": perm, "label": perm})).await;
         assert_eq!(c.status, 201, "{}", c.text);
         assert_eq!(c.body["permission"], perm);
         tokens.push((perm, c.body["token"].as_str().unwrap().to_string()));
     }
-    let listed = a.get(&format!("/api/v1/kernels/{kid}/shares")).await;
+    let listed = a.get(&format!("/api/kernels/{kid}/shares")).await;
     assert!(listed.body["shares"].as_array().unwrap().iter().any(|s| s["permission"] == "editor"));
     let rank = |p: &str| match p {
         "viewer1" => 1,
@@ -489,7 +489,7 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
         "editor" => 4,
         _ => 5,
     };
-    let b = format!("/api/v1/kernels/{kid}");
+    let b = format!("/api/kernels/{kid}");
     // (method, path, body, minimum permission)
     let ops: Vec<(&str, String, Option<Value>, &str)> = vec![
         ("GET", format!("{b}/document"), None, "viewer1"),
@@ -507,7 +507,7 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
     ];
     for (perm, token) in &tokens {
         let v = s.with_token(token);
-        assert_eq!(v.get("/api/v1/manager").await.body["permission"], *perm);
+        assert_eq!(v.get("/api/manager").await.body["permission"], *perm);
         let me = format!("client-{perm}");
         for (m, p, body, min) in &ops {
             let r = send_as(&v, Some(me.as_str()), m, p, body.clone()).await;
@@ -525,7 +525,7 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
         assert_eq!(sent["client"]["client_id"], me.as_str());
     }
     // Without a label the user is "guest"; the master token is the OS user.
-    let c = a.post(&format!("/api/v1/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await;
+    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await;
     let guest = s.with_token(c.body["token"].as_str().unwrap());
     assert_eq!(send_as(&guest, Some("guest-device"), "PUT", &format!("{b}/presence"), Some(json!({}))).await.status, 200);
     assert_eq!(s.backend.calls_of(&kid, "presence.update").pop().unwrap()["client"]["user"], "guest");
@@ -534,7 +534,7 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
     // Share tokens see other kernels as missing, never forbidden.
     let (other, _) = s.kernel("other.py");
     let editor = s.with_token(&tokens[3].1);
-    send_as(&editor, Some("client-editor"), "POST", &format!("/api/v1/kernels/{other}/cells"), Some(json!({})))
+    send_as(&editor, Some("client-editor"), "POST", &format!("/api/kernels/{other}/cells"), Some(json!({})))
         .await
         .error(404, "not_found");
 }

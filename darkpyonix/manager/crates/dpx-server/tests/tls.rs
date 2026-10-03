@@ -52,12 +52,12 @@ async fn test_d10_tls_serves_http1_and_http2_via_alpn() {
     let io = TokioIo::new(connect(addr, &der, b"h2").await);
     let (mut h2, conn) = hyper::client::conn::http2::handshake(TokioExecutor::new(), io).await.unwrap();
     tokio::spawn(conn);
-    let r = h2.send_request(get("/api/v1/manager", &s.token)).await.unwrap();
+    let r = h2.send_request(get("/api/manager", &s.token)).await.unwrap();
     assert_eq!(r.status(), 200);
     assert_eq!(r.version(), hyper::Version::HTTP_2);
     let body: serde_json::Value = serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert_eq!(body["mode"], "dedicated");
-    let r = h2.send_request(get("/api/v1/kernels", "wrong")).await.unwrap();
+    let r = h2.send_request(get("/api/kernels", "wrong")).await.unwrap();
     assert_eq!(r.status(), 401);
 
     // HTTP/1.1
@@ -87,7 +87,7 @@ async fn test_d10_plain_http2_prior_knowledge() {
     let tcp = tokio::net::TcpStream::connect(s.handle.as_ref().unwrap().local_addr).await.unwrap();
     let (mut h2, conn) = hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(tcp)).await.unwrap();
     tokio::spawn(conn);
-    let req = hyper::Request::get(format!("{}/api/v1/kernels", s.url))
+    let req = hyper::Request::get(format!("{}/api/kernels", s.url))
         .header("authorization", format!("Bearer {}", s.token))
         .body(Empty::<Bytes>::new())
         .unwrap();

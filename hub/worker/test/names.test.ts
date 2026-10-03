@@ -11,17 +11,17 @@ describe("names", () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 41, login: "owner" });
     const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
-    const reserved = await call(deps, "PUT", "/v1/names/studio", { token: main });
+    const reserved = await call(deps, "PUT", "/names/studio", { token: main });
     expect(reserved.status).toBe(201);
     expect(await reserved.json()).toMatchObject({ name: "studio", fqdn: "studio.darkpyonix.dev" });
-    expect((await call(deps, "PUT", "/v1/names/studio", { token: main })).status).toBe(200);
+    expect((await call(deps, "PUT", "/names/studio", { token: main })).status).toBe(200);
 
-    expect((await call(deps, "PUT", "/v1/names/studio/acme-challenge", { token: main, json: { values: [DIGEST] } })).status).toBe(204);
+    expect((await call(deps, "PUT", "/names/studio/acme-challenge", { token: main, json: { values: [DIGEST] } })).status).toBe(204);
     expect(deps.memoryDns.records.get("_acme-challenge.studio.darkpyonix.dev")).toEqual([DIGEST]);
-    expect((await call(deps, "DELETE", "/v1/names/studio/acme-challenge", { token: main })).status).toBe(204);
+    expect((await call(deps, "DELETE", "/names/studio/acme-challenge", { token: main })).status).toBe(204);
     expect(deps.memoryDns.records.has("_acme-challenge.studio.darkpyonix.dev")).toBe(false);
 
-    const listed = (await (await call(deps, "GET", "/v1/names", { cookie })).json()) as { names: { name: string }[] };
+    const listed = (await (await call(deps, "GET", "/names", { cookie })).json()) as { names: { name: string }[] };
     expect(listed.names.map((n) => n.name)).toEqual(["studio"]);
   });
 
@@ -32,24 +32,24 @@ describe("names", () => {
     const aliceMain = await linkDevice(deps, { cookie: alice }, await newDevice(), "main_server");
     const aliceComputer = await linkDevice(deps, { cookie: alice }, await newDevice(), "computer");
     const bobMain = await linkDevice(deps, { cookie: bob }, await newDevice(), "main_server");
-    expect((await call(deps, "PUT", "/v1/names/lab", { token: aliceComputer })).status).toBe(403);
-    expect((await call(deps, "PUT", "/v1/names/lab", { token: aliceMain })).status).toBe(201);
-    expect((await call(deps, "PUT", "/v1/names/lab", { token: bobMain })).status).toBe(409);
-    expect((await call(deps, "PUT", "/v1/names/lab/acme-challenge", { token: bobMain, json: { values: [DIGEST] } })).status).toBe(404);
-    expect((await call(deps, "PUT", "/v1/names/relay", { token: aliceMain })).status).toBe(400);
-    expect((await call(deps, "PUT", "/v1/names/Bad_Name", { token: aliceMain })).status).toBe(400);
+    expect((await call(deps, "PUT", "/names/lab", { token: aliceComputer })).status).toBe(403);
+    expect((await call(deps, "PUT", "/names/lab", { token: aliceMain })).status).toBe(201);
+    expect((await call(deps, "PUT", "/names/lab", { token: bobMain })).status).toBe(409);
+    expect((await call(deps, "PUT", "/names/lab/acme-challenge", { token: bobMain, json: { values: [DIGEST] } })).status).toBe(404);
+    expect((await call(deps, "PUT", "/names/relay", { token: aliceMain })).status).toBe(400);
+    expect((await call(deps, "PUT", "/names/Bad_Name", { token: aliceMain })).status).toBe(400);
   });
 
   it("test_fr_h5_bad_values_and_provider_failures", async () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 44, login: "owner" });
     const main = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
-    await call(deps, "PUT", "/v1/names/box", { token: main });
+    await call(deps, "PUT", "/names/box", { token: main });
     for (const values of [[], ["short"], [DIGEST, DIGEST, DIGEST, DIGEST, DIGEST]]) {
-      expect((await call(deps, "PUT", "/v1/names/box/acme-challenge", { token: main, json: { values } })).status).toBe(400);
+      expect((await call(deps, "PUT", "/names/box/acme-challenge", { token: main, json: { values } })).status).toBe(400);
     }
     deps.memoryDns.failing = true;
-    expect((await call(deps, "PUT", "/v1/names/box/acme-challenge", { token: main, json: { values: [DIGEST] } })).status).toBe(502);
+    expect((await call(deps, "PUT", "/names/box/acme-challenge", { token: main, json: { values: [DIGEST] } })).status).toBe(502);
   });
 
   it("test_fr_h5_release_and_device_removal_clear_records", async () => {
@@ -57,17 +57,17 @@ describe("names", () => {
     const cookie = await signIn(deps, { id: 45, login: "owner" });
     const device = await newDevice();
     const main = await linkDevice(deps, { cookie }, device, "main_server");
-    await call(deps, "PUT", "/v1/names/one", { token: main });
-    await call(deps, "PUT", "/v1/names/one/acme-challenge", { token: main, json: { values: [DIGEST] } });
-    expect((await call(deps, "DELETE", "/v1/names/one", { cookie })).status).toBe(204);
+    await call(deps, "PUT", "/names/one", { token: main });
+    await call(deps, "PUT", "/names/one/acme-challenge", { token: main, json: { values: [DIGEST] } });
+    expect((await call(deps, "DELETE", "/names/one", { cookie })).status).toBe(204);
     await Promise.all(deps.pending);
     expect(deps.memoryDns.records.size).toBe(0);
-    await call(deps, "PUT", "/v1/names/two", { token: main });
-    await call(deps, "PUT", "/v1/names/two/acme-challenge", { token: main, json: { values: [DIGEST] } });
-    await call(deps, "DELETE", `/v1/devices/${device.endpointId}`, { cookie });
+    await call(deps, "PUT", "/names/two", { token: main });
+    await call(deps, "PUT", "/names/two/acme-challenge", { token: main, json: { values: [DIGEST] } });
+    await call(deps, "DELETE", `/devices/${device.endpointId}`, { cookie });
     await Promise.all(deps.pending);
     expect(deps.memoryDns.records.size).toBe(0);
-    expect((await call(deps, "GET", "/v1/names", { cookie })).status).toBe(200);
+    expect((await call(deps, "GET", "/names", { cookie })).status).toBe(200);
   });
 
   it("test_fr_h5_names_follow_the_main_server_on_replacement", async () => {
@@ -75,17 +75,17 @@ describe("names", () => {
     const cookie = await signIn(deps, { id: 46, login: "owner" });
     const oldDevice = await newDevice();
     const oldMain = await linkDevice(deps, { cookie }, oldDevice, "main_server");
-    expect((await call(deps, "PUT", "/v1/names/atelier", { token: oldMain })).status).toBe(201);
-    await call(deps, "PUT", "/v1/names/atelier/acme-challenge", { token: oldMain, json: { values: [DIGEST] } });
+    expect((await call(deps, "PUT", "/names/atelier", { token: oldMain })).status).toBe(201);
+    await call(deps, "PUT", "/names/atelier/acme-challenge", { token: oldMain, json: { values: [DIGEST] } });
     const newDev = await newDevice();
     const newMain = await linkDevice(deps, { cookie }, newDev, "main_server", "new", { replace: oldDevice.endpointId });
     await Promise.all(deps.pending);
     expect(deps.memoryDns.records.has("_acme-challenge.atelier.darkpyonix.dev")).toBe(false);
-    const listed = (await (await call(deps, "GET", "/v1/names", { cookie })).json()) as { names: { name: string; endpoint_id: string }[] };
+    const listed = (await (await call(deps, "GET", "/names", { cookie })).json()) as { names: { name: string; endpoint_id: string }[] };
     expect(listed.names).toEqual([{ name: "atelier", fqdn: "atelier.darkpyonix.dev", endpoint_id: newDev.endpointId }]);
-    expect((await call(deps, "PUT", "/v1/names/atelier", { token: newMain })).status).toBe(200);
-    expect((await call(deps, "PUT", "/v1/names/atelier/acme-challenge", { token: newMain, json: { values: [DIGEST] } })).status).toBe(204);
-    expect((await call(deps, "PUT", "/v1/names/atelier/acme-challenge", { token: oldMain, json: { values: [DIGEST] } })).status).toBe(401);
+    expect((await call(deps, "PUT", "/names/atelier", { token: newMain })).status).toBe(200);
+    expect((await call(deps, "PUT", "/names/atelier/acme-challenge", { token: newMain, json: { values: [DIGEST] } })).status).toBe(204);
+    expect((await call(deps, "PUT", "/names/atelier/acme-challenge", { token: oldMain, json: { values: [DIGEST] } })).status).toBe(401);
   });
 });
 

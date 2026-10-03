@@ -710,7 +710,7 @@ impl Contract {
     }
 
     /// Documented statuses of the operation `method path` resolves to, if any. Literal
-    /// segments win over `{param}` ones (e.g. `/api/v1/documents`).
+    /// segments win over `{param}` ones (e.g. `/api/documents`).
     pub fn documented(&self, method: &str, path: &str) -> Option<&Vec<u16>> {
         let segs: Vec<&str> = path.split('?').next().unwrap().split('/').collect();
         let mut best: Option<(usize, &Vec<u16>)> = None;

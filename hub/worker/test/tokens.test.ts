@@ -32,10 +32,10 @@ describe("resolve tokens", () => {
     expect(tokensB.resolve_token).toMatch(/^dpr_/);
     expect((await call(deps, "GET", `/pkarr/${a.z32}?token=${tokensB.resolve_token}`)).status).toBe(200);
     expect((await call(deps, "GET", `/pkarr/${a.z32}`, { token: tokensB.resolve_token })).status).toBe(200);
-    for (const path of ["/v1/devices", "/v1/me", `/v1/devices/${a.endpointId}/addresses`]) {
+    for (const path of ["/devices", "/me", `/devices/${a.endpointId}/addresses`]) {
       expect((await call(deps, "GET", path, { token: tokensB.resolve_token })).status, path).toBe(401);
     }
-    expect((await call(deps, "POST", "/v1/me/resolve-token", { token: tokensB.resolve_token })).status).toBe(401);
+    expect((await call(deps, "POST", "/me/resolve-token", { token: tokensB.resolve_token })).status).toBe(401);
   });
 
   it("test_nfr_h2_query_refuses_device_tokens", async () => {
@@ -49,7 +49,7 @@ describe("resolve tokens", () => {
 
   it("test_nfr_h2_resolve_token_rotates", async () => {
     const { deps, a, tokensB } = await setup(103);
-    const rotated = await call(deps, "POST", "/v1/me/resolve-token", { token: tokensB.device_token });
+    const rotated = await call(deps, "POST", "/me/resolve-token", { token: tokensB.device_token });
     expect(rotated.status).toBe(201);
     const fresh = ((await rotated.json()) as { resolve_token: string }).resolve_token;
     expect(fresh).toMatch(/^dpr_/);
@@ -60,7 +60,7 @@ describe("resolve tokens", () => {
 
   it("test_nfr_h2_removed_device_resolve_token_is_device_removed", async () => {
     const { deps, cookie, a, b, tokensB } = await setup(104);
-    expect((await call(deps, "DELETE", `/v1/devices/${b.endpointId}`, { cookie })).status).toBe(204);
+    expect((await call(deps, "DELETE", `/devices/${b.endpointId}`, { cookie })).status).toBe(204);
     const removed = await call(deps, "GET", `/pkarr/${a.z32}?token=${tokensB.resolve_token}`);
     expect(removed.status).toBe(401);
     expect(await code(removed)).toBe("device_removed");

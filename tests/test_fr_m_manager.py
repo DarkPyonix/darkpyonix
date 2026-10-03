@@ -9,6 +9,7 @@ the Rust build) to run the rest against that implementation; it must publish
 from __future__ import annotations
 
 import os
+import re
 import time
 
 import pytest
@@ -122,30 +123,48 @@ def test_fr_m1_health_and_manager_info(manager):
     with manager.client(token=None) as c:
         assert c.get("/health").json() == {"status": "ok", "version": "0.1.0"}
     with manager.client() as c:
-        info = c.get("/api/v1/manager").json()
+        info = c.get("/api/manager").json()
     assert info["mode"] == "ephemeral" and info["permission"] == "admin" and isinstance(info["pid"], int)
     assert {"version", "started_at", "host"} <= set(info)
 
 
+# ---------------------------------------------------------------- NFR-V1 (INTENT D16)
+
+def test_nfr_v1_no_version_segment_in_any_rest_path():
+    version = re.compile(r"^v[0-9]+$")
+    for name in ("manager.openapi.yaml", "hub.openapi.yaml"):
+        with open(os.path.join(REPO, "docs", "api", name)) as f:
+            spec = yaml.safe_load(f)
+        for path in spec["paths"]:
+            assert not any(version.match(seg) for seg in path.split("/")), (name, path)
+
+
+def test_nfr_v1_versioned_manager_path_is_not_served(manager, kernel):
+    with manager.client() as c:
+        assert c.get("/api/manager").status_code == 200
+        for path in ("/api/v1/manager", "/api/v1/kernels", "/api/v1/kernels/%s/events" % kernel.kernel_id):
+            _error(c.get(path), 404, "not_found")
+
+
 def test_fr_m1_validation_errors_are_400_bad_request(manager, kernel):
     with manager.client() as c:
-        err = _error(c.post("/api/v1/kernels", json={"python": "x"}), 400, "bad_request")
+        err = _error(c.post("/api/kernels", json={"python": "x"}), 400, "bad_request")
         assert err["data"]["errors"]
-        _error(c.post("/api/v1/kernels", content=b"{not json", headers={"content-type": "application/json"}),
+        _error(c.post("/api/kernels", content=b"{not json", headers={"content-type": "application/json"}),
                400, "bad_request")
-        _error(c.post("/api/v1/kernels/%s/runs" % kernel.kernel_id, json={"mode": "some"}), 400, "bad_request")
-        _error(c.post("/api/v1/kernels/%s/runs" % kernel.kernel_id, json={"mode": "cells"}), 400, "bad_request")
-        _error(c.get("/api/v1/documents"), 400, "bad_request")
+        _error(c.post("/api/kernels/%s/runs" % kernel.kernel_id, json={"mode": "some"}), 400, "bad_request")
+        _error(c.post("/api/kernels/%s/runs" % kernel.kernel_id, json={"mode": "cells"}), 400, "bad_request")
+        _error(c.get("/api/documents"), 400, "bad_request")
 
 
 # ---------------------------------------------------------------- FR-A2
 
 def test_fr_a2_requests_without_token_are_401(manager, kernel):
     kid = kernel.kernel_id
-    calls = [("GET", "/api/v1/manager"), ("GET", "/api/v1/kernels"), ("POST", "/api/v1/kernels"),
-             ("GET", "/api/v1/kernels/%s" % kid), ("POST", "/api/v1/kernels/%s/interrupt" % kid),
-             ("POST", "/api/v1/kernels/%s/runs" % kid), ("GET", "/api/v1/kernels/%s/events" % kid),
-             ("GET", "/api/v1/documents?path=x.py"), ("GET", "/api/v1/kernels/%s/shares" % kid)]
+    calls = [("GET", "/api/manager"), ("GET", "/api/kernels"), ("POST", "/api/kernels"),
+             ("GET", "/api/kernels/%s" % kid), ("POST", "/api/kernels/%s/interrupt" % kid),
+             ("POST", "/api/kernels/%s/runs" % kid), ("GET", "/api/kernels/%s/events" % kid),
+             ("GET", "/api/documents?path=x.py"), ("GET", "/api/kernels/%s/shares" % kid)]
     for token in (None, "wrong"):
         with manager.client(token=token) as c:
             for method, path in calls:
@@ -155,8 +174,8 @@ def test_fr_a2_requests_without_token_are_401(manager, kernel):
     with manager.client(token=None) as c:
         assert c.get("/health").status_code == 200
         # ?token= is accepted on the events stream only.
-        _error(c.get("/api/v1/kernels", params={"token": manager.token}), 401, "unauthorized")
-        with c.stream("GET", "/api/v1/kernels/%s/events" % kid, params={"token": manager.token}) as r:
+        _error(c.get("/api/kernels", params={"token": manager.token}), 401, "unauthorized")
+        with c.stream("GET", "/api/kernels/%s/events" % kid, params={"token": manager.token}) as r:
             assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
     assert "interrupt" not in kernel.method_calls() and "run" not in kernel.method_calls()
 
@@ -165,24 +184,24 @@ def test_fr_a2_requests_without_token_are_401(manager, kernel):
 
 def test_fr_m1_list_and_get_kernels(manager, kernel):
     with manager.client() as c:
-        kernels = c.get("/api/v1/kernels", params={"refresh": "true"}).json()["kernels"]
+        kernels = c.get("/api/kernels", params={"refresh": "true"}).json()["kernels"]
         assert [k["kernel_id"] for k in kernels] == [kernel.kernel_id]
         k = kernels[0]
         assert {"kernel_id", "path", "pid", "status", "python", "started_at", "runs_dir"} <= set(k)
         assert "port" not in k and k["runs_dir"].endswith(os.path.join("__runs__", "train.py"))
-        info = c.get("/api/v1/kernels/%s" % kernel.kernel_id).json()
+        info = c.get("/api/kernels/%s" % kernel.kernel_id).json()
         assert info["status"] == "idle" and info["queue"] == [] and info["kernel_version"] == "0.1.0"
-        _error(c.get("/api/v1/kernels/k_00000000000000000000"), 404, "not_found")
-        _error(c.get("/api/v1/kernels/not-a-kernel"), 404, "not_found")
+        _error(c.get("/api/kernels/k_00000000000000000000"), 404, "not_found")
+        _error(c.get("/api/kernels/not-a-kernel"), 404, "not_found")
 
 
 @prototype_only
 def test_fr_m2_start_kernel_is_idempotent(manager, backend, notebook):
     with manager.client() as c:
-        first = c.post("/api/v1/kernels", json={"path": notebook})
+        first = c.post("/api/kernels", json={"path": notebook})
         assert first.status_code == 201, first.text
         assert first.json()["kernel_id"] == protocol.kernel_id_for(notebook)
-        second = c.post("/api/v1/kernels", json={"path": os.path.join(os.path.dirname(notebook), ".", "train.py")})
+        second = c.post("/api/kernels", json={"path": os.path.join(os.path.dirname(notebook), ".", "train.py")})
         assert second.status_code == 200
         assert second.json()["kernel_id"] == first.json()["kernel_id"]
     assert len(backend.launches) == 1
@@ -194,17 +213,17 @@ def test_fr_m2_start_kernel_that_never_announces_is_504(manager, backend, notebo
     backend.launchable = False
     backend.wait_timeout = 0.2
     with manager.client() as c:
-        err = _error(c.post("/api/v1/kernels", json={"path": notebook}), 504, "start_timeout")
-        _error(c.post("/api/v1/kernels", json={"path": notebook + ".missing.py"}), 400, "bad_request")
+        err = _error(c.post("/api/kernels", json={"path": notebook}), 504, "start_timeout")
+        _error(c.post("/api/kernels", json={"path": notebook + ".missing.py"}), 400, "bad_request")
         open(notebook + ".txt", "w").close()
-        _error(c.post("/api/v1/kernels", json={"path": notebook + ".txt"}), 400, "bad_request")
+        _error(c.post("/api/kernels", json={"path": notebook + ".txt"}), 400, "bad_request")
     assert err["data"]["kernel_id"] == protocol.kernel_id_for(notebook)
 
 
 # ---------------------------------------------------------------- runs (FR-X3, FR-X4)
 
 def test_fr_x3_busy_run_is_409_with_busy_error(manager, kernel):
-    url = "/api/v1/kernels/%s/runs" % kernel.kernel_id
+    url = "/api/kernels/%s/runs" % kernel.kernel_id
     with manager.client() as c:
         first = c.post(url, json={"mode": "all"})
         assert first.status_code == 202 and first.json()["state"] == "running"
@@ -223,10 +242,10 @@ def test_fr_x3_busy_run_is_409_with_busy_error(manager, kernel):
 def test_fr_x4_interrupt_maps_to_kernel_interrupt(manager, kernel):
     kid = kernel.kernel_id
     with manager.client() as c:
-        assert c.post("/api/v1/kernels/%s/interrupt" % kid).json() == {"interrupted": False}
-        run_id = c.post("/api/v1/kernels/%s/runs" % kid, json={"mode": "all"}).json()["run_id"]
-        assert c.post("/api/v1/kernels/%s/interrupt" % kid).json() == {"interrupted": True, "run_id": run_id}
-        summary = c.get("/api/v1/kernels/%s/runs/%s" % (kid, run_id), params={"format": "summary"}).json()
+        assert c.post("/api/kernels/%s/interrupt" % kid).json() == {"interrupted": False}
+        run_id = c.post("/api/kernels/%s/runs" % kid, json={"mode": "all"}).json()["run_id"]
+        assert c.post("/api/kernels/%s/interrupt" % kid).json() == {"interrupted": True, "run_id": run_id}
+        summary = c.get("/api/kernels/%s/runs/%s" % (kid, run_id), params={"format": "summary"}).json()
         assert summary["status"] == "interrupted"
     assert kernel.method_calls().count("interrupt") == 2
     assert "shutdown" not in kernel.method_calls() and "restart" not in kernel.method_calls()
@@ -234,7 +253,7 @@ def test_fr_x4_interrupt_maps_to_kernel_interrupt(manager, kernel):
 
 def test_fr_m1_runs_namespace_document_restart_shutdown(manager, kernel, notebook):
     kid = kernel.kernel_id
-    base = "/api/v1/kernels/%s" % kid
+    base = "/api/kernels/%s" % kid
     with manager.client() as c:
         run_id = c.post(base + "/runs", json={"mode": "all"}).json()["run_id"]
         queued = c.post(base + "/runs", json={"mode": "all", "on_busy": "queue"}).json()["run_id"]
@@ -254,8 +273,8 @@ def test_fr_m1_runs_namespace_document_restart_shutdown(manager, kernel, noteboo
         assert c.get(base + "/namespace").json()["variables"][0]["name"] == "x"
         doc = c.get(base + "/document")
         assert doc.status_code == 200 and doc.json()["cells"]
-        assert c.get("/api/v1/documents", params={"path": notebook}).json()["cells"][0]["type"] == "preamble"
-        _error(c.get("/api/v1/documents", params={"path": notebook + ".nope.py"}), 404, "not_found")
+        assert c.get("/api/documents", params={"path": notebook}).json()["cells"][0]["type"] == "preamble"
+        _error(c.get("/api/documents", params={"path": notebook + ".nope.py"}), 404, "not_found")
         restarted = c.post(base + "/restart", json={"hard": False})
         assert restarted.status_code == 200 and restarted.json()["kernel_id"] == kid
         resp = c.delete(base)
@@ -267,11 +286,11 @@ def test_fr_m1_runs_namespace_document_restart_shutdown(manager, kernel, noteboo
 
 def test_fr_m1_events_stream_resumes_with_last_event_id(manager, kernel):
     kid = kernel.kernel_id
-    url = "/api/v1/kernels/%s/events" % kid
+    url = "/api/kernels/%s/events" % kid
     with manager.client() as c:
         with c.stream("GET", url) as stream:
             assert stream.status_code == 200
-            assert c.post("/api/v1/kernels/%s/runs" % kid, json={"mode": "all"}).status_code == 202
+            assert c.post("/api/kernels/%s/runs" % kid, json={"mode": "all"}).status_code == 202
             live = read_sse(stream, 4)
         assert [e["event"] for e in live] == ["kernel.status", "run.started", "cell.started", "output"]
         ids = [int(e["id"]) for e in live]
@@ -296,7 +315,7 @@ def test_pr3_resume_older_than_the_ring_reports_replay_truncated(backend, notebo
         kernel.emit("output", {"run_id": "x", "index": 1, "output": {"output_type": "stream", "name": "stdout",
                                                                      "text": "%d\n" % i}})
     with make_manager(backend) as m, m.client() as c:
-        with c.stream("GET", "/api/v1/kernels/%s/events" % kernel.kernel_id, params={"since": "1"}) as stream:
+        with c.stream("GET", "/api/kernels/%s/events" % kernel.kernel_id, params={"since": "1"}) as stream:
             got = read_sse(stream, 4)
     assert got[0] == {"event": "replay_truncated", "data": {"oldest_seq": 4}}
     assert [int(e["id"]) for e in got[1:]] == [4, 5, 6]
@@ -305,16 +324,16 @@ def test_pr3_resume_older_than_the_ring_reports_replay_truncated(backend, notebo
 # ---------------------------------------------------------------- FR-M5
 
 def test_fr_m5_two_managers_share_one_kernel(backend, kernel):
-    url = "/api/v1/kernels/%s/events" % kernel.kernel_id
+    url = "/api/kernels/%s/events" % kernel.kernel_id
     with make_manager(backend) as a, make_manager(backend) as b, a.client() as ca, b.client() as cb:
         with ca.stream("GET", url) as sa, cb.stream("GET", url) as sb:
             assert _wait(lambda: kernel.connections == 2)
-            assert cb.post("/api/v1/kernels/%s/runs" % kernel.kernel_id, json={"mode": "all"}).status_code == 202
+            assert cb.post("/api/kernels/%s/runs" % kernel.kernel_id, json={"mode": "all"}).status_code == 202
             got_a, got_b = read_sse(sa, 4), read_sse(sb, 4)
         assert got_a == got_b
         assert [e["event"] for e in got_a] == ["kernel.status", "run.started", "cell.started", "output"]
         # The run started through b is busy for a too.
-        _error(ca.post("/api/v1/kernels/%s/runs" % kernel.kernel_id, json={"mode": "all"}), 409, "busy")
+        _error(ca.post("/api/kernels/%s/runs" % kernel.kernel_id, json={"mode": "all"}), 409, "busy")
 
 
 # ---------------------------------------------------------------- shares (FR-A3, minimal until #19)
@@ -322,33 +341,33 @@ def test_fr_m5_two_managers_share_one_kernel(backend, kernel):
 def test_fr_a3_ephemeral_manager_refuses_share_creation(manager, kernel):
     kid = kernel.kernel_id
     with manager.client() as c:
-        _error(c.post("/api/v1/kernels/%s/shares" % kid, json={"permission": "viewer1"}), 403, "forbidden")
-        assert c.get("/api/v1/kernels/%s/shares" % kid).json() == {"shares": []}
+        _error(c.post("/api/kernels/%s/shares" % kid, json={"permission": "viewer1"}), 403, "forbidden")
+        assert c.get("/api/kernels/%s/shares" % kid).json() == {"shares": []}
 
 
 def test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission(backend, kernel):
     kid = kernel.kernel_id
     other = backend.add(FakeKernel(kernel.path + ".other.py", backend.key).start())
     with make_manager(backend, mode="dedicated") as m, m.client() as c:
-        created = c.post("/api/v1/kernels/%s/shares" % kid, json={"permission": "viewer1", "label": "demo"})
+        created = c.post("/api/kernels/%s/shares" % kid, json={"permission": "viewer1", "label": "demo"})
         assert created.status_code == 201
         share = created.json()
         assert share["share_id"].startswith("s_") and share["token"] and share["url"].endswith(share["token"])
-        listed = c.get("/api/v1/kernels/%s/shares" % kid).json()["shares"]
+        listed = c.get("/api/kernels/%s/shares" % kid).json()["shares"]
         assert [s["share_id"] for s in listed] == [share["share_id"]] and "token" not in listed[0]
         with m.client(token=share["token"]) as v:
-            assert v.get("/api/v1/manager").json()["permission"] == "viewer1"
-            assert [k["kernel_id"] for k in v.get("/api/v1/kernels").json()["kernels"]] == [kid]
-            _error(v.get("/api/v1/kernels/%s" % other.kernel_id), 404, "not_found")
-            assert "outputs" not in v.get("/api/v1/kernels/%s/document" % kid).json()["cells"][0]
-            _error(v.post("/api/v1/kernels/%s/runs" % kid, json={"mode": "all"}), 403, "forbidden")
-            _error(v.post("/api/v1/kernels/%s/interrupt" % kid), 403, "forbidden")
-            _error(v.get("/api/v1/kernels/%s/shares" % kid), 403, "forbidden")
-            _error(v.post("/api/v1/kernels", json={"path": kernel.path}), 403, "forbidden")
-        assert c.delete("/api/v1/kernels/%s/shares/%s" % (kid, share["share_id"])).status_code == 204
-        _error(c.delete("/api/v1/kernels/%s/shares/%s" % (kid, share["share_id"])), 404, "not_found")
+            assert v.get("/api/manager").json()["permission"] == "viewer1"
+            assert [k["kernel_id"] for k in v.get("/api/kernels").json()["kernels"]] == [kid]
+            _error(v.get("/api/kernels/%s" % other.kernel_id), 404, "not_found")
+            assert "outputs" not in v.get("/api/kernels/%s/document" % kid).json()["cells"][0]
+            _error(v.post("/api/kernels/%s/runs" % kid, json={"mode": "all"}), 403, "forbidden")
+            _error(v.post("/api/kernels/%s/interrupt" % kid), 403, "forbidden")
+            _error(v.get("/api/kernels/%s/shares" % kid), 403, "forbidden")
+            _error(v.post("/api/kernels", json={"path": kernel.path}), 403, "forbidden")
+        assert c.delete("/api/kernels/%s/shares/%s" % (kid, share["share_id"])).status_code == 204
+        _error(c.delete("/api/kernels/%s/shares/%s" % (kid, share["share_id"])), 404, "not_found")
         with m.client(token=share["token"]) as v:
-            _error(v.get("/api/v1/manager"), 401, "unauthorized")
+            _error(v.get("/api/manager"), 401, "unauthorized")
 
 
 # ---------------------------------------------------------------- NFR-M3, black-box
@@ -383,4 +402,4 @@ def test_nfr_m3_every_operation_answers_with_a_documented_status(manager):
                     assert set(resp.json()) == {"error"}
                 if op.get("security") != []:
                     assert anon.request(method.upper(), url, params=params, json=body).status_code == 401
-        _error(admin.get("/api/v1/not-in-the-contract"), 404, "not_found")
+        _error(admin.get("/api/not-in-the-contract"), 404, "not_found")

@@ -122,7 +122,7 @@ async fn test_fr_h2_directory_rejects_unregistered_and_foreign() {
     assert_eq!(get(Some(&token)).await.unwrap().status(), 200);
     assert_eq!(get(Some(&mine.1)).await.unwrap().status(), 200);
 
-    let path = format!("/v1/devices/{}/addresses", key.public());
+    let path = format!("/devices/{}/addresses", key.public());
     assert_eq!(hub.get_json(&path, &their_token).await.0, 404);
     let (status, body) = hub.get_json(&path, &token).await;
     assert_eq!(status, 200);

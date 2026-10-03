@@ -78,7 +78,7 @@ async fn test_nfr_m3_every_operation_answers_with_a_documented_status() {
     let n = probe_all(&s, None).await;
     assert_eq!(n, contract().operations().count());
     assert_eq!(n, 28, "operation count changed; update the router and the tests");
-    s.admin().get("/api/v1/not-in-the-contract").await.error(404, "not_found");
+    s.admin().get("/api/not-in-the-contract").await.error(404, "not_found");
 }
 
 #[tokio::test]
@@ -92,7 +92,7 @@ async fn test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode()
 async fn test_nfr_m3_undocumented_methods_are_not_served() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let a = s.admin();
-    for (m, p) in [("PUT", "/api/v1/kernels"), ("PATCH", "/api/v1/manager"), ("POST", "/api/v1/documents")] {
+    for (m, p) in [("PUT", "/api/kernels"), ("PATCH", "/api/manager"), ("POST", "/api/documents")] {
         let r = a.call(m, p, Some(json!({}))).await;
         assert_eq!(r.status, 405, "{m} {p}");
         assert!(r.body["error"]["message"].is_string());

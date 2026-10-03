@@ -29,8 +29,8 @@ describe("GitHub sign-in", () => {
     const deps = makeDeps();
     const first = await signIn(deps, { id: 4242, login: "octo" });
     const second = await signIn(deps, { id: 4242, login: "octo-renamed" });
-    const a = (await (await call(deps, "GET", "/v1/me", { cookie: first })).json()) as { account_id: string };
-    const b = (await (await call(deps, "GET", "/v1/me", { cookie: second })).json()) as {
+    const a = (await (await call(deps, "GET", "/me", { cookie: first })).json()) as { account_id: string };
+    const b = (await (await call(deps, "GET", "/me", { cookie: second })).json()) as {
       account_id: string;
       github_login: string;
       via: string;
@@ -39,7 +39,7 @@ describe("GitHub sign-in", () => {
     expect(b.github_login).toBe("octo-renamed");
     expect(b.via).toBe("session");
     const other = await signIn(deps, { id: 7, login: "someone" });
-    const c = (await (await call(deps, "GET", "/v1/me", { cookie: other })).json()) as { account_id: string };
+    const c = (await (await call(deps, "GET", "/me", { cookie: other })).json()) as { account_id: string };
     expect(c.account_id).not.toBe(a.account_id);
   });
 
@@ -119,13 +119,13 @@ describe("GitHub sign-in", () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 11, login: "bye" });
     expect((await call(deps, "POST", "/auth/logout", { cookie })).status).toBe(204);
-    expect((await call(deps, "GET", "/v1/me", { cookie })).status).toBe(401);
+    expect((await call(deps, "GET", "/me", { cookie })).status).toBe(401);
   });
 
   it("test_fr_h6_session_writes_need_our_origin", async () => {
     const deps = makeDeps();
     const cookie = await signIn(deps, { id: 12, login: "csrf" });
-    const response = await call(deps, "POST", "/v1/link-codes/BCDF-GHJK", {
+    const response = await call(deps, "POST", "/link-codes/BCDF-GHJK", {
       cookie,
       origin: "https://evil.example",
       json: { approve: true },

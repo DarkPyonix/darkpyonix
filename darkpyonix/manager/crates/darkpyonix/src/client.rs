@@ -98,7 +98,7 @@ impl Api {
     /// Open the SSE stream of a kernel. Resolves once the response headers arrived, so
     /// the manager is subscribed before the caller starts a run.
     pub async fn events(&self, kernel_id: &str, since: Option<u64>) -> Result<reqwest::Response, CliError> {
-        let mut path = format!("/api/v1/kernels/{kernel_id}/events");
+        let mut path = format!("/api/kernels/{kernel_id}/events");
         if let Some(s) = since {
             path.push_str(&format!("?since={s}"));
         }

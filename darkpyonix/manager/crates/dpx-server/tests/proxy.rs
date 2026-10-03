@@ -110,7 +110,7 @@ async fn test_d10_proxy_forwards_http_and_preserves_host() {
 
     // Prefix match is by path segment, and the API is still guarded.
     s.anon().get("/vscodex").await.error(401, "unauthorized");
-    s.anon().get("/api/v1/kernels").await.error(401, "unauthorized");
+    s.anon().get("/api/kernels").await.error(401, "unauthorized");
 }
 
 #[tokio::test]

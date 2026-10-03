@@ -1337,7 +1337,7 @@ pub async fn wait_run(
         let next = if FINISHED.contains(&status.as_str()) {
             Value::Null
         } else {
-            Value::String(format!("/api/v1/kernels/{kid}/runs/{run_id}/wait?timeout={timeout}"))
+            Value::String(format!("/api/kernels/{kid}/runs/{run_id}/wait?timeout={timeout}"))
         };
         out.insert("status".into(), Value::String(status));
         out.insert("run_id".into(), Value::String(run_id));

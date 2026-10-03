@@ -37,10 +37,10 @@ async fn test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain() {
     let mut s = TestServer::start_with(Mode::Ephemeral, |c| c.idle_timeout = Some(Duration::from_millis(800))).await;
     let (kid, _) = s.kernel("train.py");
     let file = s.handle.as_ref().unwrap().registry_file.clone().unwrap();
-    assert_eq!(s.admin().get("/api/v1/manager").await.body["idle_timeout"], 1);
+    assert_eq!(s.admin().get("/api/manager").await.body["idle_timeout"], 1);
 
     // An open event stream keeps the manager alive past its idle timeout.
-    let r = s.admin().req("GET", &format!("/api/v1/kernels/{kid}/events")).send().await.unwrap();
+    let r = s.admin().req("GET", &format!("/api/kernels/{kid}/events")).send().await.unwrap();
     assert_eq!(r.status(), 200);
     tokio::time::sleep(Duration::from_millis(2000)).await;
     assert!(file.exists(), "exited with an open stream");
@@ -68,7 +68,7 @@ async fn test_fr_m3_shutdown_removes_registry_file() {
     let file = s.handle.as_ref().unwrap().registry_file.clone().unwrap();
     // A stream open at shutdown does not hold the process.
     let (kid, _) = s.kernel("train.py");
-    let r = s.admin().req("GET", &format!("/api/v1/kernels/{kid}/events")).send().await.unwrap();
+    let r = s.admin().req("GET", &format!("/api/kernels/{kid}/events")).send().await.unwrap();
     let h = s.handle.take().unwrap();
     h.shutdown();
     let reason = tokio::time::timeout(Duration::from_secs(5), h.wait()).await.expect("did not stop");
@@ -85,8 +85,8 @@ async fn test_fr_m4_dedicated_manager_never_idles_and_requires_token() {
     assert!(!s.home.join("managers").exists());
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert_eq!(s.anon().get("/health").await.status, 200);
-    s.anon().get("/api/v1/kernels").await.error(401, "unauthorized");
-    let info = s.admin().get("/api/v1/manager").await;
+    s.anon().get("/api/kernels").await.error(401, "unauthorized");
+    let info = s.admin().get("/api/manager").await;
     assert_eq!(info.body["mode"], "dedicated");
     assert_eq!(info.body["idle_timeout"], serde_json::Value::Null);
 }

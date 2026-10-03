@@ -38,6 +38,15 @@ info:
     resume without loss while the kernel''s replay buffer still holds the events.
 
 
+    **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
+
+    grows: fields, optional request fields, paths and error codes are added, never renamed,
+
+    retyped or removed. Clients ignore fields they do not know. A replaced field or path stays,
+
+    marked `deprecated: true`.
+
+
     Normative documents: `docs/SPEC.md` (requirements), `docs/PROTOCOL.md` (kernel wire
 
     protocol), `docs/FORMAT.md` (notebook file format).
@@ -90,7 +99,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
-  /api/v1/manager:
+  /api/manager:
     get:
       tags:
       - System
@@ -107,7 +116,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
-  /api/v1/kernels:
+  /api/kernels:
     get:
       tags:
       - Kernels
@@ -190,7 +199,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/kernels/{kernel_id}:
+  /api/kernels/{kernel_id}:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     get:
@@ -256,7 +265,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/interrupt:
+  /api/kernels/{kernel_id}/interrupt:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     post:
@@ -293,7 +302,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/restart:
+  /api/kernels/{kernel_id}/restart:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     post:
@@ -336,7 +345,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/namespace:
+  /api/kernels/{kernel_id}/namespace:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     get:
@@ -385,7 +394,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/document:
+  /api/kernels/{kernel_id}/document:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     get:
@@ -413,7 +422,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/documents:
+  /api/documents:
     get:
       tags:
       - Documents
@@ -447,7 +456,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
-  /api/v1/kernels/{kernel_id}/runs:
+  /api/kernels/{kernel_id}/runs:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     get:
@@ -534,7 +543,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/runs/{run_ref}:
+  /api/kernels/{kernel_id}/runs/{run_ref}:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     - name: run_ref
@@ -615,7 +624,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/events:
+  /api/kernels/{kernel_id}/events:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     get:
@@ -678,7 +687,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/shares:
+  /api/kernels/{kernel_id}/shares:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     get:
@@ -752,7 +761,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/shares/{share_id}:
+  /api/kernels/{kernel_id}/shares/{share_id}:
     parameters:
     - $ref: '#/components/parameters/KernelId'
     - name: share_id
@@ -779,7 +788,7 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
-  /api/v1/kernels/{kernel_id}/cells:
+  /api/kernels/{kernel_id}/cells:
     parameters:
     - &id001
       $ref: '#/components/parameters/KernelId'
@@ -829,7 +838,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentCell'
-  /api/v1/kernels/{kernel_id}/cells/{cell_id}:
+  /api/kernels/{kernel_id}/cells/{cell_id}:
     parameters:
     - *id001
     - &id005
@@ -901,7 +910,7 @@ paths:
           description: Deleted.
         '409':
           $ref: '#/components/responses/Conflict'
-  /api/v1/kernels/{kernel_id}/cells/{cell_id}/move:
+  /api/kernels/{kernel_id}/cells/{cell_id}/move:
     parameters:
     - *id001
     - *id005
@@ -941,7 +950,7 @@ paths:
         '200': *id004
         '409':
           $ref: '#/components/responses/Conflict'
-  /api/v1/kernels/{kernel_id}/cells/{cell_id}/lock:
+  /api/kernels/{kernel_id}/cells/{cell_id}/lock:
     parameters:
     - *id001
     - *id005
@@ -1008,7 +1017,7 @@ paths:
         '200': *id004
         '409':
           $ref: '#/components/responses/Conflict'
-  /api/v1/kernels/{kernel_id}/presence:
+  /api/kernels/{kernel_id}/presence:
     parameters:
     - *id001
     - *id002
@@ -1086,7 +1095,7 @@ paths:
           $ref: '#/components/responses/KernelUnreachable'
         '204':
           description: Left.
-  /api/v1/kernels/{kernel_id}/runs/{run_ref}/wait:
+  /api/kernels/{kernel_id}/runs/{run_ref}/wait:
     parameters:
     - *id001
     - name: run_ref

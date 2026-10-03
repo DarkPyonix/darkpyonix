@@ -21,7 +21,7 @@ async fn test_fr_h4_share_resolves_to_hosting_device() {
     // Only a device publishes, with a well-formed id.
     let publish = |token: &str, body: Value| {
         hub.client
-            .post(hub.url("/v1/shares"))
+            .post(hub.url("/shares"))
             .bearer_auth(token)
             .json(&body)
             .send()
@@ -57,7 +57,7 @@ async fn test_fr_h4_share_resolves_to_hosting_device() {
     // Anyone resolves it, without a token.
     let res = hub
         .client
-        .get(hub.url(&format!("/v1/shares/{SHARE}")))
+        .get(hub.url(&format!("/shares/{SHARE}")))
         .send()
         .await
         .unwrap();
@@ -70,7 +70,7 @@ async fn test_fr_h4_share_resolves_to_hosting_device() {
         .is_some_and(|t| t.starts_with("dpg_")));
 
     // Another device of the account may not unpublish it; the host may.
-    let path = hub.url(&format!("/v1/shares/{SHARE}"));
+    let path = hub.url(&format!("/shares/{SHARE}"));
     let res = hub
         .client
         .delete(&path)
@@ -109,7 +109,7 @@ async fn test_fr_h4_guest_reaches_share_host_through_relay_with_pass() {
     let _server = spawn_server(host.clone());
     let res = hub
         .client
-        .post(hub.url("/v1/shares"))
+        .post(hub.url("/shares"))
         .bearer_auth(&host_token)
         .json(&json!({ "share_id": SHARE }))
         .send()
@@ -120,7 +120,7 @@ async fn test_fr_h4_guest_reaches_share_host_through_relay_with_pass() {
     // What ash does: resolve the share, then dial the host through the relay with the pass.
     let resolved: Value = hub
         .client
-        .get(hub.url(&format!("/v1/shares/{SHARE}")))
+        .get(hub.url(&format!("/shares/{SHARE}")))
         .send()
         .await
         .unwrap()
@@ -204,7 +204,7 @@ async fn test_fr_h4_viewer_pages_are_served() {
     let token = hub.register(&account, &key, "main_server").await;
     let res = hub
         .client
-        .post(hub.url("/v1/shares"))
+        .post(hub.url("/shares"))
         .bearer_auth(&token)
         .json(&json!({ "share_id": SHARE }))
         .send()

@@ -37,7 +37,7 @@ binding = "ASSETS"
 html_handling = "auto-trailing-slash"
 not_found_handling = "none"
 
-# Unauthenticated writes (PUT /pkarr/{key}, POST /v1/device-links), per key per minute.
+# Unauthenticated writes (PUT /pkarr/{key}, POST /device-links), per key per minute.
 [[ratelimits]]
 name = "WRITE_LIMITER"
 namespace_id = "1001"
