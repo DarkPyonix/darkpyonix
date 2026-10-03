@@ -87,6 +87,38 @@ paths:
                   status: {type: string, const: ok}
                   version: {type: string}
 
+  /v1/config:
+    get:
+      tags: [System]
+      operationId: getHubConfig
+      summary: Where the relays and the pkarr directory are (FR-H8)
+      description: |
+        Public and cacheable (5 minutes). Clients read their relay map and pkarr URL from here
+        instead of building them in. `api_version` is bumped only for a breaking change under
+        `/v1`.
+      security: []
+      responses:
+        "200":
+          description: The hub's configuration.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [api_version, hub_version, relay_urls, pkarr_url, link_url]
+                properties:
+                  api_version: {type: integer, const: 1}
+                  hub_version: {type: string}
+                  relay_urls:
+                    type: array
+                    items: {type: string}
+                    description: iroh relays for the client's RelayMap.
+                    example: ["https://relay.darkpyonix.dev/"]
+                  pkarr_url:
+                    type: string
+                    description: Base URL for iroh's PkarrPublisher and PkarrResolver (append `?token=<resolve token>` to resolve).
+                    example: "https://darkpyonix.dev/pkarr"
+                  link_url: {type: string, example: "https://darkpyonix.dev/link"}
+
   /.well-known/org.flathub.VerifiedApps.txt:
     get:
       tags: [System]
