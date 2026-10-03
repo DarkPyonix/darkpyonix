@@ -181,10 +181,9 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 - 수용 기준: `[code]` 셀 변수를 참조하는 binding 클래스 본문은 `NameError`를 냅니다. import한 이름과 앞선 binding은 보입니다.
 - 테스트: `test_fr_f4_binding_cannot_see_code_cell_variables`
 
-### FR-F5 일반 파이썬과 같은 동작 — `Agreed`
-노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다.
-- 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유), `test_fr_f5_reduced_reference_runs_under_plain_python`
-- 상태 메모 (2026-10-03 감사): 표준 출력과 표준 오류가 같음은 검증했습니다. 종료 코드(오류로 끝나는 파일에서 `python file.py`의 0이 아닌 종료 코드와 커널 실행 상태 `error`)를 맞춰 보는 시험은 아직 없습니다.
+### FR-F5 일반 파이썬과 같은 동작 — `Done`
+노트북 파일을 `python file.py`로 실행한 결과(표준 출력, 종료 코드)가 커널 전체 실행의 스트림 출력과 같습니다. 마크다운 출력과 `display`의 MIME 번들은 이 비교에서 뺍니다. 종료 코드 0은 실행 상태 `ok`, 0이 아닌 종료 코드는 `error`에 대응합니다.
+- 테스트: `test_fr_x1_run_all_matches_plain_python` (FR-X1과 공유), `test_fr_f5_reduced_reference_runs_under_plain_python`, `test_fr_f5_exit_code_matches_run_status`(실제 커널: 정상 종료 0 ↔ `ok`, 예외 1 ↔ `error`, `sys.exit(3)` ↔ `error`, 중간의 `sys.exit(0)` ↔ `ok`이고 남은 셀을 실행하지 않음. 각 경우 표준 출력도 같음)
 
 ### FR-F6 `darkpyonix.run_command` — `Done`
 셸 명령을 하위 프로세스로 실행하고 출력을 줄 단위로 스트림 출력으로 보냅니다. `check=True`이면 실패 시 `CalledProcessError`입니다. 인터럽트가 오면 하위 프로세스 그룹에 SIGINT를 전달합니다.

@@ -563,3 +563,56 @@ def test_fr_f2_markdown_in_real_kernel_is_display_data_and_silent_is_not_logged(
     outputs = [o for cell in nb["cells"] for o in cell["outputs"]]
     assert not any("# Hidden" in str(o) for o in outputs)
     assert [o.get("text") for o in outputs if o["output_type"] == "stream"] == ["done\n"]
+
+
+F5_CASES = {
+    "ok": ('''
+        print("preamble")
+        # %% [code]
+        print("one")
+        # %% [code]
+        print("two")
+    ''', 0, "ok"),
+    "raises": ('''
+        print("preamble")
+        # %% [code]
+        print("one")
+        raise ValueError("boom")
+        # %% [code]
+        print("never")
+    ''', 1, "error"),
+    "exit_3": ('''
+        import sys
+        # %% [code]
+        print("one")
+        sys.exit(3)
+        # %% [code]
+        print("never")
+    ''', 3, "error"),
+    "exit_0": ('''
+        import sys
+        # %% [code]
+        print("one")
+        sys.exit(0)
+        # %% [code]
+        print("never")
+    ''', 0, "ok"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(F5_CASES))
+def test_fr_f5_exit_code_matches_run_status(python, scratch, real_kernel, case):
+    """Exit code 0 under ``python file.py`` ↔ run status ``ok``; non-zero ↔ ``error``.
+    Standard output matches too."""
+    from kernel_procs import run_and_wait, stream_text
+    text, code, status = F5_CASES[case]
+    path = _write(scratch, "f5_%s.py" % case, text)
+    plain = _run(python, path)
+    assert plain.returncode == code, plain.stderr
+    c = real_kernel(path, python)
+    got, _ = run_and_wait(c)
+    assert got == status
+    assert (plain.returncode == 0) == (got == "ok")
+    nb = c.request("runs.get", {"run_id": "latest"})
+    assert nb["metadata"]["darkpyonix"]["status"] == status
+    assert stream_text(nb) == plain.stdout
