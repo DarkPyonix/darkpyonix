@@ -65,6 +65,7 @@ flowchart LR
 flowchart TB
   subgraph Home["~/.darkpyonix  (DARKPYONIX_HOME)"]
     LOCK["locks/&lt;kernel_id&gt;.lock<br/>파일당 커널 하나 (OS 잠금)"]
+    TOK["tokens/&lt;kernel_id&gt;.json<br/>커널 접근 토큰 (모든 매니저가 검사)"]
   end
 
   CLI["darkpyonix CLI<br/>(에이전트·사람)"] -->|토큰을 모르면 자기 매니저를 띄움<br/>주소·토큰은 표준 출력으로| M1
@@ -77,6 +78,8 @@ flowchart TB
   M1 <-->|멀티캐스트 질의/공지| MC(("239.255.68.80:46880<br/>루프백"))
   K <--> MC
   K --- LOCK
+  M1 --- TOK
+  M2 --- TOK
   K -->|기록| RUNS["train.py 옆<br/>__runs__/train.py/&lt;run_id&gt;.ipynb"]
 ```
 

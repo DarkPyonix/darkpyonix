@@ -333,10 +333,12 @@ INTENT D17. 사용자 결정(2026-10-03): "원 설계대로 복구". 범위는 �
 ### FR-A5 토큰 수명 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
 2025 설계: "커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함", "공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요".
 - 커널을 종료하거나 재시작해도, 매니저를 다시 시작해도 그 커널의 접근 토큰(초기 토큰, 로그인 토큰, 공유 토큰, FR-A6)은 남습니다.
-- 파일이 지워지면 매니저는 그 파일의 토큰을 모두 지웁니다. 매니저는 `manager.db`에 커널 ID와 함께 경로를 두고, 시작할 때와 그 파일의 토큰을 쓸 때마다 경로가 있는지 확인합니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙으로 지워집니다.
-- 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 되살리지 않습니다.
-- 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 파일을 지우면 그 토큰이 `401`이 되고 `manager.db`에 행이 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다.
-- 테스트(계획): `test_fr_a5_tokens_survive_kernel_shutdown_and_manager_restart`, `test_fr_a5_tokens_are_deleted_with_the_file`, `test_fr_a5_reshare_issues_a_new_token`
+- 토큰은 어느 한 매니저가 아니라 커널 토큰 저장소 `tokens/<kernel_id>.json`(PROTOCOL §6)에 있습니다. 같은 계정의 매니저는 모두 이 저장소로 검사하므로, 한 매니저에서 받은 토큰이 다른 매니저로도 통합니다. 사용자(2026-10-04): "매니저가 여러개잖아."
+- 파일이 지워지면 그 파일의 토큰을 모두 지웁니다. 저장소에는 커널 ID와 함께 경로가 있습니다. 매니저는 시작할 때와 토큰을 검사할 때마다 경로가 있는지 확인하고, 없으면 저장소를 지우고 `401`로 답합니다. 커널은 자기 파일이 지워진 것을 알아채면(FR-S5, 1초 안) 저장소를 지웁니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙으로 지워집니다.
+- 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 저장소에 거둔 표시(`revoked_at`, 2025 `blacklisted`)로 남고 되살리지 않습니다.
+- 매니저 비밀번호, 마스터 토큰, 매니저 공유 토큰(FR-A4)은 이 규칙 밖입니다. 그 매니저의 `manager.db`에 있고 매니저와 함께 갑니다.
+- 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 매니저 A에서 받은 초기 토큰, 로그인 토큰, 공유 토큰이 같은 계정의 매니저 B(임시 매니저 포함)에서도 통합니다. 파일을 지우면 그 토큰이 `401`이 되고 `tokens/<kernel_id>.json`이 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다. 저장소 파일은 0600, 폴더는 0700입니다.
+- 테스트(계획): `test_fr_a5_tokens_survive_kernel_shutdown_and_manager_restart`, `test_fr_a5_token_from_one_manager_works_through_another`, `test_fr_a5_tokens_are_deleted_with_the_file`, `test_fr_a5_reshare_issues_a_new_token`, `test_fr_a5_token_store_is_private_to_the_account`
 
 ### FR-A6 커널 접근 토큰 (2025 복구) — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #48)
 INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 커널에 접근하는 토큰입니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아."
@@ -345,15 +347,17 @@ INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 �
 |---|---|---|---|---|
 | 초기 토큰 | `POST /kernels/{kernel_id}/tokens/initial` | `POST /api/kernels/{kernel_id}/tokens/initial` | 없음 | `{token, permission: "admin", password_required: true}` |
 | 로그인 | `POST /kernels/{kernel_id}/tokens/auth` | `POST /api/kernels/{kernel_id}/tokens/auth` | 본문의 비밀번호(요청을 받은 매니저의 비밀번호, FR-A4) | `{token, kernel_id, permission}` |
-| 공유 토큰 발급 | `POST /kernels/{kernel_id}/tokens/share` | `POST /api/kernels/{kernel_id}/shares`(이미 있음) | 그 커널의 공유 관리 권한 | `{share_id, token, url, permission}` |
+| 공유 토큰 발급 | `POST /kernels/{kernel_id}/tokens/share` | `POST /api/kernels/{kernel_id}/tokens/share`. 같은 일을 `POST /api/kernels/{kernel_id}/shares`도 함(이름표와 만료를 더 받음) | 그 커널의 공유 관리 권한 | `{share_id, share_token, permission, share_url}` |
 | 토큰 확인 | `GET /kernels/{kernel_id}/tokens/{token}/verify` | `GET /api/kernels/{kernel_id}/tokens/{token}/verify` | 같은 토큰 | `{valid, kernel_id, permission, blacklisted, password_set}` |
 
 - 초기 토큰은 2025 명세 그대로입니다. 커널을 열 때 자격 증명 없이 받고(본문은 2025처럼 `{kernel_id}`를 실을 수 있음), 응답은 `{token, permission: "admin", password_required: true}`입니다. 커널 ID 형식이 틀리면 `400`(2025 `INVALID_KERNEL_ID`)입니다. 발급 횟수, 출발지(루프백), 쓰임새에 제한을 두지 않습니다. 사용자 결정(2026-10-04): "초기 토큰은 애초에 열 때 토큰을 발급했을건데 뭐가 문제야? 토큰이 없으면 연결이 안되잖아. 초기 토큰 발급은 건드리지 마." 리더가 더했던 "한 번만 발급"(`409 already_initialized`)과 "비밀번호 설정에만 씀"은 지웠습니다(PROJECT Q11).
 - 로그인은 비밀번호를 받아 그 커널의 접근 토큰을 줍니다. 비밀번호는 매니저마다 하나이므로(FR-A4) 요청을 받은 매니저의 비밀번호입니다.
 - `password_set`은 요청을 받은 매니저에 비밀번호가 있는지입니다.
 - 커널 접근 토큰은 그 커널 하나에만 묶입니다. 다른 커널을 가리키면 `403`이 아니라 `404`입니다(FR-A3).
-- 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
-- 테스트(계획): `test_fr_a6_initial_token_is_issued_without_credentials_every_time`, `test_fr_a6_login_with_the_manager_password_returns_a_kernel_token`, `test_fr_a6_kernel_token_is_404_on_other_kernels`, `test_fr_a6_verify_reports_permission_and_revocation`
+- 어느 매니저로 들어와도 통합니다. 토큰은 커널 토큰 저장소(PROTOCOL §6)에 있고, 같은 계정의 매니저는 모두 그것으로 검사합니다(FR-A5). 검사는 매니저가 하고 커널은 하지 않습니다(INTENT D5). 초기 토큰과 확인은 임시 매니저에서도 됩니다. 공유 링크는 전용 매니저 설정(`share_base`)이 필요해서 공유 토큰 발급만 전용 매니저가 합니다(FR-A3).
+- 저장소 위치(런타임 홈의 `tokens/<kernel_id>.json`)는 리더 결정, 사용자 확인 대기입니다(PROJECT Q16).
+- 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 전용 매니저에서 받은 토큰이 같은 커널의 임시 매니저에서도 통합니다. `POST /api/kernels/{kernel_id}/tokens/share`의 응답이 2025 필드(`share_token`, `permission`, `share_url`)를 담습니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
+- 테스트(계획): `test_fr_a6_initial_token_is_issued_without_credentials_every_time`, `test_fr_a6_login_with_the_manager_password_returns_a_kernel_token`, `test_fr_a6_kernel_token_is_404_on_other_kernels`, `test_fr_a6_kernel_token_works_through_any_manager`, `test_fr_a6_tokens_share_returns_2025_fields`, `test_fr_a6_verify_reports_permission_and_revocation`
 
 ## 10a. 협업 문서 (S)
 

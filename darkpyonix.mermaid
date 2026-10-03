@@ -376,12 +376,21 @@ classDiagram
             +password_hash str|None
             +master_token_hash str
         }
-        class FileCredentials {
-            <<2025 File.tokens>>
+        class KernelTokenStore {
+            <<2025 File.tokens, DARKPYONIX_HOME/tokens/kernel_id.json>>
             +kernel_id str
             +path str
-            +initial_token_hash str|None
-            +admin_token_hash str|None
+            +tokens list~KernelToken~
+            +load(kernel_id str)$ KernelTokenStore|None
+            +update(change) None
+            +delete() None
+        }
+        class KernelToken {
+            +token_sha256 str
+            +kind str
+            +permission Permission
+            +share_id str|None
+            +revoked_at datetime|None
         }
         class Principal {
             +permission Permission
@@ -433,10 +442,11 @@ classDiagram
     KernelDirectory ..> KernelClient
     EventBroker ..> KernelClient
     AuthService --> Principal
-    AuthService *-- ShareToken
+    AuthService *-- ShareToken : manager shared tokens (manager.db)
     AuthService *-- ManagerCredentials
-    AuthService *-- FileCredentials
-    FileCredentials o-- ShareToken : per type
+    AuthService ..> KernelTokenStore : any manager reads and writes
+    KernelTokenStore *-- KernelToken
+    KernelToken --> Permission
     Principal --> Permission
     ShareToken --> Permission
     Cli ..> ManagerApp : spawns its own, reads url and token from stdout
@@ -447,6 +457,7 @@ classDiagram
     StreamHandoff ..> ControlServer : adopt + POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
     DiscoveryClient ..> DiscoveryResponder : UDP multicast 239.255.68.80 port 46880
     KernelLauncher ..> Kernel : spawns detached
+    Kernel ..> KernelTokenStore : deletes it when the file is deleted
 
     %% ───────────── Hub (Draft) ─────────────
     namespace hub {

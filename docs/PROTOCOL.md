@@ -13,6 +13,8 @@
 |---|---|---|
 | `kernels/<kernel_id>.log` | 0600 | 커널 자신의 진단 로그(사용자 출력이 아님) |
 | `locks/<kernel_id>.lock` | 0600 | 파일당 커널 하나를 보장하는 OS 잠금 |
+| `tokens/<kernel_id>.json` | 0600 (폴더 0700) | 커널 접근 토큰 저장소(§6, SPEC FR-A5·FR-A6). 같은 계정의 모든 매니저가 읽고 씁니다 |
+| `tokens/<kernel_id>.lock` | 0600 | 토큰 저장소를 고치는 쪽이 거는 OS 잠금(§6) |
 | `sockets/<kernel_id>.sock` | 0600 (폴더 0700) | POSIX 전용. 커널의 제어 채널(§3)인 유닉스 도메인 소켓. 스트림 넘김(§3.7)도 여기서 받습니다. 경로가 OS 한도(macOS 104바이트, Linux 108바이트)를 넘으면 `<tempfile.gettempdir()>/darkpyonix-<uid>/<kernel_id>.sock`(폴더 0700)을 씁니다. 실제 경로는 announce의 `control`로 알립니다 |
 
 Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-<user_tag>-<kernel_id>`입니다. 파일이 아니라서 런타임 홈 아래에 없습니다. 이름은 announce의 `control`로 알립니다.

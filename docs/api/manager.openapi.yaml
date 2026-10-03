@@ -96,7 +96,13 @@ tags:
 - name: Events
   description: Live kernel events over Server-Sent Events.
 - name: Sharing
-  description: Per-kernel share tokens with viewer permissions (dedicated manager).
+  description: 'Share tokens bound to one kernel. They live in the kernel token store with the other kernel
+
+    access tokens and work through any manager of the same OS account (SPEC FR-A5, FR-A6,
+
+    PROTOCOL §6). Created on a dedicated manager, because the share link needs its `share_base`.
+
+    '
 - name: Auth
   description: 'The 2025 authentication, restored by user decision 2026-10-03 (INTENT D17). `/api/auth…` is
 
@@ -1386,15 +1392,14 @@ paths:
                   pattern: ^k_[0-9a-f]{20}$
       responses:
         '201':
-          description: The initial token (shown once).
+          description: The initial token (shown once). Stored hashed in the kernel token store, so it works through
+            any manager (SPEC FR-A5, PROTOCOL §6).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/InitialToken'
         '400':
           $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/kernels/{kernel_id}/tokens/auth:
@@ -1460,9 +1465,13 @@ paths:
       summary: Check a token against a file
       description: 'The 2025 `GET /kernels/{kernel_id}/tokens/{token}/verify`, sent with the same token as
 
-        `Authorization: Bearer`. A revoked token answers `401 token_revoked` (2025 `TOKEN_BLACKLISTED`).
+        `Authorization: Bearer`. Any manager of the same OS account answers it from the kernel token store
 
-        SPEC FR-A4.
+        (PROTOCOL §6), whether the kernel runs or not. A revoked token answers `401 token_revoked`
+
+        (2025 `TOKEN_BLACKLISTED`). `password_set` tells whether the answering manager has a password.
+
+        SPEC FR-A6.
 
         '
       responses:
