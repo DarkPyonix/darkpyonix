@@ -96,11 +96,13 @@ tags:
 - name: Events
   description: Live kernel events over Server-Sent Events.
 - name: Sharing
-  description: 'Share tokens bound to one kernel. They live in the kernel token store with the other kernel
+  description: 'Share tokens bound to one kernel. The kernel holds them with its other access tokens, and the
 
-    access tokens and work through any manager of the same OS account (SPEC FR-A5, FR-A6,
+    manager asks the kernel to issue, verify and revoke them, so they work through any manager of the
 
-    PROTOCOL §6). Created on a dedicated manager, because the share link needs its `share_base`.
+    same OS account (SPEC FR-A5, FR-A6, FR-K10, PROTOCOL §6). Created on a dedicated manager, because
+
+    the share link needs its `share_base`.
 
     '
 - name: Auth
@@ -1392,8 +1394,9 @@ paths:
                   pattern: ^k_[0-9a-f]{20}$
       responses:
         '201':
-          description: The initial token (shown once). Stored hashed in the kernel token store, so it works through
-            any manager (SPEC FR-A5, PROTOCOL §6).
+          description: The initial token (shown once). Issued and kept by the kernel (`tokens.issue`), so it works
+            through any manager. The manager starts the kernel first if it is not running (SPEC FR-A5, FR-M2,
+            PROTOCOL §6).
           content:
             application/json:
               schema:
@@ -1402,6 +1405,14 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/kernels/{kernel_id}/tokens/auth:
     parameters:
     - $ref: '#/components/parameters/KernelId'
@@ -1450,6 +1461,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/kernels/{kernel_id}/tokens/share:
     parameters:
     - $ref: '#/components/parameters/KernelId'
@@ -1521,6 +1540,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/kernels/{kernel_id}/tokens/{token}/verify:
     parameters:
     - $ref: '#/components/parameters/KernelId'
@@ -1536,9 +1563,9 @@ paths:
       summary: Check a token against a file
       description: 'The 2025 `GET /kernels/{kernel_id}/tokens/{token}/verify`, sent with the same token as
 
-        `Authorization: Bearer`. Any manager of the same OS account answers it from the kernel token store
+        `Authorization: Bearer`. The manager asks the kernel, which holds its tokens (`tokens.verify`,
 
-        (PROTOCOL §6), whether the kernel runs or not. A revoked token answers `401 token_revoked`
+        PROTOCOL §6); if the kernel is not running, the manager starts it first (SPEC FR-M2). A revoked token answers `401 token_revoked`
 
         (2025 `TOKEN_BLACKLISTED`). `password_set` tells whether the answering manager has a password.
 
@@ -1560,6 +1587,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/ws/kernels/{kernel_id}:
     parameters:
     - $ref: '#/components/parameters/KernelId'

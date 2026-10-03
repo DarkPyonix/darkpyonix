@@ -65,7 +65,6 @@ flowchart LR
 flowchart TB
   subgraph Home["~/.darkpyonix  (DARKPYONIX_HOME)"]
     LOCK["locks/&lt;kernel_id&gt;.lock<br/>파일당 커널 하나 (OS 잠금)"]
-    TOK["tokens/&lt;kernel_id&gt;.json<br/>커널 접근 토큰 (모든 매니저가 검사)"]
   end
 
   CLI["darkpyonix CLI<br/>(에이전트·사람)"] -->|토큰을 모르면 자기 매니저를 띄움<br/>주소·토큰은 표준 출력으로| M1
@@ -78,8 +77,6 @@ flowchart TB
   M1 <-->|멀티캐스트 질의/공지| MC(("239.255.68.80:46880<br/>루프백"))
   K <--> MC
   K --- LOCK
-  M1 --- TOK
-  M2 --- TOK
   K -->|기록| RUNS["train.py 옆<br/>__runs__/train.py/&lt;run_id&gt;.ipynb"]
 ```
 
@@ -207,7 +204,7 @@ flowchart LR
 - 공유 토큰은 커널(=파일)마다 발급하며 권한은 등급이 아니라 능력의 집합입니다. `read` 코드 보기, `history` 실행 기록과 출력, `execute` 실행과 인터럽트, `edit` 코드 수정과 셀 잠금, `manage` 공유 설정입니다. 실행과 코드 수정은 다른 능력입니다(INTENT D18, SPEC FR-A3, 사용자 결정 2026-10-04).
 - 권한 검사는 매니저만 합니다. 커널은 매니저가 넘긴 능력 집합으로 보낼 내용만 거릅니다(INTENT D5).
 - 협업 동기화는 2025 WebSocket(`/api/ws/kernels/{kernel_id}`)이고, 매니저가 검사한 뒤 커널에 넘깁니다(INTENT D19, SPEC FR-S9). 구현 대기(#49).
-- 전용 매니저는 2025 비밀번호 인증을 그대로 씁니다. 비밀번호와 마스터 토큰은 매니저마다 하나입니다(`/api/auth…`, SPEC FR-A4). 커널 접근 토큰(초기, 로그인, 공유)은 커널마다 있고, 커널이 종료돼도 남으며 파일이 지워지면 지워집니다(INTENT D17, SPEC FR-A5·FR-A6, 구현 대기 #48).
+- 전용 매니저는 2025 비밀번호 인증을 그대로 씁니다. 비밀번호와 마스터 토큰은 매니저마다 하나입니다(`/api/auth…`, SPEC FR-A4). 커널 접근 토큰(초기, 로그인, 공유)은 커널이 들고 있고, 매니저는 제어 채널로 커널에 확인을 요청합니다. 그래서 어느 매니저로 들어와도 통합니다. 커널이 종료돼도 남으며 파일이 지워지면 지워집니다(INTENT D17, SPEC FR-A5·FR-A6·FR-K10, 구현 대기 #48).
 - 허브는 연결을 이어 줄 뿐이고, 내용은 끝단 사이에서 암호화합니다(SPEC NFR-H1, Draft).
 
 ## 6. ember와의 경계

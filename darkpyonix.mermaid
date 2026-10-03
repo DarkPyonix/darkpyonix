@@ -256,6 +256,23 @@ classDiagram
             +share_id str|None
             +allows(event Event) bool
         }
+        class KernelTokenStore {
+            <<2025 File.tokens, kernel only, location provisional #48>>
+            +kernel_id str
+            +tokens list~KernelToken~
+            +load()$ KernelTokenStore
+            +issue(kind str, capabilities set~Capability~) str
+            +verify(token str) dict
+            +revoke(share_id str) int
+            +delete() None
+        }
+        class KernelToken {
+            +token_sha256 str
+            +kind str
+            +capabilities set~Capability~
+            +share_id str|None
+            +revoked_at datetime|None
+        }
         class DiscoveryResponder {
             <<discovery thread>>
             +group str
@@ -273,6 +290,8 @@ classDiagram
     Kernel *-- ControlServer
     Kernel *-- DiscoveryResponder
     Kernel *-- EventLog
+    Kernel *-- KernelTokenStore
+    ClientSession ..> KernelTokenStore : tokens.*
     Kernel --> KernelStatus
     Executor ..> NotebookDocument : parses
     Executor --> RunRequest
@@ -376,22 +395,6 @@ classDiagram
             +password_hash str|None
             +master_token_hash str
         }
-        class KernelTokenStore {
-            <<2025 File.tokens, DARKPYONIX_HOME/tokens/kernel_id.json>>
-            +kernel_id str
-            +path str
-            +tokens list~KernelToken~
-            +load(kernel_id str)$ KernelTokenStore|None
-            +update(change) None
-            +delete() None
-        }
-        class KernelToken {
-            +token_sha256 str
-            +kind str
-            +capabilities set~Capability~
-            +share_id str|None
-            +revoked_at datetime|None
-        }
         class Principal {
             +capabilities set~Capability~
             +kernel_id str|None
@@ -446,7 +449,7 @@ classDiagram
     AuthService --> Principal
     AuthService *-- ShareToken : manager shared tokens (manager.db)
     AuthService *-- ManagerCredentials
-    AuthService ..> KernelTokenStore : any manager reads and writes
+    AuthService ..> KernelClient : tokens.issue / verify / revoke / list
     KernelTokenStore *-- KernelToken
     KernelToken --> Capability
     Principal --> Capability
@@ -459,7 +462,6 @@ classDiagram
     StreamHandoff ..> ControlServer : adopt + POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
     DiscoveryClient ..> DiscoveryResponder : UDP multicast 239.255.68.80 port 46880
     KernelLauncher ..> Kernel : spawns detached
-    Kernel ..> KernelTokenStore : deletes it when the file is deleted
 
     %% ───────────── Hub (Draft) ─────────────
     namespace hub {

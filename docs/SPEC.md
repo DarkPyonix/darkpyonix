@@ -72,6 +72,15 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
   - `streams.close`가 그 `share_id`의 스트림만 닫고, 다른 스트림은 그대로입니다.
 - 테스트(계획): `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_adopted_socket_on_windows`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`
 
+### FR-K10 커널 접근 토큰 보관 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #48)
+INTENT D17, PROTOCOL §6. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널은 자기 접근 토큰(초기, 로그인, 공유, SPEC FR-A6)의 주인입니다. 매니저의 `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list` 요청에 답하고, 토큰은 SHA-256 해시와 능력 집합으로만 영속화합니다. 커널은 다시 뜨면 저장소를 읽어 옵니다. 자기 파일이 지워진 것을 알아채면 저장소를 지웁니다. 저장소는 커널만 읽고 쓰며, 위치는 [provisional]로 #48에서 정합니다. 표준 라이브러리(`secrets`, `hashlib`, `hmac`, `json`, `os.replace`)만 씁니다.
+- 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
+  - `tokens.issue`로 받은 토큰을 `tokens.verify`가 그 능력 집합과 함께 확인합니다. 저장소에는 토큰 값이 없습니다.
+  - 커널을 `shutdown`하고 다시 띄워도 같은 토큰이 확인됩니다.
+  - `tokens.revoke {share_id}` 뒤 그 토큰은 `valid: false, revoked: true`이고, 그 공유로 넘겨받은 스트림이 닫힙니다.
+  - 파일을 지우면 커널이 1초 안에 저장소를 지웁니다.
+- 테스트(계획): `test_fr_k10_issue_and_verify`, `test_fr_k10_tokens_survive_restart`, `test_fr_k10_revoke_closes_share_streams`, `test_fr_k10_store_is_deleted_with_the_file`, `test_fr_k10_store_holds_no_token_values`
+
 ## 3. 실행 (X)
 
 ### FR-X1 전체 실행과 셀 실행 — `Done`
@@ -433,12 +442,13 @@ INTENT D17. 사용자 결정(2026-10-03): "원 설계대로 복구". 범위는 �
 ### FR-A5 토큰 수명 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
 2025 설계: "커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함", "공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요".
 - 커널을 종료하거나 재시작해도, 매니저를 다시 시작해도 그 커널의 접근 토큰(초기 토큰, 로그인 토큰, 공유 토큰, FR-A6)은 남습니다.
-- 토큰은 어느 한 매니저가 아니라 커널 토큰 저장소 `tokens/<kernel_id>.json`(PROTOCOL §6)에 있습니다. 같은 계정의 매니저는 모두 이 저장소로 검사하므로, 한 매니저에서 받은 토큰이 다른 매니저로도 통합니다. 사용자(2026-10-04): "매니저가 여러개잖아."
-- 파일이 지워지면 그 파일의 토큰을 모두 지웁니다. 저장소에는 커널 ID와 함께 경로가 있습니다. 매니저는 시작할 때와 토큰을 검사할 때마다 경로가 있는지 확인하고, 없으면 저장소를 지우고 `401`로 답합니다. 커널은 자기 파일이 지워진 것을 알아채면(FR-S5, 1초 안) 저장소를 지웁니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙으로 지워집니다.
-- 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 저장소에 거둔 표시(`revoked_at`, 2025 `blacklisted`)로 남고 되살리지 않습니다.
+- 토큰은 커널이 들고 있습니다. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널이 토큰을 해시로 영속화하고(FR-K10), 다시 뜨면 읽어 옵니다. 매니저는 토큰 파일을 읽거나 쓰지 않고, 제어 채널로 커널에 확인을 요청합니다(PROTOCOL §6). 같은 계정의 어느 매니저든 같은 커널에 묻기 때문에, 한 매니저에서 받은 토큰이 다른 매니저로도 통합니다. 사용자(2026-10-04): "매니저가 여러개잖아."
+- 커널이 떠 있지 않을 때 토큰을 확인해야 하면 매니저가 그 커널을 먼저 띄웁니다(FR-M2의 ensure). 커널이 10초 안에 뜨지 않으면 `504`입니다.
+- 파일이 지워지면 그 파일의 토큰을 모두 지웁니다. 커널은 자기 파일이 지워진 것을 알아채면(FR-S5, 1초 안) 저장소를 지웁니다. 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 저장소는 파일과 수명을 같이 하는 곳에 두고, 정확한 위치는 [provisional]로 #48에서 정합니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙을 따릅니다.
+- 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 커널 저장소에 거둔 표시(`revoked_at`, 2025 `blacklisted`)로 남고 되살리지 않습니다.
 - 매니저 비밀번호, 마스터 토큰, 매니저 공유 토큰(FR-A4)은 이 규칙 밖입니다. 그 매니저의 `manager.db`에 있고 매니저와 함께 갑니다.
-- 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 매니저 A에서 받은 초기 토큰, 로그인 토큰, 공유 토큰이 같은 계정의 매니저 B(임시 매니저 포함)에서도 통합니다. 파일을 지우면 그 토큰이 `401`이 되고 `tokens/<kernel_id>.json`이 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다. 저장소 파일은 0600, 폴더는 0700입니다.
-- 테스트(계획): `test_fr_a5_tokens_survive_kernel_shutdown_and_manager_restart`, `test_fr_a5_token_from_one_manager_works_through_another`, `test_fr_a5_tokens_are_deleted_with_the_file`, `test_fr_a5_reshare_issues_a_new_token`, `test_fr_a5_token_store_is_private_to_the_account`
+- 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 매니저 A에서 받은 초기 토큰, 로그인 토큰, 공유 토큰이 같은 계정의 매니저 B(임시 매니저 포함)에서도 통합니다. 커널이 꺼져 있을 때 토큰을 확인하면 매니저가 커널을 띄우고 확인합니다. 파일을 지우면 그 토큰이 통하지 않고 커널의 토큰 저장소가 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다. 매니저는 토큰 저장소를 열지 않습니다.
+- 테스트(계획): `test_fr_a5_tokens_survive_kernel_shutdown_and_manager_restart`, `test_fr_a5_token_from_one_manager_works_through_another`, `test_fr_a5_tokens_are_deleted_with_the_file`, `test_fr_a5_reshare_issues_a_new_token`, `test_fr_a5_manager_starts_the_kernel_to_verify_a_token`, `test_fr_a5_manager_never_opens_the_token_store`
 
 ### FR-A6 커널 접근 토큰 (2025 복구) — `Agreed` (사용자 결정 2026-10-03·2026-10-04, 구현 대기 #48)
 INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 커널에 접근하는 토큰입니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아."
@@ -454,8 +464,8 @@ INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 �
 - 로그인은 비밀번호를 받아 그 커널의 접근 토큰을 줍니다. 비밀번호는 매니저마다 하나이므로(FR-A4) 요청을 받은 매니저의 비밀번호입니다.
 - `password_set`은 요청을 받은 매니저에 비밀번호가 있는지입니다.
 - 커널 접근 토큰은 그 커널 하나에만 묶입니다. 다른 커널을 가리키면 `403`이 아니라 `404`입니다(FR-A3).
-- 어느 매니저로 들어와도 통합니다. 토큰은 커널 토큰 저장소(PROTOCOL §6)에 있고, 같은 계정의 매니저는 모두 그것으로 검사합니다(FR-A5). 검사는 매니저가 하고 커널은 하지 않습니다(INTENT D5). 초기 토큰과 확인은 임시 매니저에서도 됩니다. 공유 링크는 전용 매니저 설정(`share_base`)이 필요해서 공유 토큰 발급만 전용 매니저가 합니다(FR-A3).
-- 저장소 위치(런타임 홈의 `tokens/<kernel_id>.json`)는 리더 결정, 사용자 확인 대기입니다(PROJECT Q16).
+- 어느 매니저로 들어와도 통합니다. 토큰은 커널이 들고 있고, 매니저는 발급·확인·철회를 제어 채널로 커널에 요청합니다(FR-A5, FR-K10, PROTOCOL §6). 커널이 떠 있지 않으면 매니저가 먼저 띄웁니다(FR-M2). 초기 토큰과 확인은 임시 매니저에서도 됩니다. 공유 링크는 전용 매니저 설정(`share_base`)이 필요해서 공유 토큰 발급만 전용 매니저가 합니다(FR-A3).
+- 저장소 위치는 [provisional]이고 #48에서 정합니다. 원칙은 커널만 접근하고, 노트북 파일과 수명을 같이 한다는 것입니다(PROJECT Q16).
 - 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 전용 매니저에서 받은 토큰이 같은 커널의 임시 매니저에서도 통합니다. `POST /api/kernels/{kernel_id}/tokens/share`의 응답이 2025 필드(`share_token`, `share_url`)와 `capabilities`를 담습니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
 - 테스트(계획): `test_fr_a6_initial_token_is_issued_without_credentials_every_time`, `test_fr_a6_login_with_the_manager_password_returns_a_kernel_token`, `test_fr_a6_kernel_token_is_404_on_other_kernels`, `test_fr_a6_kernel_token_works_through_any_manager`, `test_fr_a6_tokens_share_returns_2025_fields`, `test_fr_a6_verify_reports_permission_and_revocation`
 
@@ -733,3 +743,7 @@ PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓
 ### PR-6 공유 철회 `streams.close` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
 PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.
 - 테스트(계획): `test_pr_6_streams_close_by_share_id`
+
+### PR-7 커널 토큰 메서드 `tokens.*` — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #48)
+PROTOCOL §3.3, §6. `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list`. 토큰 값은 `tokens.issue`의 응답에만 나오고, `tokens.list`는 토큰 값과 해시를 주지 않습니다. 모르는 `kind`나 능력 이름은 `bad_request`입니다.
+- 테스트(계획): `test_pr_7_issue_returns_the_token_once`, `test_pr_7_list_never_returns_tokens`, `test_pr_7_unknown_capability_is_bad_request`
