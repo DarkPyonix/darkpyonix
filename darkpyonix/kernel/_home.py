@@ -27,6 +27,12 @@ def subdir(name: str) -> str:
     return path
 
 
+def _package_dir() -> str:
+    """The real folder of this package (symlinks resolved, so a link named ``darkpyonix`` to
+    ``kernel`` still counts as a source checkout)."""
+    return os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
+
+
 def source_root() -> str:
     """Return a directory that contains this package under the name ``darkpyonix``.
 
@@ -38,7 +44,7 @@ def source_root() -> str:
     the folder is already named ``darkpyonix`` (installed, or extracted by the Rust launcher) its
     parent is returned and nothing is created.
     """
-    package = os.path.dirname(os.path.abspath(__file__))
+    package = _package_dir()
     if os.path.basename(package) == "darkpyonix":
         return os.path.dirname(package)
     root = os.path.join(subdir("src"), hashlib.sha256(package.encode("utf-8")).hexdigest()[:12])
@@ -69,8 +75,11 @@ def expose_package() -> None:
     """Make ``import darkpyonix`` work in child interpreters of this process (FR-K1).
 
     ``multiprocessing`` spawn children inherit ``sys.path``; other children inherit
-    ``PYTHONPATH``. Both get :func:`source_root` appended, after everything the user set.
+    ``PYTHONPATH``. Both get :func:`source_root` appended, after everything the user set. A no-op
+    when the folder is already named ``darkpyonix``.
     """
+    if os.path.basename(_package_dir()) == "darkpyonix":
+        return  # installed or extracted: already importable; never leak its parent to children
     root = source_root()
     if root not in sys.path:
         sys.path.append(root)
