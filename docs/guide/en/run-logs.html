@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run logs &middot; darkpyonix guide</title>
+<meta name="description" content="Every DarkPyonix run is recorded beside the file in __runs__/<file>/<run_id>.ipynb. Inside the kernel, the __runs__ variable reads those logs as dicts with attribute access.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/run-logs.html">
+<link rel="alternate" hreflang="en" href="run-logs.html">
+<link rel="alternate" hreflang="ko" href="../ko/run-logs.html">
+<link rel="alternate" hreflang="x-default" href="../en/run-logs.html">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="run-logs.html" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/run-logs.html" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <nav aria-label="Guide">
+      <h2>Guide</h2>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="getting-started.html">Install and first run</a></li>
+        <li><a href="notebook-format.html">Notebook files</a></li>
+        <li><a href="cli.html">The darkpyonix CLI</a></li>
+        <li><a href="run-logs.html" aria-current="page">Run logs</a></li>
+        <li><a href="manager-api.html">Manager HTTP API</a></li>
+        <li><a href="clients.html">Editors, ash and agents</a></li>
+        <li><a href="hub.html">darkpyonix.dev hub</a></li>
+      </ul>
+      <h2>On this page</h2>
+      <ul>
+        <li><a href="#folder">The __runs__ folder</a></li>
+        <li><a href="#written">How it is written</a></li>
+        <li><a href="#cells">Mapping logs to cells</a></li>
+        <li><a href="#magic">The __runs__ variable</a></li>
+        <li><a href="#git">Logs and Git</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <p class="eyebrow">Run logs</p>
+    <h1>Every run leaves a notebook</h1>
+    <p class="lede">You do not redirect output to a log file. The kernel writes each run as an nbformat 4 notebook beside the source file, while it runs.</p>
+
+    <h2 id="folder">The <code>__runs__</code> folder</h2>
+    <figure class="codeblock" data-copy="Copy" data-copied="Copied">
+      <figcaption>layout</figcaption>
+<pre><code>experiments/
+├─ train.py
+└─ __runs__/
+   └─ train.py/
+      ├─ 20261003-142233-a1f0.ipynb
+      ├─ 20261003-150102-77c2.ipynb
+      └─ index.json</code></pre>
+    </figure>
+
+    <ul>
+      <li>One run is one request: the whole file or a few cells.</li>
+      <li><code>run_id</code> is <code>YYYYMMDD-HHMMSS-&lt;4 hex&gt;</code> in UTC, so names sort by time.</li>
+      <li><code>index.json</code> lists the runs newest first with id, status, start, end and mode. It is rebuilt if it is damaged.</li>
+      <li>Any Jupyter viewer opens the <code>.ipynb</code>. Notebook metadata <code>metadata.darkpyonix</code> holds the run id, kernel id, file hash, mode, params, status, times, interpreter and host.</li>
+    </ul>
+
+    <h2 id="written">How it is written</h2>
+    <p>The kernel rewrites the log atomically (temporary file, then rename) at most every second while the run
+      is going. If the kernel is killed, the file is still valid JSON and holds the output up to about a second
+      before the kill. Its status stays <code>running</code>; the next kernel for that file marks it
+      <code>crashed</code>.</p>
+    <p>Status values are <code>running</code>, <code>ok</code>, <code>error</code>, <code>interrupted</code> and
+      <code>crashed</code>. When one cell's stream output passes 16 MiB (<code>DARKPYONIX_RUN_OUTPUT_LIMIT</code>), the rest goes to <code>&lt;run_id&gt;.cell&lt;index&gt;.log</code> beside the notebook, so the notebook stays readable. Live events are not limited.</p>
+
+    <h2 id="cells">Mapping logs to cells</h2>
+    <p>Each cell in a log carries its index, type, title, status, times and <code>source_sha256</code>, the hash
+      of the cell body. An editor maps the latest log onto the file by <code>id</code>, then by source hash, then
+      by index. A cell whose source changed since the run can be shown as an output of the previous source.</p>
+
+    <h2 id="magic">The <code>__runs__</code> variable</h2>
+    <p>Inside the kernel the same logs are a variable, so code (yours or an agent's) can read past results
+      without opening files:</p>
+    <figure class="codeblock" data-copy="Copy" data-copied="Copied">
+      <figcaption>in a cell</figcaption>
+<pre><code>run = __runs__.latest                 <span class="c"># the last finished run, or None</span>
+run.run_id, run.status, run.params    <span class="c"># '20261003-150102-77c2', 'ok', {'lr': 0.01}</span>
+run.cells[0].text                     <span class="c"># stdout of the first recorded cell</span>
+run.cell(<span class="s">"Train"</span>).result             <span class="c"># repr of that cell's last expression</span>
+__runs__.list(limit=<span class="n">5</span>)                 <span class="c"># newest first</span>
+__runs__.current.path                 <span class="c"># the .ipynb being written right now</span></code></pre>
+    </figure>
+
+    <p>A run and a cell are <code>dict</code> subclasses with attribute access. An attribute is looked up in the
+      dict first, then in <code>metadata.darkpyonix</code>. <code>cell.text</code> joins the stdout stream,
+      <code>cell.stderr</code> joins stderr, and <code>run.cell(key)</code> finds a cell by id, title or file
+      index. <code>json.dumps(run)</code> gives the notebook back unchanged, and changing the returned value
+      never changes the log.</p>
+    <p>Variables are not checkpointed. To get a value back, rerun the code that the log recorded.</p>
+
+    <h2 id="git">Logs and Git</h2>
+    <p><code>__runs__/</code> is tracked by default, because a run's record is part of the work. Add it to
+      <code>.gitignore</code> if you do not want that.</p>
+    <nav class="pagenav" aria-label="Pagination">
+      <a class="prev" href="cli.html"><span>Previous</span>&larr; The darkpyonix CLI</a>
+      <a class="next" href="manager-api.html"><span>Next</span>Manager HTTP API &rarr;</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; Apache License 2.0</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

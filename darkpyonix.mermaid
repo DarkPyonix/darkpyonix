@@ -1,0 +1,491 @@
+---
+title: DarkPyonix kernel stack — object model
+---
+classDiagram
+    direction LR
+
+    %% ───────────── Notebook format (darkpyonix.format, stdlib only) ─────────────
+    namespace format {
+        class NotebookDocument {
+            +path str
+            +preamble Cell
+            +cells list~Cell~
+            +file_sha256 str
+            +parse(text str, path str)$ NotebookDocument
+            +load(path str)$ NotebookDocument
+            +serialize() str
+            +cell(index int) Cell
+        }
+        class Cell {
+            +index int
+            +type CellType
+            +title str|None
+            +metadata dict
+            +source str
+            +marker str
+            +source_sha256 str
+            +id str|None
+        }
+        class CellType {
+            <<enumeration>>
+            PREAMBLE
+            CODE
+            MARKDOWN
+            ARGPARSE
+            BINDING
+            SHELL
+            PARALLEL
+            CONCURRENT
+            CINTEROP
+            CPPINTEROP
+            RUSTINTEROP
+        }
+    }
+    NotebookDocument "1" *-- "1..*" Cell
+    Cell --> CellType
+
+    %% ───────────── Runtime API (darkpyonix, stdlib only) ─────────────
+    namespace runtime {
+        class darkpyonix {
+            <<module>>
+            +params Params
+            +uv Uv
+            +pip Pip
+            +markdown(text str, silent bool) None
+            +display(obj object) None
+            +binding(obj) object
+            +run_command(cmd str, check bool) int
+            +run_parallel(*aws) list
+            +run_cinterop(src str) None
+            +run_cppinterop(src str) None
+            +run_rustinterop(src str) None
+        }
+        class Params {
+            -overrides dict
+            -argv list~str~
+            +get(name str, default, choices, range, type, help) object
+        }
+        class RuntimeHost {
+            <<interface>>
+            +emit_display(bundle dict, silent bool) None
+            +params_overrides() dict
+            +in_kernel() bool
+        }
+        class PlainHost {
+            +emit_display(bundle dict, silent bool) None
+        }
+    }
+    darkpyonix --> Params
+    darkpyonix ..> RuntimeHost : delegates to
+    RuntimeHost <|.. PlainHost
+    Params ..> RuntimeHost
+
+    %% ───────────── Kernel (darkpyonix/kernel/__main__.py and the _*.py modules, stdlib only) ─────────────
+    namespace kernel {
+        class Kernel {
+            <<process main>>
+            +identity KernelIdentity
+            +status KernelStatus
+            +executor Executor
+            +server ControlServer
+            +discovery DiscoveryResponder
+            +router OutputRouter
+            +runs RunStore
+            +main(argv list) int
+            +shutdown() None
+        }
+        class KernelIdentity {
+            +kernel_id str
+            +path str
+            +user_tag str
+            +from_path(path str)$ KernelIdentity
+        }
+        class FileLock {
+            -fd int
+            +acquire() bool
+            +release() None
+        }
+        class KernelStatus {
+            <<enumeration>>
+            STARTING
+            IDLE
+            BUSY
+            STOPPING
+        }
+        class Executor {
+            <<main thread>>
+            +namespace dict
+            +execution_count int
+            -queue Queue~RunRequest~
+            +submit(req RunRequest) RunTicket
+            +interrupt() bool
+            +restart(hard bool) None
+            +run_forever() None
+            -execute_cell(cell Cell, run Run) CellResult
+        }
+        class RunRequest {
+            +run_id str
+            +mode str
+            +cells list~int~
+            +source str|None
+            +params dict
+            +on_busy str
+        }
+        class Run {
+            +run_id str
+            +status RunStatus
+            +started_at datetime
+            +ended_at datetime|None
+            +cells list~CellRecord~
+            +to_notebook() dict
+        }
+        class CellRecord {
+            +cell Cell
+            +status str
+            +execution_count int
+            +outputs list~dict~
+            +started_at datetime
+            +ended_at datetime|None
+        }
+        class RunStatus {
+            <<enumeration>>
+            QUEUED
+            RUNNING
+            OK
+            ERROR
+            INTERRUPTED
+            CANCELLED
+            CRASHED
+        }
+        class OutputRouter {
+            <<output thread>>
+            -queue Queue
+            +write_stream(name str, text str) None
+            +write_display(bundle dict, kind str) None
+            +clear(wait bool) None
+            -flush_loop() None
+        }
+        class StreamCapture {
+            +name str
+            +write(text str) int
+            +flush() None
+        }
+        class FdCapture {
+            <<fd reader thread>>
+            +fd int
+            +start() None
+        }
+        class DisplayHook {
+            +format_bundle(obj) dict
+            +displayhook(value) None
+        }
+        class KernelHost {
+            +emit_display(bundle dict, silent bool) None
+            +params_overrides() dict
+        }
+        class RunStore {
+            +dir str
+            +save(run Run, final bool) None
+            +list(limit int) list~dict~
+            +get(run_ref str) dict
+            +recover_crashed() None
+        }
+        class RunsMagic {
+            <<magic variable>>
+            +current RunLog|None
+            +latest RunLog|None
+            +dir str
+            +list(limit int) list~LogDict~
+            +__getitem__(key) RunLog
+        }
+        class LogDict {
+            <<dict with attribute access>>
+            +__getattr__(name) Any
+        }
+        class RunLog {
+            +path str
+            +notebook dict
+            +cell(key) CellLog
+        }
+        class CellLog {
+            +text str
+            +stderr str
+            +result str|None
+        }
+        class ControlServer {
+            <<control thread, unix socket or named pipe>>
+            +address str
+            -same_account(conn) bool
+            -receive_fd(session ClientSession) int
+            -sessions list~ClientSession~
+            +serve_forever() None
+            +broadcast(event Event) None
+        }
+        class ClientSession {
+            +session_id str
+            +subscribed bool
+            +handle(frame dict) None
+            +send(frame dict) None
+        }
+        class EventLog {
+            +seq int
+            -ring deque~Event~
+            +append(type str, data dict) Event
+            +since(seq int) list~Event~
+        }
+        class AdoptedStream {
+            <<handed-off connection>>
+            +stream_id str
+            +kind str
+            +label StreamLabel
+            +sock socket
+            +send(event Event) None
+            +close() None
+        }
+        class WebSocketSync {
+            <<2025 WS messages>>
+            +stream AdoptedStream
+            +on_message(msg dict) None
+            +translate(event Event, label StreamLabel) dict|None
+        }
+        class StreamLabel {
+            +capabilities set~Capability~
+            +client_id str|None
+            +user str|None
+            +nickname str|None
+            +share_id str|None
+            +allows(event Event) bool
+        }
+        class KernelTokenStore {
+            <<2025 File.tokens, kernel only, location provisional #48>>
+            +kernel_id str
+            +tokens list~KernelToken~
+            +load()$ KernelTokenStore
+            +issue(kind str, capabilities set~Capability~) str
+            +verify(token str) dict
+            +revoke(share_id str) int
+            +delete() None
+        }
+        class KernelToken {
+            +token_sha256 str
+            +kind str
+            +capabilities set~Capability~
+            +share_id str|None
+            +revoked_at datetime|None
+        }
+        class DiscoveryResponder {
+            <<discovery thread>>
+            +group str
+            +port int
+            +announce() None
+            +bye() None
+            -on_query(msg dict, addr) None
+        }
+    }
+    Kernel *-- KernelIdentity
+    Kernel *-- FileLock
+    Kernel *-- Executor
+    Kernel *-- OutputRouter
+    Kernel *-- RunStore
+    Kernel *-- ControlServer
+    Kernel *-- DiscoveryResponder
+    Kernel *-- EventLog
+    Kernel *-- KernelTokenStore
+    ClientSession ..> KernelTokenStore : tokens.*
+    Kernel --> KernelStatus
+    Executor ..> NotebookDocument : parses
+    Executor --> RunRequest
+    Executor --> Run : executes
+    Run *-- CellRecord
+    Run --> RunStatus
+    CellRecord --> Cell
+    StreamCapture ..> OutputRouter : sys.stdout / sys.stderr
+    FdCapture ..> OutputRouter : fd 1 / fd 2
+    DisplayHook ..> OutputRouter
+    KernelHost ..|> RuntimeHost
+    KernelHost ..> OutputRouter
+    OutputRouter ..> EventLog : events
+    OutputRouter ..> RunStore : throttled saves
+    RunsMagic ..> RunStore
+    RunsMagic ..> RunLog : returns
+    LogDict <|-- RunLog
+    LogDict <|-- CellLog
+    RunLog *-- CellLog : cells
+    Executor ..> RunsMagic : injects as __runs__
+    ControlServer *-- ClientSession
+    ControlServer *-- AdoptedStream : adopt
+    AdoptedStream *-- StreamLabel
+    WebSocketSync --> AdoptedStream : kind ws
+    WebSocketSync ..> ClientSession : start_typing / cell_focus as doc.* requests
+    AdoptedStream ..> EventLog : replay and live events
+    ControlServer ..> EventLog : replay
+    ClientSession ..> Executor : run / interrupt / restart
+
+    %% ───────────── Manager (Rust workspace darkpyonix/manager) ─────────────
+    namespace manager {
+        class ManagerApp {
+            +mode ManagerMode
+            +config ManagerConfig
+            +directory KernelDirectory
+            +auth AuthService
+            +broker EventBroker
+            +app FastAPI
+            +run() None
+        }
+        class ManagerMode {
+            <<enumeration>>
+            EPHEMERAL
+            DEDICATED
+        }
+        class ManagerConfig {
+            +host str
+            +port int
+            +idle_timeout int|None
+            +home str
+        }
+        class KernelDirectory {
+            -kernels dict~str, KernelInfo~
+            +discover(refresh bool) list~KernelInfo~
+            +get(kernel_id str) KernelInfo
+            +ensure(path str, python str) KernelInfo
+            +client(kernel_id str) KernelClient
+        }
+        class KernelInfo {
+            +kernel_id str
+            +path str
+            +pid int
+            +control str
+            +status str
+            +python dict
+        }
+        class DiscoveryClient {
+            +query(kernel_id str|None) list~dict~
+            +listen() None
+        }
+        class KernelLauncher {
+            +python str
+            +bootstrap(package_root str) str
+            +launch(path str, cwd str, env dict) int
+        }
+        class KernelClient {
+            +connect() None
+            +request(method str, params dict) dict
+            +subscribe(since int) AsyncIterator~Event~
+            +close() None
+        }
+        class EventBroker {
+            +stream(kernel_id str, since int, capabilities set~Capability~) AsyncIterator~Event~
+        }
+        class AuthService {
+            +master_token str
+            +check(token str) Principal
+            +create_share(kernel_id str, capabilities set~Capability~) ShareToken
+            +revoke(share_id str) None
+            +initial_token(kernel_id str) str
+            +set_password(token str, password str) None
+            +login(password str) str
+            +kernel_login(kernel_id str, password str) str
+            +reset_master(password str) str
+            +reset_shared(capabilities set~Capability~) ShareToken
+            +verify(kernel_id str, token str) dict
+            +forget_deleted_files() None
+        }
+        class ManagerCredentials {
+            <<one per manager, manager.db>>
+            +password_hash str|None
+            +master_token_hash str
+        }
+        class Principal {
+            +capabilities set~Capability~
+            +kernel_id str|None
+            +is_master bool
+            +has(capability Capability) bool
+        }
+        class Capability {
+            <<enumeration, no order>>
+            READ
+            HISTORY
+            EXECUTE
+            EDIT
+            MANAGE
+        }
+        class ShareToken {
+            +share_id str
+            +kernel_id str|None
+            +capabilities set~Capability~
+            +token_hash str
+            +expires_at datetime|None
+        }
+        class StreamHandoff {
+            +handoff(conn Connection, kernel KernelInfo, label StreamLabel) None
+            +pump(conn Connection, kernel KernelInfo, label StreamLabel) None
+            +close_share(share_id str) None
+        }
+        class LifecycleWatchdog {
+            +idle_timeout int
+            +touch() None
+            +run() None
+        }
+        class Cli {
+            <<darkpyonix CLI>>
+            +main(argv list) int
+            -spawn_manager() ManagerHandle
+        }
+    }
+    ManagerApp --> ManagerMode
+    ManagerApp *-- ManagerConfig
+    ManagerApp *-- KernelDirectory
+    ManagerApp *-- AuthService
+    ManagerApp *-- EventBroker
+    ManagerApp *-- LifecycleWatchdog
+    ManagerApp *-- StreamHandoff
+    StreamHandoff ..> KernelClient : adopt / streams.close
+    AuthService ..> StreamHandoff : revoke closes streams
+    KernelDirectory *-- DiscoveryClient
+    KernelDirectory *-- KernelLauncher
+    KernelDirectory --> KernelInfo
+    KernelDirectory ..> KernelClient
+    EventBroker ..> KernelClient
+    AuthService --> Principal
+    AuthService *-- ShareToken : manager shared tokens (manager.db)
+    AuthService *-- ManagerCredentials
+    AuthService ..> KernelClient : tokens.issue / verify / revoke / list
+    KernelTokenStore *-- KernelToken
+    KernelToken --> Capability
+    Principal --> Capability
+    ShareToken --> Capability
+    Cli ..> ManagerApp : spawns its own, reads url and token from stdout
+    Cli ..> ManagerApp : HTTP
+
+    %% ───────────── Wire boundaries ─────────────
+    KernelClient ..> ControlServer : DKP/1 over unix socket or named pipe (same OS account)
+    StreamHandoff ..> ControlServer : adopt + POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
+    DiscoveryClient ..> DiscoveryResponder : UDP multicast 239.255.68.80 port 46880
+    KernelLauncher ..> Kernel : spawns detached
+
+    %% ───────────── Hub (Draft) ─────────────
+    namespace hub {
+        class HubApp {
+            <<darkpyonix.dev, Draft>>
+        }
+        class Device {
+            +device_id str
+            +role str
+            +public_key str
+        }
+        class Rendezvous {
+            +offer(from Device, to Device, candidates list) None
+        }
+        class Relay {
+            +pipe(session_id str) None
+        }
+        class PublishedShare {
+            +share_id str
+            +device_id str
+        }
+    }
+    HubApp *-- Device
+    HubApp *-- Rendezvous
+    HubApp *-- Relay
+    HubApp *-- PublishedShare
+    PublishedShare ..> ShareToken : refers to (token never sent to hub)

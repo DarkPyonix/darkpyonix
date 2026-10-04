@@ -1,21 +1,74 @@
 [build-system]
-requires = ["flit_core >=3.2,<4"]
-build-backend = "flit_core.buildapi"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
 
 [project]
 name = "darkpyonix"
-version = "0.1.0"
-description = "AI-optimized Python kernel with VS Code integration"
-authors = [{name = "Your Name", email = "your.email@example.com"}]
+# Single source: darkpyonix/kernel/__init__.py (see [tool.hatch.version]).
+dynamic = ["version"]
+description = "File-bound, manager-independent Python kernel for AI/ML work by people and agents"
 readme = "README.md"
-license = {file = "LICENSE"}
-requires-python = ">=3.9"
-dependencies = [
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "DarkPyonix"}]
+maintainers = [{name = "DarkPyonix"}]
+requires-python = ">=3.8"
+keywords = ["kernel", "notebook", "jupyter", "agents", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Interpreters",
+]
+# The runtime API and the kernel are standard library only (INTENT §2).
+dependencies = []
+
+[project.urls]
+Homepage = "https://darkpyonix.dev"
+Repository = "https://github.com/DarkPyonix/darkpyonix"
+Issues = "https://github.com/DarkPyonix/darkpyonix/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyyaml>=6",
+    "nbformat>=5",
+    "jsonschema>=4",
 ]
 
-[project.scripts]
-darkpyonix = "darkpyonix.cli:main"
+# No console script: the `darkpyonix` CLI is the Rust binary (INTENT D10).
 
-[tool.flit.module]
-name = "darkpyonix"
-path = "kernel/darkpyonix"
+[tool.hatch.version]
+path = "darkpyonix/kernel/__init__.py"
+
+# Editable installs are unsupported for a renamed folder; tests/conftest.py links the folder
+# as ``darkpyonix`` under .scratch/src instead. The folder darkpyonix/kernel IS the ``darkpyonix`` package. The build renames it; hatchling's
+# ``sources`` mapping can do that, pdm-backend cannot.
+[tool.hatch.build.targets.wheel.sources]
+"darkpyonix/kernel" = "darkpyonix"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["darkpyonix/kernel"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["darkpyonix/kernel", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

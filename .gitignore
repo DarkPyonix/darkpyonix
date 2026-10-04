@@ -205,3 +205,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# DarkPyonix: project-local work areas (AGENTS.md "Where files go")
+.scratch/
+.claude/worktrees/
+
+# Rust manager build output
+darkpyonix/manager/target/
+
+# Rust hub build output
+darkpyonix/hub/server/target/

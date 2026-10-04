@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DarkPyonix API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui.min.css">
+<style>
+  /* DarkPyonix palette, taken from vscode-darkpyonix-theme (DarkPyonix Light). */
+  :root {
+    --bg: #F5EFE0;          /* parchment, editor.background */
+    --surface: #FBF7EE;
+    --sunken: #E8DECA;      /* sand, sideBar.background */
+    --line: #D3C5AE;
+    --ink: #3E2E22;         /* editor.foreground */
+    --muted: #7A6A57;
+    --ember: #C65F3C;       /* button.background, focusBorder */
+    --ember-soft: #F1D9CC;
+    --get: #5B7C99; --post: #4E7A3A; --delete: #B5402F; --patch: #B58900; --put: #8A5FA0;
+    --code-bg: #EFE6D6;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17120E; --surface: #211A15; --sunken: #2A221B; --line: #3D3229;
+      --ink: #EFE6D6; --muted: #A89883; --ember: #E07A55; --ember-soft: #3A2419;
+      --get: #7FA2C2; --post: #7FAE68; --delete: #E0705E; --patch: #D9AE3A; --put: #B48CC8;
+      --code-bg: #2A221B; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17120E; --surface: #211A15; --sunken: #2A221B; --line: #3D3229;
+    --ink: #EFE6D6; --muted: #A89883; --ember: #E07A55; --ember-soft: #3A2419;
+    --get: #7FA2C2; --post: #7FAE68; --delete: #E0705E; --patch: #D9AE3A; --put: #B48CC8;
+    --code-bg: #2A221B; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 15px/1.55 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  header.dp {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px max(16px, calc((100vw - 1160px) / 2));
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; font-size: 17px; }
+  .brand svg { width: 26px; height: 26px; }
+  .brand small { font-weight: 500; color: var(--muted); font-size: 13px; margin-left: 2px; }
+  nav.specs { display: flex; gap: 4px; padding: 3px; background: var(--sunken); border-radius: 10px; margin-left: auto; }
+  nav.specs button, .theme {
+    font: 600 13px Inter, sans-serif; color: var(--muted); background: transparent;
+    border: 0; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  }
+  nav.specs button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .theme { border: 1px solid var(--line); padding: 7px 10px; }
+  .status { font: 600 11px Inter, sans-serif; text-transform: uppercase; letter-spacing: .06em;
+            padding: 3px 8px; border-radius: 999px; background: var(--ember-soft); color: var(--ember); }
+
+  main { max-width: 1160px; margin: 0 auto; padding: 8px 16px 64px; }
+
+  /* ---- Swagger UI overrides ---- */
+  .swagger-ui, .swagger-ui .info .title, .swagger-ui .opblock-tag, .swagger-ui .opblock .opblock-summary-description,
+  .swagger-ui .opblock-description-wrapper p, .swagger-ui .parameter__name, .swagger-ui .parameter__type,
+  .swagger-ui table thead tr th, .swagger-ui .response-col_status, .swagger-ui .tab li, .swagger-ui label,
+  .swagger-ui .model, .swagger-ui .model-title, .swagger-ui section.models h4, .swagger-ui .info li, .swagger-ui .info p,
+  .swagger-ui .markdown p, .swagger-ui .markdown li, .swagger-ui .renderedMarkdown p, .swagger-ui .opblock .opblock-section-header h4,
+  .swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5, .swagger-ui .parameter__in, .swagger-ui .prop-format,
+  .swagger-ui .scheme-container .schemes > label, .swagger-ui .servers > label, .swagger-ui .opblock-tag small { color: var(--ink); font-family: Inter, system-ui, sans-serif; }
+  .swagger-ui .topbar { display: none; }
+  .swagger-ui .info { margin: 36px 0 24px; }
+  .swagger-ui .info .title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+  .swagger-ui .info .title small { background: var(--sunken) !important; color: var(--muted); }
+  .swagger-ui .info .title small.version-stamp { background: var(--ember) !important; color: #fff; }
+  .swagger-ui .info a, .swagger-ui a.nostyle, .swagger-ui .markdown a { color: var(--ember); }
+  .swagger-ui .markdown code, .swagger-ui .renderedMarkdown code, .swagger-ui code {
+    font-family: "JetBrains Mono", ui-monospace, monospace; background: var(--code-bg); color: var(--ink);
+    border-radius: 5px; padding: 1px 5px; font-size: .88em;
+  }
+  .swagger-ui .scheme-container { background: var(--surface); box-shadow: none; border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 0 0 24px; }
+  .swagger-ui select, .swagger-ui input[type=text], .swagger-ui textarea {
+    background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: none;
+  }
+  .swagger-ui .btn { border-radius: 8px; border-color: var(--line); color: var(--ink); box-shadow: none; font-family: Inter, sans-serif; }
+  .swagger-ui .btn.authorize { color: var(--ember); border-color: var(--ember); }
+  .swagger-ui .btn.authorize svg { fill: var(--ember); }
+  .swagger-ui .btn.execute { background: var(--ember); border-color: var(--ember); color: #fff; }
+  .swagger-ui .opblock-tag { border-bottom: 1px solid var(--line); font-size: 20px; font-weight: 700; padding: 14px 4px; }
+  .swagger-ui .opblock-tag:hover { background: transparent; }
+  .swagger-ui .opblock { border-radius: 12px; box-shadow: none; border: 1px solid var(--line) !important; background: var(--surface) !important; margin: 0 0 10px; overflow: hidden; }
+  .swagger-ui .opblock .opblock-summary { border: 0; padding: 8px 10px; }
+  .swagger-ui .opblock .opblock-summary-method { border-radius: 7px; min-width: 76px; font: 700 12px "JetBrains Mono", monospace; letter-spacing: .03em; text-shadow: none; }
+  .swagger-ui .opblock .opblock-summary-path, .swagger-ui .opblock .opblock-summary-path__deprecated { font: 600 14px "JetBrains Mono", monospace; color: var(--ink); }
+  .swagger-ui .opblock.opblock-get .opblock-summary-method { background: var(--get); }
+  .swagger-ui .opblock.opblock-post .opblock-summary-method { background: var(--post); }
+  .swagger-ui .opblock.opblock-delete .opblock-summary-method { background: var(--delete); }
+  .swagger-ui .opblock.opblock-patch .opblock-summary-method { background: var(--patch); }
+  .swagger-ui .opblock.opblock-put .opblock-summary-method { background: var(--put); }
+  .swagger-ui .opblock.opblock-get { border-left: 4px solid var(--get) !important; }
+  .swagger-ui .opblock.opblock-post { border-left: 4px solid var(--post) !important; }
+  .swagger-ui .opblock.opblock-delete { border-left: 4px solid var(--delete) !important; }
+  .swagger-ui .opblock .opblock-section-header { background: var(--sunken); box-shadow: none; }
+  .swagger-ui .opblock-body pre.microlight, .swagger-ui .highlight-code > .microlight, .swagger-ui .model-box {
+    background: var(--code-bg) !important; color: var(--ink) !important; border-radius: 10px; font-family: "JetBrains Mono", monospace !important;
+  }
+  .swagger-ui .opblock-body pre.microlight span { color: inherit !important; }
+  .swagger-ui table tbody tr td { border-color: var(--line); }
+  .swagger-ui .parameter__name.required:after { color: var(--ember); }
+  .swagger-ui .parameter__name.required span { color: var(--ember); }
+  .swagger-ui section.models { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  .swagger-ui section.models .model-container { background: var(--sunken); border-radius: 8px; }
+  .swagger-ui section.models h4 { border-bottom: 1px solid var(--line); }
+  .swagger-ui .model-toggle:after, .swagger-ui svg.arrow, .swagger-ui .expand-operation svg { filter: var(--icon-filter, none); }
+  :root[data-theme="dark"] .swagger-ui svg:not(.brand svg), :root:not([data-theme="light"]) .swagger-ui svg { --icon-filter: none; }
+  .swagger-ui .prop-type { color: var(--get); }
+  .swagger-ui .dialog-ux .modal-ux { background: var(--surface); border-color: var(--line); color: var(--ink); }
+  .swagger-ui .dialog-ux .modal-ux-header h3, .swagger-ui .dialog-ux .modal-ux-content p, .swagger-ui .dialog-ux .modal-ux-content h4 { color: var(--ink); }
+  .swagger-ui .response-control-media-type__accept-message { color: var(--post); }
+  footer { max-width: 1160px; margin: 0 auto; padding: 0 16px 40px; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--ember); }
+  @media (max-width: 640px) {
+    nav.specs { margin-left: 0; width: 100%; }
+    nav.specs button { flex: 1; }
+    .swagger-ui .opblock .opblock-summary-method { min-width: 62px; }
+  }
+</style>
+</head>
+<body>
+<header class="dp">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 3c2.6 4.2 7.9 6.4 7.9 13.2A7.9 7.9 0 0 1 16 24a7.9 7.9 0 0 1-7.9-7.8C8.1 12 11 9.8 12.4 6.7c.9 2.4 2.6 3.7 3.6 4.2C15.6 8.3 15.2 5.6 16 3z" fill="var(--ember)"/>
+      <path d="M16 13.5c1.3 2 3.4 3 3.4 5.6a3.4 3.4 0 0 1-6.8 0c0-1.8 1.1-2.8 1.8-4 .4.9 1 1.4 1.4 1.6-.1-1.2-.2-2.2.2-3.2z" fill="var(--bg)"/>
+      <path d="M6 27h20" stroke="var(--ember)" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    DarkPyonix <small>API</small>
+  </div>
+  <span class="status" id="status">Draft</span>
+  <nav class="specs" aria-label="API">
+    <button type="button" data-spec="manager.openapi.yaml" aria-pressed="true">Kernel Manager</button>
+    <button type="button" data-spec="hub.openapi.yaml" aria-pressed="false">Hub · darkpyonix.dev</button>
+  </nav>
+  <button class="theme" type="button" id="theme" aria-label="Toggle colour theme">◐</button>
+</header>
+<main><div id="swagger"></div></main>
+<footer>
+  Normative: <a href="../SPEC.md">SPEC</a> · <a href="../PROTOCOL.md">PROTOCOL</a> · <a href="../FORMAT.md">FORMAT</a>.
+  The OpenAPI files in this folder are the contract; the running manager serves the same page at <code>/docs</code>.
+</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-bundle.min.js"></script>
+<script>
+(function () {
+  var buttons = document.querySelectorAll('nav.specs button');
+  var statusEl = document.getElementById('status');
+  var params = new URLSearchParams(location.search);
+  var initial = params.get('spec') || 'manager.openapi.yaml';
+
+  function load(spec) {
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.spec === spec)); });
+    statusEl.textContent = spec.indexOf('hub') === 0 ? 'Draft · FR-H' : 'Agreed';
+    var u = new URL(location.href); u.searchParams.set('spec', spec); history.replaceState(null, '', u);
+    window.ui = SwaggerUIBundle({
+      url: spec,
+      dom_id: '#swagger',
+      deepLinking: true,
+      docExpansion: 'list',
+      defaultModelsExpandDepth: 0,
+      displayRequestDuration: true,
+      tryItOutEnabled: false,
+      syntaxHighlight: { activated: false },
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: 'BaseLayout'
+    });
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { load(b.dataset.spec); }); });
+
+  var root = document.documentElement;
+  try { var saved = localStorage.getItem('dp-theme'); if (saved) root.dataset.theme = saved; } catch (e) {}
+  document.getElementById('theme').addEventListener('click', function () {
+    var dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('dp-theme', root.dataset.theme); } catch (e) {}
+  });
+  load(initial);
+})();
+</script>
+</body>
+</html>

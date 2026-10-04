@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/dpx-core", "crates/dpx-kernel", "crates/dpx-server", "crates/darkpyonix"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/DarkPyonix/darkpyonix"
+
+[workspace.dependencies]
+dpx-core = { path = "crates/dpx-core" }
+dpx-kernel = { path = "crates/dpx-kernel" }
+dpx-server = { path = "crates/dpx-server" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+thiserror = "1"
+futures = "0.3"
+tracing = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

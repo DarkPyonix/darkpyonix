@@ -1,0 +1,13 @@
+[package]
+name = "dpx-core"
+description = "Shared types and the KernelBackend trait of the DarkPyonix manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+futures.workspace = true
