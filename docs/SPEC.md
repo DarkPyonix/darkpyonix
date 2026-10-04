@@ -25,6 +25,8 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 매니저는 사용자가 고른 인터프리터에, 패키지 소스를 `darkpyonix`라는 이름으로 불러오는 부트스트랩(`-c`)으로 커널을 띄웁니다. 실행하는 모듈은 `darkpyonix.__main__`이라 설치된 환경에서는 `python -m darkpyonix --file <경로>`와 같습니다. 그 인터프리터에 DarkPyonix가 설치되어 있지 않아도 됩니다.
 - 수용 기준: DarkPyonix가 설치되지 않은 가상환경의 인터프리터로 커널을 띄우고 셀을 실행할 수 있습니다. 사용자 코드의 `import darkpyonix`가 성공합니다.
 - 테스트: `test_fr_k1_kernel_runs_from_uninstalled_interpreter`, `test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell`(인터프리터마다 `.scratch/` 아래에 `--without-pip` 가상환경을 만들고, 그 인터프리터로 띄운 커널의 셀에서 `import darkpyonix`가 커널 소스 루트에서 불러와지고 `sys.prefix`가 그 가상환경임을 확인)
+- 소스 체크아웃의 폴더 이름은 `kernel`이라 부트스트랩이 경로로 불러오므로, 커널은 시작할 때 `<DARKPYONIX_HOME>/src/<체크아웃 해시>/darkpyonix`(심볼릭 링크, 링크가 안 되는 곳에서는 복사)를 만들고 그 부모 디렉터리를 `sys.path`와 `PYTHONPATH` 끝에 붙입니다. 사용자 코드가 띄우는 `multiprocessing` spawn 자식이나 하위 프로세스에서도 `import darkpyonix`가 됩니다(#65). 체크아웃 안에는 아무것도 만들지 않습니다. 폴더 이름이 이미 `darkpyonix`이면(설치본, Rust 런처가 푼 소스) 아무것도 만들지 않습니다.
+- 테스트: `test_fr_k1_spawn_child_from_source_checkout_kernel_can_import_darkpyonix`(인터프리터마다, 셀에서 spawn 자식을 띄워 자식의 `import darkpyonix` 결과를 돌려받음)
 
 ### FR-K2 파일에 묶인 커널 ID — `Done`
 커널 ID는 PROTOCOL §2.6의 규칙으로 만듭니다.

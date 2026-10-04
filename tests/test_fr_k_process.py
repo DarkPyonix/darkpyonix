@@ -64,6 +64,45 @@ def test_fr_k1_kernel_runs_from_uninstalled_interpreter(python, dp_home, scratch
         reap(proc)
 
 
+def test_fr_k1_spawn_child_from_source_checkout_kernel_can_import_darkpyonix(
+        python, dp_home, scratch, monkeypatch):
+    """A multiprocessing spawn child of user code can ``import darkpyonix`` (issue #65)."""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    path = write_notebook(scratch, "spawn_nb.py", """
+        import multiprocessing
+
+        def child(q):
+            import darkpyonix
+            q.put("child imported " + darkpyonix.__name__)
+
+        # %% [code]
+        if __name__ == "__main__":
+            ctx = multiprocessing.get_context("spawn")
+            q = ctx.Queue()
+            p = ctx.Process(target=child, args=(q,))
+            p.start()
+            print(q.get(timeout=30))
+            p.join(30)
+            print("exit", p.exitcode)
+        """)
+    pid = launcher.launch(path, python=python)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=20)
+        assert info is not None, "kernel did not announce"
+        c = connect(info)
+        try:
+            status, _ = run_and_wait(c, timeout=60)
+            nb = c.request("runs.get", {"run_id": "latest"})
+        finally:
+            c.close()
+        assert status == "ok", [o.get("text") for c in nb["cells"] for o in c["outputs"]]
+        assert stream_text(nb).splitlines() == ["child imported darkpyonix", "exit 0"]
+    finally:
+        kill(pid, signal.SIGTERM)
+        if not wait_pid_gone(pid):
+            kill(pid, signal.SIGKILL)
+
+
 def test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell(python, dp_home, scratch, monkeypatch):
     """A venv interpreter without DarkPyonix starts a kernel whose cells import darkpyonix."""
     monkeypatch.delenv("PYTHONPATH", raising=False)
