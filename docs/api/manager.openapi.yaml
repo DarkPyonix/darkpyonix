@@ -1,0 +1,2665 @@
+openapi: 3.1.0
+info:
+  title: DarkPyonix Kernel Manager API
+  version: 1.0.0-draft.4
+  summary: Discover, launch and drive file-bound DarkPyonix kernels.
+  description: 'The HTTP API every DarkPyonix client uses: IDE extensions (VS Code, IntelliJ), the Ember
+
+    workbench, the ash shared notebook, and the `darkpyonix` CLI that agents call.
+
+
+    **Model.** A kernel is bound to one notebook file (`.py` / `.pynb`). Its id is derived from
+
+    the file''s canonical path, so every client finds the same kernel for the same file without
+
+    coordinating. Kernels outlive managers: any manager of the same OS user discovers running
+
+    kernels and attaches to them.
+
+
+    **Stopping is interrupting.** `POST /kernels/{kernel_id}/interrupt` raises
+
+    `KeyboardInterrupt` in the running cell and keeps the namespace. Only
+
+    `DELETE /kernels/{kernel_id}?force=true` kills a process.
+
+
+    **Runs.** Every run is recorded beside the file as
+
+    `__runs__/<file name>/<run_id>.ipynb` (nbformat 4). Outputs in this API use the nbformat 4
+
+    output schema verbatim.
+
+
+    **Events.** `GET /kernels/{kernel_id}/events` is a Server-Sent Events stream. The SSE `id`
+
+    is the kernel''s event sequence number; reconnect with `Last-Event-ID` (or `?since=`) to
+
+    resume without loss while the kernel''s replay buffer still holds the events.
+
+
+    **Handed-off streams.** Operations marked `x-darkpyonix-handoff: kernel` are long-lived
+
+    streams. The manager authenticates and authorizes the request, then passes the connection
+
+    itself to the kernel (POSIX `SCM_RIGHTS`, Windows `WSADuplicateSocketW`; TLS, HTTP/2 and
+
+    tunnel connections through a socketpair the manager pumps). The kernel writes the response.
+
+    A stream handed off as a raw socket survives the manager (INTENT D6, SPEC FR-M6,
+
+    PROTOCOL §3.7). Status: planned, issue #47.
+
+
+    **Planned operations.** Operations marked `x-darkpyonix-status: planned` are designed but not
+
+    served yet; `x-darkpyonix-issue` names the issue that builds them. A manager answers them `404`
+
+    until then. The mark is removed in the change that serves the operation (SPEC NFR-M3).
+
+
+    **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
+
+    grows: fields, optional request fields, paths and error codes are added, never renamed,
+
+    retyped or removed. Clients ignore fields they do not know. A replaced field or path stays,
+
+    marked `deprecated: true`.
+
+
+    Normative documents: `docs/SPEC.md` (requirements), `docs/PROTOCOL.md` (kernel wire
+
+    protocol), `docs/FORMAT.md` (notebook file format).
+
+    '
+  license:
+    name: Apache-2.0
+    url: https://github.com/DarkPyonix/darkpyonix/blob/main/LICENSE
+  contact:
+    name: DarkPyonix
+    url: https://github.com/DarkPyonix/darkpyonix
+servers:
+- url: http://127.0.0.1:{port}
+  description: Ephemeral manager (url and token are printed on stdout to the process that started it)
+  variables:
+    port:
+      default: '46881'
+- url: https://{host}
+  description: Dedicated manager reached through the main server or darkpyonix.dev
+  variables:
+    host:
+      default: main.example.darkpyonix.dev
+security:
+- bearerAuth: []
+tags:
+- name: System
+  description: Health and manager information.
+- name: Kernels
+  description: Discover, start, interrupt, restart and shut down file-bound kernels.
+- name: Runs
+  description: Execute a whole file or selected cells, and read run logs.
+- name: Documents
+  description: A notebook file's cells with the latest outputs mapped onto them.
+- name: Events
+  description: Live kernel events over Server-Sent Events.
+- name: Sharing
+  description: 'Share tokens bound to one kernel. The kernel holds them with its other access tokens, and the
+
+    manager asks the kernel to issue, verify and revoke them, so they work through any manager of the
+
+    same OS account (SPEC FR-A5, FR-A6, FR-K10, PROTOCOL §6). Created on a dedicated manager, because
+
+    the share link needs its `share_base`.
+
+    '
+- name: Auth
+  description: 'The 2025 authentication, restored by user decision 2026-10-03 (INTENT D17). `/api/auth…` is
+
+    per manager: one password and one master token per manager (user confirmation 2026-10-04,
+
+    SPEC FR-A4); dedicated manager only, an ephemeral manager answers `403 forbidden`.
+
+    `/api/kernels/{kernel_id}/tokens/…` are access tokens bound to one kernel (SPEC FR-A6, FR-A5).
+
+    Status: planned, issue #48.
+
+    '
+paths:
+  /health:
+    get:
+      tags:
+      - System
+      operationId: getHealth
+      summary: Liveness check
+      security: []
+      responses:
+        '200':
+          description: The manager is up.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/manager:
+    get:
+      tags:
+      - System
+      operationId: getManager
+      summary: Manager information
+      responses:
+        '200':
+          description: Mode, version, uptime and the caller's capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagerInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth:
+    get:
+      tags:
+      - Auth
+      operationId: login
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Log in to the manager
+      description: 'The 2025 "login" (`GET /auth`, "the password goes in the session"). The password of this
+
+        manager in `Authorization: Basic` with an empty user name; the manager''s master token out.
+
+        `400 password_not_set` while the manager has no password. One password and one master token per
+
+        manager (user confirmation 2026-10-04, SPEC FR-A4). Reading "session" as HTTP Basic is a user
+
+        decision (2026-10-04, PROJECT Q15). An ephemeral manager answers `403 forbidden`.
+
+        '
+      security:
+      - passwordBasic: []
+      responses:
+        '200':
+          description: The manager's master token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterToken'
+        '400':
+          description: '`bad_request`, or `password_not_set` (2025 `PASSWORD_NOT_SET`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/password:
+    put:
+      tags:
+      - Auth
+      operationId: setPassword
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Set or reset the manager's password
+      description: 'The 2025 "password reset" (`PUT /auth/password`): authenticate with a token, then register a
+
+        new password. The master token resets it. While the manager has no password, an initial token
+
+        (SPEC FR-A6) may set the first one; once a password exists, an initial token answers `403`
+
+        (user decision 2026-10-04, PROJECT Q15). Stored as a salted slow hash. SPEC FR-A4.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Password set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - message
+                properties:
+                  message:
+                    type: string
+                    example: Password set successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/tokens/master:
+    put:
+      tags:
+      - Auth
+      operationId: resetMasterToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Issue a new master token for the manager
+      description: 'The 2025 "master token reset" (`PUT /auth/tokens/master`): authenticate with the password in
+
+        `Authorization: Basic`, issue a new master token. The earlier master token stops working (`401`).
+
+        SPEC FR-A4.
+
+        '
+      security:
+      - passwordBasic: []
+      responses:
+        '200':
+          description: The new master token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterToken'
+        '400':
+          description: '`bad_request`, or `password_not_set`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/tokens/shared/{token_type}:
+    parameters:
+    - name: token_type
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/TokenType'
+    put:
+      tags:
+      - Auth
+      operationId: resetSharedToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Issue a new manager shared token of one type
+      description: 'The 2025 "shared token reset" (`PUT /auth/tokens/shared/{token_type}`): authenticate with the
+
+        master token, issue a new manager shared token of that type and revoke the previous one. A manager
+
+        shared token works on every kernel through this manager only; a token bound to one kernel and
+
+        valid through any manager is a kernel access token (SPEC FR-A6). Streams opened with the revoked
+
+        token are closed (`streams.close`, SPEC FR-M6). SPEC FR-A4.
+
+        '
+      responses:
+        '200':
+          description: The new shared token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareWithToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels:
+    get:
+      tags:
+      - Kernels
+      operationId: listKernels
+      summary: List running kernels
+      description: 'Kernels found by loopback multicast discovery, the only discovery
+
+        (SPEC FR-D1, INTENT D4). A share token sees only its own kernel.
+
+        '
+      parameters:
+      - name: refresh
+        in: query
+        description: Send a fresh discovery query instead of using the cached view.
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: Running kernels.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - kernels
+                properties:
+                  kernels:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Kernel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+      - Kernels
+      operationId: startKernel
+      summary: Start (or attach to) the kernel for a file
+      description: 'Idempotent per file (SPEC FR-M2). Returns `200` with the running kernel if one exists,
+
+        otherwise launches one detached from this manager and returns `201` once it announces
+
+        itself. A second kernel for the same file can never exist (SPEC FR-K3).
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartKernelRequest'
+      responses:
+        '200':
+          description: The kernel for this file was already running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Kernel'
+        '201':
+          description: A new kernel was launched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Kernel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          description: The kernel did not announce itself within 10 seconds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/kernels/{kernel_id}:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Kernels
+      operationId: getKernel
+      summary: Kernel status
+      responses:
+        '200':
+          description: Current kernel information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Kernel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+    delete:
+      tags:
+      - Kernels
+      operationId: shutdownKernel
+      summary: Shut the kernel down
+      description: 'Graceful by default: interrupts the running cell, finishes the run log, and exits
+
+        (SPEC FR-K8). `force=true` kills the process if it has not exited within 5 seconds;
+
+        it is the only operation that kills a kernel.
+
+        '
+      parameters:
+      - name: force
+        in: query
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '202':
+          description: Shutdown started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - shutting_down
+                properties:
+                  shutting_down:
+                    type: boolean
+                    const: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/interrupt:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Kernels
+      operationId: interruptKernel
+      summary: Interrupt the running cell
+      description: 'Raises `KeyboardInterrupt` in the running cell. The namespace, the process and the
+
+        queue are kept (SPEC FR-X4). This is what "stop" means in DarkPyonix.
+
+        '
+      responses:
+        '200':
+          description: Whether anything was running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - interrupted
+                properties:
+                  interrupted:
+                    type: boolean
+                  run_id:
+                    $ref: '#/components/schemas/RunId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/restart:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Kernels
+      operationId: restartKernel
+      summary: Restart the kernel
+      description: 'Soft restart clears the namespace in place. Hard restart re-executes the kernel
+
+        process with the same interpreter and arguments; the kernel id is unchanged
+
+        (SPEC FR-K7).
+
+        '
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hard:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Restarted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Kernel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/namespace:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Kernels
+      operationId: getNamespace
+      summary: Inspect user variables
+      description: 'Names, types and short summaries of user variables (SPEC FR-K6). While a cell is
+
+        running only `name` and `type` are filled, so no user `__repr__` runs off the main
+
+        thread.
+
+        '
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 200
+      responses:
+        '200':
+          description: Variables.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - variables
+                properties:
+                  variables:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Variable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/document:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Documents
+      operationId: getKernelDocument
+      summary: The kernel's file with the latest outputs mapped onto its cells
+      description: 'Parses the file on disk and maps the latest run log onto it by cell `id`, then
+
+        `source_sha256`, then `index` (SPEC FR-R4). Needs `read`; without `history` the cells come without outputs.
+
+        '
+      responses:
+        '200':
+          description: Cells with outputs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/documents:
+    get:
+      tags:
+      - Documents
+      operationId: getDocument
+      summary: Parse any notebook file, with or without a kernel
+      description: 'Same result as `getKernelDocument`, for a file whose kernel is not running. Reads
+
+        `__runs__/` directly. Master token only.
+
+        '
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Cells with outputs from the latest run log, if any.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/kernels/{kernel_id}/runs:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Runs
+      operationId: listRuns
+      summary: List run logs, newest first
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 20
+      responses:
+        '200':
+          description: Run summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - runs
+                properties:
+                  runs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RunSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+    post:
+      tags:
+      - Runs
+      operationId: startRun
+      summary: Run the whole file or selected cells
+      description: 'With `on_busy: reject` (the default) a request that arrives while another run is
+
+        executing is refused with `409 busy` and the current run in `error.data`; this is what
+
+        stops an agent from running the same file twice (SPEC FR-X3). With `on_busy: queue`
+
+        the run waits its turn.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+      responses:
+        '202':
+          description: Accepted. Follow progress on the events stream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Another run is executing and `on_busy` is `reject`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusyError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/runs/{run_ref}:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    - name: run_ref
+      in: path
+      required: true
+      description: A run id, or `latest` (newest finished run), or `current` (the run executing now).
+      schema:
+        oneOf:
+        - $ref: '#/components/schemas/RunId'
+        - type: string
+          enum:
+          - latest
+          - current
+    get:
+      tags:
+      - Runs
+      operationId: getRun
+      summary: Read one run log
+      description: The run log as an nbformat 4 notebook (`format=ipynb`, default) or its summary.
+      parameters:
+      - name: format
+        in: query
+        schema:
+          type: string
+          enum:
+          - ipynb
+          - summary
+          default: ipynb
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/RunNotebook'
+                - $ref: '#/components/schemas/RunSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+    delete:
+      tags:
+      - Runs
+      operationId: cancelRun
+      summary: Cancel a queued run
+      description: 'Only queued runs can be cancelled. To stop the executing run, interrupt the kernel. `latest`
+        and `current` never refer to a queued run, so they answer `{"cancelled": false}`.'
+      responses:
+        '200':
+          description: Whether the run was removed from the queue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - cancelled
+                properties:
+                  cancelled:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/events:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Events
+      operationId: streamEvents
+      x-darkpyonix-handoff: kernel
+      summary: Live kernel events (Server-Sent Events)
+      description: "Each SSE message has `id: <seq>`, `event: <type>` and `data: <JSON>` where type and data\nare\
+        \ those of `docs/PROTOCOL.md` §3.4. Because `EventSource` cannot set headers, this\nendpoint also accepts\
+        \ `?token=`. Needs `read`; output events are omitted without `history`.\n A `replay_truncated` message carries no SSE `id`,\
+        \ so it does not move the client's `Last-Event-ID`. With `client_id` the stream also makes the client present;\
+        \ it leaves 30 s after the stream closes. Document events `doc.*` and `presence.*` (PROTOCOL §4) are delivered\
+        \ here too. Handed off: after authentication the manager passes this connection to the kernel, which writes\
+        \ the response (SPEC FR-M6, PROTOCOL §3.7)."
+      security:
+      - bearerAuth: []
+      - tokenQuery: []
+      parameters:
+      - name: since
+        in: query
+        description: Replay events after this sequence number. `Last-Event-ID` takes precedence.
+        schema:
+          type: integer
+          minimum: 0
+      - name: Last-Event-ID
+        in: header
+        schema:
+          type: string
+      - name: client_id
+        in: query
+        schema:
+          type: string
+        description: Joins presence while the stream is open (FR-S4).
+      - name: nickname
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: An endless event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: 'SSE frames: `id`, `event`, `data` (JSON of `KernelEvent.data`).'
+              example: 'id: 1043
+
+                event: output
+
+                data: {"run_id":"20261003-142233-a1f0","index":3,"cell_id":"c_5e1f0a9b2c3d","output":{"output_type":"stream","name":"stdout","text":"epoch
+                1 loss 0.42\n"}}
+
+                '
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/shares:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Sharing
+      operationId: listShares
+      summary: List share tokens of a kernel
+      responses:
+        '200':
+          description: Shares (tokens are never returned again after creation).
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - shares
+                properties:
+                  shares:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Share'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+    post:
+      tags:
+      - Sharing
+      operationId: createShare
+      summary: Create a share token
+      description: Needs `manage` on this kernel; dedicated manager only (SPEC FR-A3). An ephemeral manager answers `403 forbidden`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - capabilities
+              properties:
+                capabilities:
+                  $ref: '#/components/schemas/Capabilities'
+                label:
+                  type: string
+                  maxLength: 120
+                expires_at:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: The share, including its token (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareWithToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/shares/{share_id}:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    - name: share_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^s_[0-9a-f]{16}$
+    delete:
+      tags:
+      - Sharing
+      operationId: revokeShare
+      summary: Revoke a share token
+      responses:
+        '204':
+          description: Revoked.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+  /api/kernels/{kernel_id}/cells:
+    parameters:
+    - &id001
+      $ref: '#/components/parameters/KernelId'
+    - &id002
+      $ref: '#/components/parameters/ClientId'
+    - &id003
+      $ref: '#/components/parameters/Nickname'
+    - &id006
+      $ref: '#/components/parameters/RequestId'
+    post:
+      tags:
+      - Documents
+      operationId: createCell
+      summary: Create a cell
+      description: Inserted after `after` or before `before`; with neither it is appended at the end of the
+        document (giving both is `400`). Saved to the file within 300 ms and broadcast as
+        `doc.cell.created` (SPEC FR-S2, FR-S5). Needs `edit` (SPEC FR-A3, FR-S8).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/CellEdit'
+              - type: object
+                properties:
+                  after:
+                    type: string
+                  before:
+                    type: string
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '201': &id004
+          description: The cell after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentCell'
+  /api/kernels/{kernel_id}/cells/{cell_id}:
+    parameters:
+    - *id001
+    - &id005
+      $ref: '#/components/parameters/CellId'
+    - *id002
+    - *id003
+    - *id006
+    patch:
+      tags:
+      - Documents
+      operationId: updateCell
+      summary: Edit a cell
+      description: Requires `base_version`; refused with `409 conflict` when stale and `409 locked` when another
+        client holds the lock (SPEC FR-S2, FR-S3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/CellEdit'
+              - type: object
+                required:
+                - base_version
+                properties:
+                  base_version:
+                    type: integer
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200': *id004
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags:
+      - Documents
+      operationId: deleteCell
+      summary: Delete a cell
+      parameters:
+      - name: base_version
+        in: query
+        required: true
+        schema:
+          type: integer
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '204':
+          description: Deleted.
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/kernels/{kernel_id}/cells/{cell_id}/move:
+    parameters:
+    - *id001
+    - *id005
+    - *id002
+    - *id003
+    - *id006
+    post:
+      tags:
+      - Documents
+      operationId: moveCell
+      summary: Move a cell
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - to_index
+              properties:
+                to_index:
+                  type: integer
+                  minimum: 1
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200': *id004
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/kernels/{kernel_id}/cells/{cell_id}/lock:
+    parameters:
+    - *id001
+    - *id005
+    - *id002
+    - *id003
+    - *id006
+    put:
+      tags:
+      - Documents
+      operationId: lockCell
+      summary: Lock a cell for editing (or renew the lock)
+      description: One lock per cell; released by unlock, after 3 minutes without activity, or when the client disconnects
+        (SPEC FR-S3). Needs `edit` (SPEC FR-A3).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200':
+          description: The lock.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lock'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags:
+      - Documents
+      operationId: unlockCell
+      summary: Release a lock, optionally saving the final source
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source:
+                  type: string
+                base_version:
+                  type: integer
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200': *id004
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/kernels/{kernel_id}/presence:
+    parameters:
+    - *id001
+    - *id002
+    - *id003
+    - *id006
+    put:
+      tags:
+      - Documents
+      operationId: updatePresence
+      summary: Report focus and cursor
+      description: Broadcast as `presence.update`; cursor updates are coalesced to 20 per second per client (SPEC
+        FR-S4). Needs `read`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                focused_cell_id:
+                  type:
+                  - string
+                  - 'null'
+                cursor:
+                  oneOf:
+                  - $ref: '#/components/schemas/Cursor'
+                  - type: 'null'
+                avatar:
+                  type:
+                  - string
+                  - 'null'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200':
+          description: Current presence list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - presence
+                properties:
+                  presence:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Presence'
+    delete:
+      tags:
+      - Documents
+      operationId: leavePresence
+      summary: Leave (also implied 30 s after the client's event stream closes)
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '204':
+          description: Left.
+  /api/kernels/{kernel_id}/runs/{run_ref}/wait:
+    parameters:
+    - *id001
+    - name: run_ref
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Runs
+      operationId: waitRun
+      x-darkpyonix-handoff: kernel
+      summary: Long-poll until a run finishes (alarm)
+      description: 'Returns as soon as the run finishes, or after `timeout` seconds with `status: running` and a
+        `next` URL (SPEC FR-S7, the 2025 alarm long-poll). Handed off: after authentication the manager passes
+        this connection to the kernel, which writes the response (SPEC FR-M6, PROTOCOL §3.7).'
+      parameters:
+      - name: timeout
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 60
+      - name: client_id
+        in: query
+        description: The 2025 alarm's client id (UUID).
+        schema:
+          type: string
+      - name: poll_sequence
+        in: query
+        description: The 2025 polling sequence number, starting at 1. Status planned, issue #49.
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '429':
+          description: '`poll_limit_exceeded` (2025 `POLL_LIMIT_EXCEEDED`): `poll_sequence` is above `max_polls`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '200':
+          description: Finished or still running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitResult'
+  /api/kernels/{kernel_id}/tokens/initial:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Auth
+      operationId: createInitialToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Issue the initial token of a kernel
+      description: 'The 2025 "initial token" (`POST /kernels/{kernel_id}/tokens/initial`), unchanged. A client
+
+        receives it without credentials when it opens the kernel, because it cannot connect without
+
+        a token. No limit on how often, from where, or for what it is used (user decision 2026-10-04:
+
+        leave the initial token as the 2025 design has it). `400` when the kernel id is malformed (2025 `INVALID_KERNEL_ID`).
+
+        SPEC FR-A4.
+
+        '
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The 2025 request body. `kernel_id`, when present, must equal the path parameter.
+              properties:
+                kernel_id:
+                  type: string
+                  pattern: ^k_[0-9a-f]{20}$
+      responses:
+        '201':
+          description: The initial token (shown once). Issued and kept by the kernel (`tokens.issue`), so it works
+            through any manager. The manager starts the kernel first if it is not running (SPEC FR-A5, FR-M2,
+            PROTOCOL §6).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitialToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/kernels/{kernel_id}/tokens/auth:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Auth
+      operationId: kernelLogin
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Log in to one kernel with the manager's password
+      description: 'The 2025 kernel login (`POST /kernels/{kernel_id}/tokens/auth`): the password in, an access
+
+        token for this kernel out (SPEC FR-A6). The password is the one of the manager that receives the
+
+        request: one password per manager (SPEC FR-A4). `400 password_not_set` while that manager has none.
+
+        '
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: An access token for this kernel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '400':
+          description: '`bad_request`, or `password_not_set` (2025 `PASSWORD_NOT_SET`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/kernels/{kernel_id}/tokens/share:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    post:
+      tags:
+      - Sharing
+      operationId: createShareToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Issue a share token for one kernel (2025 shape)
+      description: 'The 2025 `POST /kernels/{kernel_id}/tokens/share` (`get_sharing_settings`). The same operation as
+
+        `POST /api/kernels/{kernel_id}/shares` with the 2025 fields (`share_token`, `share_url`); the 2025
+
+        `permission` is now `capabilities` (INTENT D18). Needs `manage`. The token is bound
+
+        to this kernel and works through any manager (SPEC FR-A6). Dedicated manager only; an ephemeral
+
+        manager answers `403 forbidden`. 2025 `INSUFFICIENT_PERMISSION` "Only admin can enable sharing" is
+
+        `403 forbidden`.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - capabilities
+              properties:
+                capabilities:
+                  $ref: '#/components/schemas/Capabilities'
+                kernel_id:
+                  type: string
+                  pattern: ^k_[0-9a-f]{20}$
+                  description: The 2025 body field; must equal the path parameter when present.
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
+      responses:
+        '201':
+          description: The share token (shown once).
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - share_id
+                - share_token
+                - capabilities
+                - share_url
+                properties:
+                  share_id:
+                    type: string
+                    pattern: ^s_[0-9a-f]{16}$
+                  share_token:
+                    type: string
+                  capabilities:
+                    $ref: '#/components/schemas/Capabilities'
+                  share_url:
+                    type: string
+                    description: Same as `ShareWithToken.url`.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/kernels/{kernel_id}/tokens/{token}/verify:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    - name: token
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - Auth
+      operationId: verifyToken
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 48
+      summary: Check a token against a file
+      description: 'The 2025 `GET /kernels/{kernel_id}/tokens/{token}/verify`, sent with the same token as
+
+        `Authorization: Bearer`. The manager asks the kernel, which holds its tokens (`tokens.verify`,
+
+        PROTOCOL §6); if the kernel is not running, the manager starts it first (SPEC FR-M2). A revoked token answers `401 token_revoked`
+
+        (2025 `TOKEN_BLACKLISTED`). `password_set` tells whether the answering manager has a password.
+
+        SPEC FR-A6.
+
+        '
+      responses:
+        '200':
+          description: The token is valid for this file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenVerification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+        '504':
+          description: The kernel had to be started and did not announce itself within 10 seconds (SPEC FR-M2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/ws/kernels/{kernel_id}:
+    parameters:
+    - $ref: '#/components/parameters/KernelId'
+    get:
+      tags:
+      - Events
+      operationId: syncWebSocket
+      x-darkpyonix-status: planned
+      x-darkpyonix-issue: 49
+      x-darkpyonix-handoff: kernel
+      summary: 2025 WebSocket synchronization (cells, history, locks, focus, execution)
+      description: 'The 2025 `/ws/kernels/{kernel_id}?token={token}`, restored by user decision 2026-10-03
+
+        (INTENT D19, SPEC FR-S9, PROTOCOL §5). The manager checks the token and its capabilities, then
+
+        hands the connection to the kernel (SPEC FR-M6). The kernel answers the upgrade with `101` and
+
+        speaks the 2025 messages: `request_code`, `request_history`, `request_locks`, `start_typing`,
+
+        `cell_focus`, `cell_blur` in; `code_data`, `history_data`, `locks_data`, `users_focus_data`,
+
+        `other_user_focus`, `other_user_blur`, `cell_locked`, `cell_unlocked_with_code`,
+
+        `execution_started`, `execution_output`, `execution_complete`, `execution_error`,
+
+        `execution_interrupted` out. Status: planned, issue #49.
+
+        '
+      security:
+      - bearerAuth: []
+      - tokenQuery: []
+      parameters:
+      - name: nickname
+        in: query
+        description: Device name; the same token may be used by several devices (2025 `?nickname=`).
+        schema:
+          type: string
+          maxLength: 64
+      - name: client_id
+        in: query
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,64}$
+      responses:
+        '101':
+          description: Switching Protocols; the kernel speaks the 2025 sync messages (PROTOCOL §5).
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/KernelUnreachable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'The manager''s master token (SPEC FR-A4), a manager shared token, or a kernel access token (SPEC FR-A6). An
+
+        ephemeral manager prints its url and master token on stdout to the process that started it and
+
+        writes them nowhere else (INTENT D4, SPEC FR-C1).
+
+        '
+    passwordBasic:
+      type: http
+      scheme: basic
+      description: 'The manager''s password as HTTP Basic credentials with an empty user name (SPEC FR-A4).
+
+        Only `GET /api/auth` and `PUT /api/auth/tokens/master` accept it.
+
+        '
+    tokenQuery:
+      type: apiKey
+      in: query
+      name: token
+      description: Accepted only on the events stream, the WebSocket sync (2025 `/ws/kernels/{kernel_id}?token=`) and share links.
+  parameters:
+    KernelId:
+      name: kernel_id
+      in: path
+      required: true
+      description: '`k_` + the first 20 hex digits of SHA-256(canonical path). See PROTOCOL §2.6.'
+      schema:
+        type: string
+        pattern: ^k_[0-9a-f]{20}$
+        example: k_3f9a0c1b2d4e5f607182
+    ClientId:
+      name: X-DarkPyonix-Client
+      in: header
+      required: false
+      description: Stable per-device client id (SPEC FR-S4). Required for edits, locks and presence; the events
+        stream may pass it as `?client_id=` instead.
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9_-]{8,64}$
+    Nickname:
+      name: X-DarkPyonix-Nickname
+      in: header
+      required: false
+      description: Device name shown to other clients (2025 `?nickname=`).
+      schema:
+        type: string
+        maxLength: 64
+    RequestId:
+      name: X-DarkPyonix-Request
+      in: header
+      required: false
+      description: 'Optional client-chosen id for this request. The manager passes it to the kernel as
+
+        `request_id`, and every event the request causes (`doc.*`, `presence.*`) carries it back as
+
+        `data.request_id`, so two windows sharing one client_id can recognise their own edits (PROTOCOL §4).
+
+        Events not caused by a request (idle unlock, external reload) have none.'
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    CellId:
+      name: cell_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9_.:-]{1,64}$
+  responses:
+    BadRequest:
+      description: The request is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The token's capability set lacks the capability this operation needs (SPEC FR-A3).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No such kernel, run or share.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Unexpected manager failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    KernelUnreachable:
+      description: The kernel was discovered but its control channel could not be reached or belongs to another OS account (`kernel_unreachable`),
+        or it is shutting down (`shutting_down`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: '`conflict` (base_version is stale; `data.cell` is the current cell) or `locked` (another client
+        holds the lock; `data.locked_by`).'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    InitialToken:
+      type: object
+      description: 2025 `/kernels/{kernel_id}/tokens/initial` response.
+      required:
+      - token
+      - capabilities
+      - password_required
+      properties:
+        token:
+          type: string
+        capabilities:
+          allOf:
+          - $ref: '#/components/schemas/Capabilities'
+          description: 'All five capabilities. The 2025 response had `permission: "admin"` here (INTENT D18).'
+        password_required:
+          type: boolean
+          const: true
+    MasterToken:
+      type: object
+      description: The manager's master token (`GET /api/auth`, `PUT /api/auth/tokens/master`, SPEC FR-A4).
+      required:
+      - token
+      properties:
+        token:
+          type: string
+    AuthToken:
+      type: object
+      description: 2025 `/kernels/{kernel_id}/tokens/auth` response.
+      required:
+      - token
+      - kernel_id
+      - capabilities
+      properties:
+        token:
+          type: string
+        kernel_id:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+    TokenVerification:
+      type: object
+      description: 2025 `/kernels/{kernel_id}/tokens/{token}/verify` response.
+      required:
+      - valid
+      - kernel_id
+      - capabilities
+      - blacklisted
+      - password_set
+      properties:
+        valid:
+          type: boolean
+        kernel_id:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+        blacklisted:
+          type: boolean
+        password_set:
+          type: boolean
+    Health:
+      type: object
+      required:
+      - status
+      - version
+      properties:
+        status:
+          type: string
+          const: ok
+        version:
+          type: string
+          example: 0.1.0
+    ManagerInfo:
+      type: object
+      required:
+      - version
+      - mode
+      - pid
+      - started_at
+      - capabilities
+      properties:
+        version:
+          type: string
+        mode:
+          type: string
+          enum:
+          - ephemeral
+          - dedicated
+        pid:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        idle_timeout:
+          type:
+          - integer
+          - 'null'
+          description: Seconds; null for dedicated managers.
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+        host:
+          type: string
+    Capability:
+      type: string
+      enum:
+      - read
+      - history
+      - execute
+      - edit
+      - manage
+      description: 'One capability (user decision 2026-10-04, INTENT D18, SPEC FR-A3). `read` view code; `history`
+
+        run logs and outputs; `execute` run and interrupt; `edit` edit code and lock cells; `manage` share
+
+        settings. Capabilities are not tiers: there is no order and none implies another. Tier names
+
+        (`viewer1`, `viewer2`, `viewer3`, `admin`, `editor`) and the 2025 `write` are refused with `400`.
+
+        '
+    Capabilities:
+      type: array
+      items:
+        $ref: '#/components/schemas/Capability'
+      minItems: 1
+      uniqueItems: true
+      description: 'A token''s capability set. The master token (SPEC FR-A4) and a kernel''s initial and login tokens
+
+        (SPEC FR-A6) carry all five. A share token carries the set chosen when it was issued. Each operation
+
+        needs one capability, listed in SPEC FR-A3. A token bound to one kernel answers `404 not_found` on
+
+        any other kernel, never `403`.
+
+        '
+      example:
+      - read
+      - history
+    TokenType:
+      type: string
+      pattern: ^(read|history|execute|edit|manage)(\+(read|history|execute|edit|manage))*$
+      description: 'The 2025 `{token_type}` of `PUT /auth/tokens/shared/{token_type}`, written as a capability set
+
+        joined by `+` in the order read, history, execute, edit, manage (e.g. `read+history`). User
+
+        decision 2026-10-04 (PROJECT Q15).
+
+        '
+      example: read+history
+    UserPermission:
+      allOf:
+      - $ref: '#/components/schemas/Capability'
+      description: 'The 2025 request argument `user_permission`, now naming the capability the operation needs:
+
+        `execute` on runs, `edit` on cell edits, moves, locks and unlocks (2025 `"write"` on both), `manage`
+
+        on sharing (2025 `"admin"`). Another value is `400`. The token''s capability set decides, not this
+
+        field: a token without that capability answers `403 forbidden` (2025 `INSUFFICIENT_PERMISSION`).
+
+        SPEC FR-A3, FR-S8. Status: planned, issue #49.
+
+        '
+    KernelStatus:
+      type: string
+      enum:
+      - starting
+      - idle
+      - busy
+      - stopping
+    PythonInfo:
+      type: object
+      required:
+      - version
+      - implementation
+      - executable
+      properties:
+        version:
+          type: string
+          example: 3.11.9
+        implementation:
+          type: string
+          example: CPython
+        executable:
+          type: string
+    Kernel:
+      type: object
+      required:
+      - kernel_id
+      - path
+      - pid
+      - status
+      - python
+      - started_at
+      properties:
+        kernel_id:
+          type: string
+          pattern: ^k_[0-9a-f]{20}$
+        path:
+          type: string
+          description: Canonical absolute path of the notebook file.
+        pid:
+          type: integer
+        status:
+          $ref: '#/components/schemas/KernelStatus'
+        run_id:
+          oneOf:
+          - $ref: '#/components/schemas/RunId'
+          - type: 'null'
+        queue:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunId'
+        execution_count:
+          type: integer
+          minimum: 0
+        python:
+          $ref: '#/components/schemas/PythonInfo'
+        started_at:
+          type: string
+          format: date-time
+        host:
+          type: string
+        kernel_version:
+          type: string
+        runs_dir:
+          type: string
+          description: '`<file dir>/__runs__/<file name>/`; derived from `path` when the kernel has not reported
+            it.'
+    StartKernelRequest:
+      type: object
+      required:
+      - path
+      properties:
+        path:
+          type: string
+          description: Path of a `.py` or `.pynb` file on the manager's machine.
+        python:
+          type: string
+          description: Interpreter to run the kernel with. Defaults to the manager's own interpreter.
+        cwd:
+          type: string
+          description: Working directory. Defaults to the file's directory.
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Extra environment variables for the kernel process.
+    RunId:
+      type: string
+      pattern: ^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$
+      example: 20261003-142233-a1f0
+    RunRequest:
+      type: object
+      required:
+      - mode
+      properties:
+        user_permission:
+          $ref: '#/components/schemas/UserPermission'
+        mode:
+          type: string
+          enum:
+          - all
+          - cells
+          description: '`all` runs the preamble and every cell; `cells` runs the preamble once and then the listed
+            cells.'
+        cells:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+          description: Cell indexes (preamble is 0). Required when `mode` is `cells`.
+        source:
+          type: string
+          description: Run this text instead of the file on disk (an unsaved editor buffer). Not saved.
+        params:
+          type: object
+          additionalProperties: true
+          description: Values for `darkpyonix.params.get(...)`; take precedence over command-line arguments.
+        on_busy:
+          type: string
+          enum:
+          - reject
+          - queue
+          default: reject
+        cell_ids:
+          type: array
+          items:
+            type: string
+          description: 'Alternative to `cells`: run these cells by cell_id (FR-S6).'
+    RunAccepted:
+      type: object
+      required:
+      - run_id
+      - state
+      properties:
+        run_id:
+          $ref: '#/components/schemas/RunId'
+        state:
+          type: string
+          enum:
+          - running
+          - queued
+        position:
+          type: integer
+          minimum: 1
+          description: Queue position when queued.
+    RunStatus:
+      type: string
+      enum:
+      - queued
+      - running
+      - ok
+      - error
+      - interrupted
+      - cancelled
+      - crashed
+    RunSummary:
+      type: object
+      required:
+      - run_id
+      - status
+      - mode
+      - started_at
+      properties:
+        run_id:
+          $ref: '#/components/schemas/RunId'
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        mode:
+          type: string
+          enum:
+          - all
+          - cells
+        cells:
+          type: array
+          items:
+            type: integer
+        params:
+          type: object
+          additionalProperties: true
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        duration:
+          type:
+          - number
+          - 'null'
+          description: Seconds.
+        path:
+          type: string
+          description: Absolute path of the run log file.
+        started_by:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: '{client_id, user, nickname} (FR-S6).'
+        interrupted_by:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+    RunNotebook:
+      type: object
+      description: 'An nbformat 4.5 notebook. `metadata.darkpyonix` holds the run fields of SPEC FR-R1 and
+
+        every cell''s `metadata.darkpyonix` holds `index`, `type`, `title`, `source_sha256`,
+
+        `status`, `started_at`, `ended_at`.
+
+        '
+      required:
+      - nbformat
+      - nbformat_minor
+      - metadata
+      - cells
+      properties:
+        nbformat:
+          type: integer
+          const: 4
+        nbformat_minor:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        cells:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    BusyError:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          - data
+          properties:
+            code:
+              type: string
+              const: busy
+            message:
+              type: string
+            data:
+              type: object
+              required:
+              - current
+              properties:
+                current:
+                  $ref: '#/components/schemas/RunSummary'
+                queue_length:
+                  type: integer
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              enum:
+              - bad_request
+              - unauthorized
+              - forbidden
+              - not_found
+              - busy
+              - start_timeout
+              - kernel_unreachable
+              - internal
+              - conflict
+              - locked
+              - password_not_set
+              - poll_limit_exceeded
+              - token_revoked
+            message:
+              type: string
+            data:
+              type: object
+              additionalProperties: true
+    Variable:
+      type: object
+      required:
+      - name
+      - type
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          example: torch.nn.Module
+        repr:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+        shape:
+          type:
+          - array
+          - 'null'
+          items:
+            type: integer
+        dtype:
+          type:
+          - string
+          - 'null'
+        len:
+          type:
+          - integer
+          - 'null'
+    CellType:
+      type: string
+      description: See FORMAT §3. Unknown types are preserved as written.
+      examples:
+      - preamble
+      - code
+      - markdown
+      - argparse
+      - binding
+      - shell
+      - parallel
+      - concurrent
+      - cinterop
+      - cppinterop
+      - rustinterop
+    Output:
+      type: object
+      description: An nbformat 4 output object (`stream`, `display_data`, `execute_result` or `error`), unchanged.
+      required:
+      - output_type
+      properties:
+        output_type:
+          type: string
+          enum:
+          - stream
+          - display_data
+          - execute_result
+          - error
+      additionalProperties: true
+    DocumentCell:
+      type: object
+      required:
+      - cell_id
+      - index
+      - type
+      - source
+      - source_sha256
+      - version
+      - metadata
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        type:
+          $ref: '#/components/schemas/CellType'
+        raw_type:
+          type:
+          - string
+          - 'null'
+          description: 'The type exactly as written between `[ ]` in the marker, or null when the marker has
+
+            none (and for the preamble). `type` is the canonical form (lower-cased, aliases resolved).'
+        title:
+          type:
+          - string
+          - 'null'
+        source:
+          type: string
+          description: 'Exactly the parser''s cell body (FORMAT §2.4): marker and metadata lines excluded,
+
+            line endings and the blank lines before the next marker kept. Sending it back unchanged leaves
+
+            the file bytes unchanged.'
+        source_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        metadata:
+          type: object
+          additionalProperties: true
+          description: '`# @key: value` lines.'
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Output'
+        execution_count:
+          type:
+          - integer
+          - 'null'
+        status:
+          type:
+          - string
+          - 'null'
+          enum:
+          - ok
+          - error
+          - interrupted
+          - null
+        stale:
+          type: boolean
+          description: The outputs came from a different source for this cell.
+        run_id:
+          oneOf:
+          - $ref: '#/components/schemas/RunId'
+          - type: 'null'
+        cell_id:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        lock:
+          oneOf:
+          - $ref: '#/components/schemas/Lock'
+          - type: 'null'
+        conflict:
+          type:
+          - object
+          - 'null'
+          description: 'Set when the file changed on disk while this cell was locked (FR-S5): {disk_source}.'
+          additionalProperties: true
+    Document:
+      type: object
+      required:
+      - path
+      - cells
+      - doc_version
+      - seq
+      - presence
+      properties:
+        path:
+          type: string
+        kernel_id:
+          type: string
+        file_sha256:
+          type: string
+        latest_run:
+          oneOf:
+          - $ref: '#/components/schemas/RunSummary'
+          - type: 'null'
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentCell'
+        doc_version:
+          type: integer
+          minimum: 0
+          description: Grows by one on cell create/update/delete/move and on `doc.reloaded` only; lock, unlock,
+            conflict and presence events carry the current value without changing it (PROTOCOL §4).
+        seq:
+          type: integer
+          minimum: 0
+          description: 'The seq of the last event already reflected in this snapshot. Subscribe with
+
+            `since=seq` and apply only events with a greater seq; an edit racing the snapshot is then neither
+
+            lost nor applied twice (FR-S1).'
+        presence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Presence'
+    KernelEvent:
+      type: object
+      description: The `data` of one SSE message. Types and fields follow PROTOCOL §3.4.
+      required:
+      - seq
+      - type
+      - time
+      - data
+      properties:
+        seq:
+          type: integer
+        type:
+          type: string
+          enum:
+          - kernel.status
+          - run.queued
+          - run.started
+          - run.finished
+          - cell.started
+          - cell.finished
+          - output
+          - output.clear
+          - replay_truncated
+          - doc.cell.created
+          - doc.cell.updated
+          - doc.cell.deleted
+          - doc.cell.moved
+          - doc.lock
+          - doc.unlock
+          - doc.reloaded
+          - doc.conflict
+          - presence.update
+          - presence.leave
+        time:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+    Share:
+      type: object
+      required:
+      - share_id
+      - kernel_id
+      - capabilities
+      - created_at
+      properties:
+        share_id:
+          type: string
+          pattern: ^s_[0-9a-f]{16}$
+        kernel_id:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+        label:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    ShareWithToken:
+      allOf:
+      - $ref: '#/components/schemas/Share'
+      - type: object
+        required:
+        - token
+        - url
+        properties:
+          token:
+            type: string
+            description: Shown only in this response. Stored hashed.
+          url:
+            type: string
+            description: Share link `<share_base>/<share_id>#<token>`; `share_base` is dedicated-manager configuration,
+              default `https://darkpyonix.dev/s`. The token is in the fragment so it never reaches the hub.
+            e.g. `https://darkpyonix.dev/s/<share_id>#<token>`.: null
+    Cursor:
+      type: object
+      required:
+      - cell_id
+      - line
+      - column
+      properties:
+        cell_id:
+          type: string
+        line:
+          type: integer
+          minimum: 0
+        column:
+          type: integer
+          minimum: 0
+        selection:
+          type:
+          - array
+          - 'null'
+          items:
+            type: array
+            items:
+              type: integer
+            minItems: 2
+            maxItems: 2
+          minItems: 2
+          maxItems: 2
+    Presence:
+      type: object
+      required:
+      - client_id
+      - nickname
+      - user
+      - capabilities
+      - last_seen
+      properties:
+        client_id:
+          type: string
+        nickname:
+          type: string
+        user:
+          type: string
+        avatar:
+          type:
+          - string
+          - 'null'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+        focused_cell_id:
+          type:
+          - string
+          - 'null'
+        focused_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        cursor:
+          oneOf:
+          - $ref: '#/components/schemas/Cursor'
+          - type: 'null'
+        last_seen:
+          type: string
+          format: date-time
+    Lock:
+      type: object
+      required:
+      - cell_id
+      - locked_by
+      - user
+      - locked_at
+      - last_activity
+      properties:
+        cell_id:
+          type: string
+        locked_by:
+          type: string
+          description: client_id
+        user:
+          type: string
+        nickname:
+          type: string
+        locked_at:
+          type: string
+          format: date-time
+        last_activity:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: 3 minutes after last_activity (FR-S3).
+    CellEdit:
+      type: object
+      properties:
+        user_permission:
+          $ref: '#/components/schemas/UserPermission'
+        type:
+          type: string
+          description: Written into the marker as given; the cell's canonical `type` is derived from it.
+        title:
+          type:
+          - string
+          - 'null'
+          description: The marker title; `null` or `""` removes it. Not allowed on the preamble.
+        source:
+          type: string
+          description: The cell body exactly as `DocumentCell.source` (markers and metadata lines excluded).
+        metadata:
+          type: object
+          additionalProperties: true
+    WaitResult:
+      description: Fields `poll_sequence`, `next_poll_sequence` and `auto_repoll` restore the 2025 alarm response
+        (SPEC FR-S7). Status planned, issue #49.
+      type: object
+      required:
+      - status
+      - run_id
+      properties:
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        run_id:
+          $ref: '#/components/schemas/RunId'
+        run:
+          oneOf:
+          - $ref: '#/components/schemas/RunSummary'
+          - type: 'null'
+        progress:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        poll_sequence:
+          type: integer
+        next_poll_sequence:
+          type:
+          - integer
+          - 'null'
+        auto_repoll:
+          type:
+          - object
+          - 'null'
+          properties:
+            enabled:
+              type: boolean
+            next_poll_url:
+              type: string
+            recommended_delay:
+              type: integer
+            max_polls:
+              type: integer
+        next:
+          type:
+          - string
+          - 'null'
+          description: URL to poll again when still running.

@@ -1,0 +1,40 @@
+[package]
+name = "dpx-kernel"
+description = "RealBackend: discovery, DKP/1 client and launcher for DarkPyonix kernels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+dpx-core.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+socket2 = { version = "0.6", features = ["all"] }
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+rand = "0.8"
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[build-dependencies]
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+tokio.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

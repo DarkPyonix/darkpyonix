@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" class="landing">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>darkpyonix: a file-bound Python kernel for people and agents</title>
+<meta name="description" content="DarkPyonix runs each Python notebook file in its own kernel. Runs survive IDE and manager restarts, stop means interrupt, and every run is logged beside the file in __runs__.">
+<link rel="canonical" href="https://darkpyonix.dev/darkpyonix/en/">
+<link rel="alternate" hreflang="en" href="./">
+<link rel="alternate" hreflang="ko" href="../ko/">
+<link rel="alternate" hreflang="x-default" href="../en/">
+<link rel="stylesheet" href="../assets/style.css?v=20">
+<script>(function(){try{var t=localStorage.getItem("dxc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="./"><span class="dot" aria-hidden="true"></span>darkpyonix <small>guide</small></a>
+  <span class="spacer"></span>
+  <button id="navtoggle" class="ghost" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="langswitch" aria-label="Language">
+    <a href="./" aria-current="true" hreflang="en">EN</a>
+    <a href="../ko/" hreflang="ko">KO</a>
+  </nav>
+  <button id="themetoggle" class="ghost" type="button" data-dark="Dark" data-light="Light" aria-pressed="false">Dark</button>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <h1>One Python kernel per file,<span class="said">and it outlives your IDE.</span></h1>
+    <p class="lede">DarkPyonix binds a Python kernel to a notebook file. Close the editor, lose the
+      network or kill the manager: the run keeps going, and the next tool that opens the file finds the
+      same kernel.</p>
+    <p class="sub">Notebooks are plain <code>.py</code> files. Every run is recorded beside the file in
+      <code>__runs__/</code> as an nbformat 4 notebook.</p>
+    <div class="cta">
+      <a class="btn" href="getting-started.html">Get started</a>
+      <a class="btn secondary" href="cli.html">The CLI</a>
+      <a class="btn secondary" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a>
+    </div>
+    <ul class="claims">
+      <li>One kernel per file</li>
+      <li>Kernels outlive managers</li>
+      <li>Stop means interrupt</li>
+      <li>Standard library only, Python 3.8+</li>
+    </ul>
+  </section>
+
+  <div class="showcase">
+<pre><code>darkpyonix run train.py                  <span class="c"># run the whole file, follow the output</span>
+darkpyonix run train.py --detach         <span class="c"># start it and return the run id</span>
+darkpyonix logs train.py --follow        <span class="c"># follow the latest run</span>
+darkpyonix stop train.py                 <span class="c"># interrupt the running cell; the kernel stays</span>
+darkpyonix vars train.py                 <span class="c"># what the kernel holds now</span></code></pre>
+    <div class="note">
+      <h2>Built for runs that take hours</h2>
+      <p>The kernel id comes from the file's path. Every IDE, agent and shared viewer that opens
+        <code>train.py</code> reaches the same kernel. Running the same file twice is refused with
+        the current run's details, so an agent cannot start a duplicate by mistake.</p>
+      <p>Stopping raises <code>KeyboardInterrupt</code> in the running cell. The variables stay,
+        so the next run continues from them.</p>
+    </div>
+  </div>
+
+  <section>
+    <h2>What it is</h2>
+    <p>DarkPyonix has three parts in this repository. The <strong>kernel</strong> is a Python process
+      bound to one file. It uses only the standard library and starts from any Python 3.8 or newer
+      interpreter without being installed there. The <strong>manager</strong> is an HTTP front that
+      finds running kernels, starts new ones and serves editors, agents and the shared notebook. It
+      is the same Rust binary as the <code>darkpyonix</code> CLI. The <strong>runtime API</strong>
+      is what a notebook imports as <code>darkpyonix</code>.</p>
+    <p>The manager is disposable. A kernel never depends on one being alive, so several managers can
+      attach to the same kernel and any of them can go away.</p>
+  </section>
+
+  <section>
+    <h2>Where it stands today</h2>
+    <p class="fineprint">A redesign is under way. Items marked <em>changing</em> work today but are being
+      replaced; the linked issue says what replaces them.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Part</th><th scope="col">Status</th><th scope="col">Reference</th></tr></thead>
+        <tbody>
+          <tr><td>Kernel: one per file, outlives managers, interrupt, run logs</td><td><span class="pill works">implemented</span></td><td>SPEC FR-K, FR-X, FR-R</td></tr>
+          <tr><td>Runtime API and notebook parser</td><td><span class="pill works">implemented</span></td><td>SPEC FR-F</td></tr>
+          <tr><td>Rust manager and <code>darkpyonix</code> CLI</td><td><span class="pill works">implemented</span></td><td>SPEC FR-M, FR-C</td></tr>
+          <tr><td>Discovery without registry files</td><td><span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span></td><td>INTENT D4</td></tr>
+          <tr><td>Event streams handed from the manager to the kernel</td><td><span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span></td><td>INTENT D6</td></tr>
+          <tr><td>Password login and share-token lifetime</td><td><span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/48">#48</a></span></td><td>SPEC FR-A</td></tr>
+          <tr><td>2025 permission model and WebSocket sync</td><td><span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></td><td>SPEC FR-S</td></tr>
+          <tr><td>PyPI release 0.2.0</td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a></span></td><td><a href="https://github.com/DarkPyonix/darkpyonix/issues/45">#45</a></td></tr>
+          <tr><td>Prebuilt CLI binary (wheel with the binary)</td><td><span class="pill planned">planned</span></td><td>INTENT D10</td></tr>
+          <tr><td>VS Code and IntelliJ notebook renderers</td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/22">#22</a></span></td><td></td></tr>
+          <tr><td>ash opening a shared kernel</td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/20">#20</a></span></td><td></td></tr>
+          <tr><td>darkpyonix.dev hub</td><td><span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/21">#21</a></span></td><td><a href="https://github.com/DarkPyonix/darkpyonix/pull/41">#41</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </section>
+
+  <section>
+    <h2>Start here</h2>
+    <div class="cards">
+      <a class="card" href="getting-started.html"><h3>Install and first run</h3><p>Get the CLI, pick an interpreter, run a file.</p></a>
+      <a class="card" href="notebook-format.html"><h3>Notebook files</h3><p>Cells, metadata, parameters and markdown in a file that stays valid Python.</p></a>
+      <a class="card" href="cli.html"><h3>The darkpyonix CLI</h3><p>run, stop, logs, vars and the rest, with exit codes.</p></a>
+      <a class="card" href="run-logs.html"><h3>Run logs</h3><p>The <code>__runs__/</code> folder and the <code>__runs__</code> variable inside the kernel.</p></a>
+      <a class="card" href="manager-api.html"><h3>Manager HTTP API</h3><p>The endpoints every client uses, under <code>/api/</code>.</p></a>
+      <a class="card" href="clients.html"><h3>Editors, ash and agents</h3><p>Who connects to a kernel, and how.</p></a>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>darkpyonix &middot; Apache License 2.0</span>
+    <span><a class="footer-repo" href="https://github.com/DarkPyonix/darkpyonix">GitHub</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/SPEC.md">SPEC.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md">FORMAT.md</a> &middot; <a href="https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml">manager.openapi.yaml</a></span>
+    <span>Guide last reviewed against the repository on 2026-10-03</span>
+  </div>
+</footer>
+
+<script src="../assets/guide.js" defer></script>
+</body>
+</html>

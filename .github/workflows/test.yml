@@ -1,0 +1,90 @@
+name: test
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.8", "3.10", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python: "3.13"
+    env:
+      # Runtime state stays inside the checkout (AGENTS.md "Where files go").
+      DARKPYONIX_HOME: ${{ github.workspace }}/.scratch/home
+      # NFR-K3 timings are measured on a quiet machine, not on shared runners.
+      DARKPYONIX_SKIP_PERF: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install the interpreters
+        run: uv python install ${{ matrix.python }} 3.13
+      - name: Create the test environment
+        run: |
+          # The harness (pytest, the Python manager prototype) runs on 3.13; the matrix version
+          # is the interpreter the kernels run under (NFR-K1).
+          uv venv --no-project -p 3.13 .scratch/venv
+          uv pip install -p .scratch/venv/bin/python -e ".[dev,manager]"
+      - name: Run the suite
+        run: |
+          # Kernel tests run against the bare interpreter, where darkpyonix is not installed
+          # (FR-K1, NFR-K1).
+          export DARKPYONIX_TEST_PYTHONS="$(uv python find --no-project ${{ matrix.python }})"
+          echo "kernel interpreter: $DARKPYONIX_TEST_PYTHONS"
+          .scratch/venv/bin/python -m pytest -ra
+
+  rust:
+    name: rust manager
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: darkpyonix/manager
+    env:
+      DARKPYONIX_HOME: ${{ github.workspace }}/.scratch/home
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Interpreter for the real-kernel tests
+        # manager_latency.rs looks for .venv/bin/python unless DPX_TEST_PYTHON is set.
+        run: echo "DPX_TEST_PYTHON=$(command -v python3)" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: darkpyonix/manager
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  hub-worker:
+    name: hub worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hub/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: hub/worker/package-lock.json
+      - run: npm ci
+      - run: npm test

@@ -1,0 +1,28 @@
+[package]
+name = "darkpyonix"
+description = "DarkPyonix CLI and kernel manager (single binary)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "darkpyonix"
+path = "src/main.rs"
+
+[dependencies]
+dpx-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "signal", "time", "sync"] }
+dpx-kernel.workspace = true
+dpx-server.workspace = true
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
+libc = "0.2"
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
