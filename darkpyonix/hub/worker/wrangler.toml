@@ -1,5 +1,5 @@
 # darkpyonix.dev hub API on Cloudflare Workers (SPEC §10, INTENT D15).
-# The iroh relay is NOT here: it runs on the relay host (relay.darkpyonix.dev, hub/server).
+# The iroh relay is NOT here: it runs on the relay host (relay.darkpyonix.dev, darkpyonix/hub/server).
 name = "darkpyonix-hub"
 main = "src/index.ts"
 compatibility_date = "2026-08-15"

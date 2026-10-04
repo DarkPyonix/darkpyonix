@@ -76,8 +76,8 @@ darkpyonix/kernel/darkpyonix/            runtime API + notebook parser (stdlib o
 darkpyonix/kernel/darkpyonix/kernel/     the kernel process (stdlib only)
 darkpyonix/kernel/darkpyonix/manager/    the superseded Python manager prototype
 darkpyonix/manager/                      the manager and the darkpyonix CLI (Rust workspace)
-hub/worker/                              darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
-hub/server/                              relay.darkpyonix.dev iroh relay host (Rust)
+darkpyonix/hub/worker/                              darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
+darkpyonix/hub/server/                              relay.darkpyonix.dev iroh relay host (Rust)
 docs/                                    design documents and the user guide
 tests/                                   Python test suite
 ```

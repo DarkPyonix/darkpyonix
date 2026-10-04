@@ -1,5 +1,5 @@
 //! The relay host's operations match docs/api/hub.openapi.yaml (CLAUDE.md: the OpenAPI file
-//! is the SPEC). Since INTENT D15 the hub API runs on Cloudflare Workers (hub/worker, which
+//! is the SPEC). Since INTENT D15 the hub API runs on Cloudflare Workers (darkpyonix/hub/worker, which
 //! checks the rest); this binary serves only the operations with a path-level
 //! `servers: relay.darkpyonix.dev` entry.
 
@@ -11,7 +11,7 @@ use crate::common::*;
 fn spec() -> Yaml {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/api/hub.openapi.yaml"
+        "/../../../docs/api/hub.openapi.yaml"
     );
     let text = std::fs::read_to_string(path).expect("read hub.openapi.yaml");
     serde_yaml_ng::from_str(&text).expect("parse hub.openapi.yaml")

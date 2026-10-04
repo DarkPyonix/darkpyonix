@@ -1,11 +1,11 @@
 // CLAUDE.md: the OpenAPI file is the SPEC. Every operation this Worker serves answers, with no
 // credentials and an empty body, only with a status its documentation lists; and every route
 // the Worker has is documented. Operations with a path-level `servers` entry live on the relay
-// host (hub/server) and are checked there.
+// host (darkpyonix/hub/server) and are checked there.
 
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import specText from "../../../docs/api/hub.openapi.yaml?raw";
+import specText from "../../../../docs/api/hub.openapi.yaml?raw";
 import { ROUTES } from "../src/app";
 import { z32Encode } from "../src/pkarr";
 import { call, makeDeps } from "./helpers";

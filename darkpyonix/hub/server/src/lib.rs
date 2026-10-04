@@ -1,7 +1,7 @@
 //! darkpyonix.dev, the DarkPyonix hub (SPEC §10, docs/api/hub.openapi.yaml).
 //!
 //! **Partly superseded (INTENT D15, 2026-10-03).** The hub API now runs on Cloudflare
-//! Workers (`hub/worker/`): GitHub accounts and device links (FR-H6, FR-H1), the address
+//! Workers (`darkpyonix/hub/worker/`): GitHub accounts and device links (FR-H6, FR-H1), the address
 //! directory (FR-H2), shares (FR-H4) and names (FR-H5). This crate stays as the **relay
 //! host** at `relay.darkpyonix.dev`: the iroh relay with its probes and QUIC address
 //! discovery on UDP 7842 (FR-H3), which Workers cannot serve.
@@ -10,7 +10,7 @@
 //! `/ping`, `/generate_204` and `/health`, drop `db.rs` and `dns.rs`, replace `HubAccess`'s
 //! SQLite lookups with `POST https://darkpyonix.dev/internal/relay/admit` (honouring
 //! `cache_secs`) plus `/internal/relay/presence` reports, add `POST /admin/disconnect`,
-//! and replace the `fr_h1`/`fr_h2`/`fr_h4`/`fr_h5` tests (now covered by `hub/worker/test/`)
+//! and replace the `fr_h1`/`fr_h2`/`fr_h4`/`fr_h5` tests (now covered by `darkpyonix/hub/worker/test/`)
 //! with relay tests against a stub admission endpoint. Until then the API code below is the
 //! pre-D15 implementation and is not deployed.
 

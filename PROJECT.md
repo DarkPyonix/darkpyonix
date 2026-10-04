@@ -14,7 +14,7 @@
 - `darkpyonix/kernel/darkpyonix/kernel`: 파일에 묶인 커널(표준 라이브러리 전용, 3.8+)
 - `darkpyonix/manager`: 임시/전용 매니저, HTTP API, `darkpyonix` CLI(Rust 워크스페이스)
 - `darkpyonix/kernel/darkpyonix`: 노트북 파일이 쓰는 런타임 API와 셀 파서
-- `hub/`: darkpyonix.dev(시그널링, 중계, HTTPS, ash 호스팅)
+- `darkpyonix/hub/`: darkpyonix.dev(시그널링, 중계, HTTPS, ash 호스팅)
 - 문서: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT, OpenAPI, 클래스 다이어그램(`darkpyonix.mermaid`)
 
 **제외 (다른 저장소)**
@@ -39,7 +39,7 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | M2 | 매니저·CLI·런타임 API | 2026-10-10 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
 | M3 | 전용 매니저와 공유 | 2026-10-13 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
 | M3b | 노트북 렌더러 확장 | 2026-10-16 | `vscode-darkpyonix`(Ember 기본 설치)와 `intellij-darkpyonix`가 `.py`/`.pynb` 셀을 그리고, 매니저 API로 `__runs__`의 최근 실행 기록을 셀에 맞춰 보여 줌(FR-R4). 실행·중지와 SSE 실시간 출력. VS Code 먼저, IntelliJ 다음. 코드는 확장 저장소에 있고 여기서는 추적만 함 | M2 |
-| M4 | 허브 | 2026-10-18 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`hub/worker/`), 계정은 GitHub 로그인(FR-H6), 릴레이는 `relay.darkpyonix.dev`(`hub/server/`, FR-H3). 릴레이를 VPS에 둘지 Container로 옮길지는 Ember NFR-N1의 QAD 켬/끔 측정으로 정함(Q9). 사용자 준비물: Cloudflare 존·API 토큰, GitHub OAuth App, 릴레이 VPS | Q1(조건부 결정됨, iroh로 시작), Ember M5와 함께 |
+| M4 | 허브 | 2026-10-18 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`darkpyonix/hub/worker/`), 계정은 GitHub 로그인(FR-H6), 릴레이는 `relay.darkpyonix.dev`(`darkpyonix/hub/server/`, FR-H3). 릴레이를 VPS에 둘지 Container로 옮길지는 Ember NFR-N1의 QAD 켬/끔 측정으로 정함(Q9). 사용자 준비물: Cloudflare 존·API 토큰, GitHub OAuth App, 릴레이 VPS | Q1(조건부 결정됨, iroh로 시작), Ember M5와 함께 |
 
 **10월 셋째 주 범위에서 뺀 것과 이유**
 - (변수 체크포인트·복원은 범위가 아닙니다. 변수는 실행 기록에 남은 코드로 재현합니다. INTENT 1.2 D.)

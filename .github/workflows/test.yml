@@ -78,13 +78,13 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: hub/worker
+        working-directory: darkpyonix/hub/worker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: hub/worker/package-lock.json
+          cache-dependency-path: darkpyonix/hub/worker/package-lock.json
       - run: npm ci
       - run: npm test

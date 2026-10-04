@@ -17,7 +17,7 @@ DarkPyonix kernel stack:
   Python prototype.
 - `darkpyonix/kernel/darkpyonix/` (top level): the **runtime API** that notebook files import
   (`darkpyonix.markdown`, `darkpyonix.params`, `darkpyonix.binding`, …). Standard library only.
-- `hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine connections, HTTPS,
+- `darkpyonix/hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine connections, HTTPS,
   and hosting of the official darkpyonix-ash viewer.
 
 The rest of the product lives in sibling repositories: `darkpyonix-ember` (IDE and agent
@@ -47,10 +47,10 @@ The root holds exactly these entries:
 - `PROJECT.md`: scope, milestones, open questions.
 - `README.md`: what the project is and how it is laid out.
 - `darkpyonix.mermaid`: the class diagram of the object model.
-- `darkpyonix/`: the product code: `kernel/` (Python kernel and runtime API) and `manager/`
-  (Rust manager and CLI).
+- `darkpyonix/`: the product code, exactly three folders: `kernel/` (the Python `darkpyonix`
+  package: runtime API and kernel), `manager/` (Rust manager and CLI) and `hub/`
+  (`darkpyonix.dev`: Cloudflare Worker and relay host).
 - `docs/`: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT and the OpenAPI files.
-- `hub/`: `darkpyonix.dev` (Cloudflare Worker and relay host).
 - `pyproject.toml`: the Python package and pytest configuration.
 - `tests/`: the Python test suite.
 
@@ -107,7 +107,7 @@ Never introduce anything that violates these. If a task seems to require it, sto
 2. Where inside:
    - worktrees: `.claude/worktrees/<name>/` (ignored by git);
    - throwaway work, probes, downloads, test run directories: `.scratch/<name>/` (ignored);
-   - Rust build output: `darkpyonix/manager/target/` and `hub/server/target/` (ignored);
+   - Rust build output: `darkpyonix/manager/target/` and `darkpyonix/hub/server/target/` (ignored);
    - experiments worth keeping: ask first (see "Repository root"); there is no top-level
      `experiments/` folder.
 3. The one exception is what the product itself writes at run time on a user's machine

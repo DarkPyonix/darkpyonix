@@ -37,7 +37,7 @@ pub fn install_crypto_provider() {
 /// A fresh directory under `<repo>/.scratch/hub-tests/`.
 pub fn scratch_dir(name: &str) -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.scratch/hub-tests")
+        .join("../../../.scratch/hub-tests")
         .join(format!(
             "{name}-{}-{:08x}",
             std::process::id(),
