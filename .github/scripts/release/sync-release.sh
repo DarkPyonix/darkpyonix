@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Brings develop's public tree onto the `release` branch, append-only.
 #
-# Usage: release-sync.sh [--push]
+# Usage: sync-release.sh [--push]
 #
 # Run inside a full clone (fetch-depth: 0) that has origin/develop. Environment:
 #   SOURCE  branch to publish from (default: develop)

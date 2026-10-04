@@ -5,7 +5,7 @@
 # planning documents, with main merged in so it never conflicts) and opens or refreshes
 # the release -> main pull request. A human merges it; Pages then deploys docs/guide.
 #
-# The release branch is never force-pushed. Logic: .github/scripts/release-sync.sh
+# The release branch is never force-pushed. Logic: .github/scripts/release/sync-release.sh
 #
 # Requires the repository setting "Allow GitHub Actions to create and approve pull
 # requests" (Settings > Actions > General). Without it the branch is still pushed and
@@ -25,7 +25,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  sync:
+    name: Sync release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -40,7 +41,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          .github/scripts/release-sync.sh --push
+          .github/scripts/release/sync-release.sh --push
 
       - name: Open or refresh the pull request into main
         env:
@@ -67,10 +68,10 @@ jobs:
           set +e
           n="$(gh pr list --base main --head release --state open --json number --jq '.[0].number')"
           if [[ -n "$n" ]]; then
-            gh pr edit "$n" --body "$body"
+            gh pr edit "$n" --title "Publish develop to main" --body "$body"
             echo "refreshed pull request #$n"
           else
-            gh pr create --base main --head release --title "Release: develop to main" --body "$body"
+            gh pr create --base main --head release --title "Publish develop to main" --body "$body"
           fi
           status=$?
           set -e
