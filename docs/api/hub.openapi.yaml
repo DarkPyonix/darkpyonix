@@ -9,11 +9,11 @@ info:
 
     **Two hosts** (SPEC §10, INTENT D15):
 
-    - `https://darkpyonix.dev` is a **Cloudflare Worker** (`hub/worker/`, TypeScript, D1).
+    - `https://darkpyonix.dev` is a **Cloudflare Worker** (`darkpyonix/hub/worker/`, TypeScript, D1).
       It serves GitHub sign-in, the device registry, the address directory, share links, the
       ash viewer (Workers static assets) and HTTPS names (ACME TXT through the Cloudflare DNS
       API).
-    - `https://relay.darkpyonix.dev` is the **relay host** (`hub/server/`, the `iroh-relay`
+    - `https://relay.darkpyonix.dev` is the **relay host** (`darkpyonix/hub/server/`, the `iroh-relay`
       server crate). Workers cannot accept UDP, and iroh's QUIC address discovery (QAD) needs
       UDP 7842, so the relay runs where it can. Operations served there carry a path-level
       `servers` entry. The relay asks the Worker whom to admit

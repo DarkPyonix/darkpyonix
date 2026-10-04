@@ -73,8 +73,8 @@ cargo build --release --manifest-path darkpyonix/manager/Cargo.toml
     <p>Put <code>darkpyonix/manager/target/release/darkpyonix</code> on your <code>PATH</code>.</p>
 
     <h2 id="runtime">The runtime API</h2>
-    <p>Inside a kernel, <code>import darkpyonix</code> always works, because the kernel puts its own sources
-      on <code>sys.path</code>. You install the package only to run a notebook outside a kernel, for example
+    <p>Inside a kernel, <code>import darkpyonix</code> always works, because the kernel loads its own sources
+      as <code>darkpyonix</code>. You install the package only to run a notebook outside a kernel, for example
       with <code>python train.py</code> in CI.</p>
     <figure class="codeblock" data-copy="Copy" data-copied="Copied">
       <figcaption>shell</figcaption>

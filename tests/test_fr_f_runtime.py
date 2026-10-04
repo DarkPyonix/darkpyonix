@@ -1,7 +1,7 @@
 """FR-F2..F6: the runtime API notebook files import (docs/FORMAT.md §3–§4).
 
 Plain-python behaviour is checked by running scripts under every interpreter on the machine
-(NFR-K1); kernel behaviour is checked through ``darkpyonix.kernel.hostctx``.
+(NFR-K1); kernel behaviour is checked through ``darkpyonix._hostctx``.
 """
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ import warnings
 import pytest
 
 import darkpyonix
-from conftest import KERNEL_ROOT
-from darkpyonix.kernel import hostctx
+from conftest import SRC_ROOT
+from darkpyonix import _hostctx as hostctx
 
 
 def _env(**extra):
     env = dict(os.environ)
-    env["PYTHONPATH"] = KERNEL_ROOT
+    env["PYTHONPATH"] = SRC_ROOT
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.update(extra)
     return env
@@ -56,15 +56,30 @@ def kernel():
 # --------------------------------------------------------------------------- import
 
 
-def test_runtime_import_is_cheap_and_never_loads_the_manager(python, scratch):
+# Kernel-process modules (flat, private, in the package root). The runtime API must never load
+# any of them, except the tiny host-context module it talks to.
+KERNEL_MODULES = (
+    "__main__", "_capture", "_client", "_collab", "_discovery", "_display", "_document", "_events",
+    "_executor", "_figures", "_hostctx", "_launcher", "_lock", "_model", "_mplbackend", "_protocol",
+    "_registry", "_runs", "_server",
+)
+
+
+def test_runtime_import_is_cheap_and_never_loads_the_kernel_process(python, scratch):
     out = subprocess.run(
         [python, "-c", "import sys, darkpyonix; darkpyonix.params; darkpyonix.markdown('x');"
                        "print(sorted(m for m in sys.modules if m.startswith('darkpyonix.')))"],
         capture_output=True, text=True, env=_env(), cwd=scratch, timeout=30)
     assert out.returncode == 0, out.stderr
     loaded = eval(out.stdout)
-    assert not [m for m in loaded if m.startswith("darkpyonix.manager")]
-    assert not [m for m in loaded if m.startswith("darkpyonix.kernel.") and m != "darkpyonix.kernel.hostctx"]
+    kernel_loaded = [m for m in loaded if m.startswith("darkpyonix.") and m[len("darkpyonix."):] in KERNEL_MODULES]
+    assert [m for m in kernel_loaded if m != "darkpyonix._hostctx"] == []
+    # Every module in the package root is either a kernel-process module or a runtime one, so a
+    # new file cannot slip past the assertion above unnoticed.
+    from conftest import PACKAGE_DIR
+    runtime = {"__init__", "_binding", "_command", "_home", "_host", "_markdown", "_misc", "_params"}
+    present = {n[:-3] for n in os.listdir(PACKAGE_DIR) if n.endswith(".py")}
+    assert present == runtime | set(KERNEL_MODULES)
 
 
 # --------------------------------------------------------------------------- FR-F2
@@ -340,7 +355,7 @@ def test_package_helpers_install_into_current_interpreter_and_raise_on_failure(s
 def test_display_parallel_and_reserved_interop(kernel, capsys):
     activate, emitted = kernel
     darkpyonix.display({"a": 1})
-    if not os.path.exists(os.path.join(KERNEL_ROOT, "darkpyonix", "kernel", "display.py")):
+    if not os.path.exists(os.path.join(SRC_ROOT, "darkpyonix", "_display.py")):
         assert emitted[-1] == ({"text/plain": "{'a': 1}"}, False)
     hostctx.clear()
     darkpyonix.display([1, 2], "s")
@@ -510,8 +525,8 @@ def test_fr_f5_reduced_reference_in_kernel_emits_markdown(scratch, kernel, capsy
 @pytest.fixture
 def real_kernel(dp_home):
     """Start a real kernel for a file; yields ``open(path, python) -> client``."""
-    from darkpyonix.kernel import launcher
-    from darkpyonix.kernel.protocol import kernel_id_for
+    from darkpyonix import _launcher as launcher
+    from darkpyonix._protocol import kernel_id_for
     from kernel_procs import connect, kill, wait_pid_gone
     started = []
 

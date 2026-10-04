@@ -6,7 +6,7 @@ import signal
 import subprocess
 import time
 
-from darkpyonix.kernel import launcher, registry
+from darkpyonix import _launcher as launcher, _registry as registry
 
 
 def notebook(scratch: str, name: str = "nb.py") -> str:
@@ -68,7 +68,7 @@ def write_notebook(scratch: str, name: str, text: str) -> str:
 
 def connect(info):
     """A connected, subscribed ``KernelClient`` for an announce body."""
-    from darkpyonix.kernel.client import KernelClient
+    from darkpyonix._client import KernelClient
     c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
     c.connect()
     c.subscribe()

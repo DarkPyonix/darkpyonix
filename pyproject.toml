@@ -1,10 +1,10 @@
 [build-system]
-requires = ["pdm-backend>=2.4"]
-build-backend = "pdm.backend"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
 
 [project]
 name = "darkpyonix"
-# Single source: darkpyonix/kernel/darkpyonix/__init__.py (see [tool.pdm.version]).
+# Single source: darkpyonix/kernel/__init__.py (see [tool.hatch.version]).
 dynamic = ["version"]
 description = "File-bound, manager-independent Python kernel for AI/ML work by people and agents"
 readme = "README.md"
@@ -45,11 +45,6 @@ Repository = "https://github.com/DarkPyonix/darkpyonix"
 Issues = "https://github.com/DarkPyonix/darkpyonix/issues"
 
 [project.optional-dependencies]
-manager = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "httpx>=0.27",
-]
 dev = [
     "pytest>=8",
     "pyyaml>=6",
@@ -59,13 +54,20 @@ dev = [
 
 # No console script: the `darkpyonix` CLI is the Rust binary (INTENT D10).
 
-[tool.pdm.version]
-source = "file"
-path = "darkpyonix/kernel/darkpyonix/__init__.py"
+[tool.hatch.version]
+path = "darkpyonix/kernel/__init__.py"
 
-[tool.pdm.build]
-package-dir = "darkpyonix/kernel"
-includes = ["darkpyonix/kernel/darkpyonix"]
+# Editable installs are unsupported for a renamed folder; tests/conftest.py links the folder
+# as ``darkpyonix`` under .scratch/src instead. The folder darkpyonix/kernel IS the ``darkpyonix`` package. The build renames it; hatchling's
+# ``sources`` mapping can do that, pdm-backend cannot.
+[tool.hatch.build.targets.wheel.sources]
+"darkpyonix/kernel" = "darkpyonix"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["darkpyonix/kernel"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["darkpyonix/kernel", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

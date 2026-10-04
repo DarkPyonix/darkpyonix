@@ -36,10 +36,12 @@ jobs:
         run: uv python install ${{ matrix.python }} 3.13
       - name: Create the test environment
         run: |
-          # The harness (pytest, the Python manager prototype) runs on 3.13; the matrix version
+          # The harness (pytest) runs on 3.13; the matrix version
           # is the interpreter the kernels run under (NFR-K1).
           uv venv --no-project -p 3.13 .scratch/venv
-          uv pip install -p .scratch/venv/bin/python -e ".[dev,manager]"
+          # The package is not installed: tests/conftest.py links darkpyonix/kernel as `darkpyonix`
+          # under .scratch/src (hatchling cannot do an editable install of a renamed folder).
+          uv pip install -p .scratch/venv/bin/python "pytest>=8" "pyyaml>=6" "nbformat>=5" "jsonschema>=4"
       - name: Run the suite
         run: |
           # Kernel tests run against the bare interpreter, where darkpyonix is not installed
@@ -78,13 +80,13 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: hub/worker
+        working-directory: darkpyonix/hub/worker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: hub/worker/package-lock.json
+          cache-dependency-path: darkpyonix/hub/worker/package-lock.json
       - run: npm ci
       - run: npm test

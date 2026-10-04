@@ -1,6 +1,6 @@
 """A tiny fake DKP/1 kernel for manager tests (PROTOCOL §3).
 
-It speaks the real handshake and frames from ``darkpyonix.kernel.protocol`` and answers
+It speaks the real handshake and frames from ``darkpyonix._protocol`` and answers
 status, run, cancel, interrupt, restart, shutdown, namespace, runs.list, runs.get, subscribe
 and unsubscribe with canned data. A started run stays ``running`` until the test calls
 ``finish_run()`` or a client interrupts it.
@@ -23,10 +23,27 @@ import sys
 import threading
 from typing import Any, Dict, List, Optional
 
-if __name__ == "__main__":
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "darkpyonix", "kernel"))
 
-from darkpyonix.kernel import protocol  # noqa: E402
+
+def _load_package():
+    """``import darkpyonix`` from a source checkout, where the package folder is darkpyonix/kernel."""
+    try:
+        import darkpyonix  # noqa: F401
+        return
+    except ImportError:
+        pass
+    import importlib.util
+    d = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "darkpyonix", "kernel"))
+    spec = importlib.util.spec_from_file_location("darkpyonix", os.path.join(d, "__init__.py"),
+                                                  submodule_search_locations=[d])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["darkpyonix"] = module
+    spec.loader.exec_module(module)
+
+
+_load_package()
+
+from darkpyonix import _protocol as protocol  # noqa: E402
 
 
 async def _read(reader: asyncio.StreamReader) -> Dict[str, Any]:
@@ -285,7 +302,6 @@ class FakeKernel:
 
 def _standalone(path: str, out: str) -> None:
     import signal
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "darkpyonix", "kernel"))
     from darkpyonix import _home
     kernel = FakeKernel(path, _home.user_key()).start()
     stop = threading.Event()

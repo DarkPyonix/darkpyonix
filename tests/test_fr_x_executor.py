@@ -14,7 +14,7 @@ import textwrap
 
 import pytest
 
-from conftest import KERNEL_ROOT
+from conftest import SRC_ROOT
 
 DRIVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "helpers", "executor_driver.py")
 
@@ -23,7 +23,7 @@ def drive(python, scratch, source, steps, name="nb.py", timeout=60, **plan):
     path = os.path.join(scratch, name)
     with open(path, "w", encoding="utf-8") as f:
         f.write(textwrap.dedent(source).lstrip("\n"))
-    plan.update({"path": path, "kernel_root": KERNEL_ROOT, "steps": steps})
+    plan.update({"path": path, "src_root": SRC_ROOT, "steps": steps})
     plan_path = os.path.join(scratch, "plan.json")
     out_path = os.path.join(scratch, "out.json")
     with open(plan_path, "w") as f:
@@ -274,7 +274,7 @@ def test_fr_x2_error_stops_run_and_hides_kernel_frames(python, scratch):
     assert error["output_type"] == "error"
     assert (error["ename"], error["evalue"]) == ("ValueError", "bad value")
     tb = "".join(error["traceback"])
-    assert KERNEL_ROOT not in tb and "executor.py" not in tb
+    assert SRC_ROOT not in tb and "executor.py" not in tb
     # Frames point at the user's file and its real line numbers.
     assert 'File "%s", line 6' % out["path"] in tb
     assert 'File "%s", line 3, in inner' % out["path"] in tb
@@ -414,7 +414,7 @@ def test_fr_x5_repr_protocol_becomes_mime_bundle(python, scratch):
                 return b"\\x89PNG"
             def __repr__(self):
                 return "Rich()"
-        from darkpyonix.kernel.display import display
+        from darkpyonix._display import display
         display(Rich())
         Rich()
         """, run_all())
@@ -440,7 +440,7 @@ def test_fr_x5_streams_are_coalesced_into_one_output(python, scratch):
 def test_fr_x5_hostctx_exposes_params_and_display(python, scratch):
     out = drive(python, scratch, """
         # %%
-        from darkpyonix.kernel import hostctx
+        from darkpyonix import _hostctx as hostctx
         print(hostctx.in_kernel(), hostctx.current_params())
         hostctx.emit_display({"text/markdown": "# shown"})
         ok = hostctx.emit_display({"data": {"text/markdown": "live only"}, "metadata": {}}, silent=True)

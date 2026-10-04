@@ -9,8 +9,8 @@ import time
 import pytest
 
 from darkpyonix import _home
-from darkpyonix.kernel import discovery, launcher, registry
-from darkpyonix.kernel.protocol import QUERY_TIMEOUT, kernel_id_for
+from darkpyonix import _discovery as discovery, _launcher as launcher, _registry as registry
+from darkpyonix._protocol import QUERY_TIMEOUT, kernel_id_for
 
 from kernel_procs import kill, notebook, reap, start
 
