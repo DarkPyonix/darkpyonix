@@ -1,4 +1,4 @@
-name: publish-pypi
+name: Publish to PyPI
 
 # Publishing happens only when a GitHub Release is published. The upload uses PyPI trusted
 # publishing (OIDC); there is no API token anywhere in this repository.
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: build and check
+    name: Build and check the package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: publish to PyPI
+    name: Upload to PyPI
     needs: build
     runs-on: ubuntu-latest
     environment:

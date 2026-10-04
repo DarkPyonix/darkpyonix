@@ -161,6 +161,24 @@ Never introduce anything that violates these. If a task seems to require it, sto
 - One logical change per commit. Do not commit `.DS_Store`, `__pycache__`, `.scratch/`,
   `__runs__/` produced by tests, or local databases.
 
+## CI names
+
+Workflow files and names are the same in every thisisthepy and darkpyonix repository, so a
+status check means the same thing wherever it appears (owner-approved, 2026-10-04):
+
+- `test.yml`, "Test": the quality gate on every pull request.
+- `release-sync.yml`, "Release sync": develop to release, through
+  `.github/scripts/release/sync-release.sh`; a pull request then takes release to main.
+- `publish-pypi.yml`, "Publish to PyPI": a published GitHub Release uploads the package.
+- `pages.yml`, "Pages": the guide site.
+- `test-<target>.yml`, "<Target> test": a special check for one target.
+
+Job names are short sentence-case statements of what the job does ("Rust manager", "Hub
+worker", "Deploy the guide"); a matrix job is "<what> (<os>)" or "<what> (<os>, <version>)",
+such as "Python (ubuntu-latest, 3.8)". A job with the same role carries the same name in every
+repository. Renaming a job renames its status check, so the owner re-selects main's required
+checks.
+
 ## Verification
 
 - A milestone is complete only when its SPEC acceptance criteria pass. Report failures with the

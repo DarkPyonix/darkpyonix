@@ -5,7 +5,7 @@
 # planning documents, with main merged in so it never conflicts) and opens or refreshes
 # the release -> main pull request. A human merges it; Pages then deploys docs/guide.
 #
-# The release branch is never force-pushed. Logic: .github/scripts/release-sync.sh
+# The release branch is never force-pushed. Logic: .github/scripts/release/sync-release.sh
 #
 # Requires the repository setting "Allow GitHub Actions to create and approve pull
 # requests" (Settings > Actions > General). Without it the branch is still pushed and
@@ -25,7 +25,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  sync:
+    name: Sync release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -40,7 +41,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          .github/scripts/release-sync.sh --push
+          .github/scripts/release/sync-release.sh --push
 
       - name: Open or refresh the pull request into main
         env:

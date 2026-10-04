@@ -1,4 +1,4 @@
-name: test
+name: Test
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   python:
-    name: python ${{ matrix.python }} (${{ matrix.os }})
+    name: Python (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -51,7 +51,7 @@ jobs:
           .scratch/venv/bin/python -m pytest -ra
 
   rust:
-    name: rust manager
+    name: Rust manager
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,7 +76,7 @@ jobs:
         run: cargo test --workspace
 
   hub-worker:
-    name: hub worker
+    name: Hub worker
     runs-on: ubuntu-latest
     defaults:
       run:
