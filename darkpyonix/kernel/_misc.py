@@ -14,7 +14,7 @@ def display(*objs):
             print(repr(obj))
         return None
     try:
-        from darkpyonix.kernel.display import display as kernel_display
+        from darkpyonix._display import display as kernel_display
     except ImportError:
         kernel_display = None
     if kernel_display is not None:

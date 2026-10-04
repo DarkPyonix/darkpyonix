@@ -20,9 +20,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
-from . import protocol as _p
-from .events import EventLog
-from .protocol import DKPError, FrameTooLarge, encode
+from . import _protocol as _p
+from ._events import EventLog
+from ._protocol import DKPError, FrameTooLarge, encode
 
 Handler = Callable[[Dict[str, Any]], Any]
 

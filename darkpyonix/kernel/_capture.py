@@ -24,7 +24,7 @@ import time
 import uuid
 from typing import Any, Callable, Dict, Optional
 
-from darkpyonix.kernel.protocol import STREAM_COALESCE_SECONDS
+from darkpyonix._protocol import STREAM_COALESCE_SECONDS
 
 _POLL = 0.02        # router poll (and stream flush) interval while a cell is active
 _IDLE_POLL = 0.1    # flush interval for stream text written between cells

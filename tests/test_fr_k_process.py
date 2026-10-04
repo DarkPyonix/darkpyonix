@@ -12,10 +12,11 @@ import time
 
 import pytest
 
+from conftest import SRC_ROOT
 from darkpyonix import _home
-from darkpyonix.kernel import discovery, launcher, lock, registry
-from darkpyonix.kernel.protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
-from darkpyonix.kernel.runs import RunStore
+from darkpyonix import _discovery as discovery, _launcher as launcher, _lock as lock, _registry as registry
+from darkpyonix._protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
+from darkpyonix._runs import RunStore
 
 from kernel_procs import (
     connect, kill, notebook, reap, run_and_wait, start, stream_text, wait_pid_gone,
@@ -43,7 +44,7 @@ def test_fr_k1_kernel_runs_from_uninstalled_interpreter(python, dp_home, scratch
     probe[2] = launcher.BOOTSTRAP_PRELUDE + "import darkpyonix, sys; print(darkpyonix.__file__); sys.exit(0)"
     out = subprocess.run(probe, cwd=scratch, env=env, capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip().startswith(launcher.KERNEL_ROOT)
+    assert out.stdout.strip().startswith(launcher.PACKAGE_DIR)
 
     path = notebook(scratch)
     proc = subprocess.Popen(launcher.bootstrap_command(python, path), cwd=scratch, env=env,
@@ -97,7 +98,7 @@ def test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell(python, dp_home, scratch
             c.close()
         assert status == "ok", nb
         module, prefix, in_venv = stream_text(nb).splitlines()
-        assert module.startswith(launcher.KERNEL_ROOT)
+        assert module.startswith(launcher.PACKAGE_DIR)
         assert os.path.realpath(prefix) == os.path.realpath(venv)
         assert in_venv == "True"
     finally:
@@ -153,8 +154,8 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
     path = notebook(scratch)
     kid = kernel_id_for(path)
     # A throwaway "manager" process launches the kernel and exits at once.
-    code = ("import sys; sys.path.insert(0, %r); from darkpyonix.kernel import launcher; "
-            "print(launcher.launch(%r, python=%r))" % (launcher.KERNEL_ROOT, path, python))
+    code = ("import sys; sys.path.insert(0, %r); from darkpyonix import _launcher as launcher; "
+            "print(launcher.launch(%r, python=%r))" % (SRC_ROOT, path, python))
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     pid = int(out.stdout.strip())

@@ -9,10 +9,10 @@ import time
 
 import pytest
 
-from darkpyonix.kernel import protocol as p
-from darkpyonix.kernel.client import KernelClient
-from darkpyonix.kernel.events import EventLog
-from darkpyonix.kernel.server import ControlServer
+from darkpyonix import _protocol as p
+from darkpyonix._client import KernelClient
+from darkpyonix._events import EventLog
+from darkpyonix._server import ControlServer
 
 KID = "k_0123456789abcdef0123"
 KEY = b"k" * 32

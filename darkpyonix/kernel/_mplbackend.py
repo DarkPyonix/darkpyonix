@@ -1,6 +1,6 @@
 """The kernel's matplotlib backend: figures become ``image/png`` display_data (SPEC FR-X6).
 
-matplotlib loads this module itself, as ``module://darkpyonix.kernel.mplbackend``, when user
+matplotlib loads this module itself, as ``module://darkpyonix._mplbackend``, when user
 code imports pyplot inside a kernel (see ``figures``). Kernel code never imports it, which is
 why it is the one kernel module allowed to import matplotlib (SPEC NFR-K2).
 
@@ -15,7 +15,7 @@ import io
 from matplotlib._pylab_helpers import Gcf
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-from darkpyonix.kernel import hostctx
+from darkpyonix import _hostctx as hostctx
 
 FigureCanvas = FigureCanvasAgg
 try:  # classic module-level API, kept by matplotlib for backends that export it

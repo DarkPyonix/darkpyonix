@@ -1,4 +1,4 @@
-"""Defensive access to the kernel host context (``darkpyonix.kernel.hostctx``).
+"""Defensive access to the kernel host context (``darkpyonix._hostctx``).
 
 When the module is missing or reports ``in_kernel() == False`` the runtime API behaves as it
 does under plain ``python file.py`` (SPEC FR-F5).
@@ -10,11 +10,11 @@ import sys
 
 def hostctx():
     """The host context module, or None when it cannot be imported."""
-    mod = sys.modules.get("darkpyonix.kernel.hostctx")
+    mod = sys.modules.get("darkpyonix._hostctx")
     if mod is not None:
         return mod
     try:
-        from darkpyonix.kernel import hostctx as mod  # tiny, stdlib only
+        from darkpyonix import _hostctx as mod  # tiny, stdlib only
     except ImportError:
         return None
     return mod

@@ -9,7 +9,7 @@ import inspect
 import json
 from typing import Any, Dict, Tuple
 
-from darkpyonix.kernel import hostctx
+from darkpyonix import _hostctx as hostctx
 
 TEXT_PLAIN_LIMIT = 100000
 

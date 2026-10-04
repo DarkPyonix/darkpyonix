@@ -72,7 +72,10 @@ fn fr_m2_kernel_id_matches_python() {
         "relative-missing.py".to_string(),
     ];
     let script = format!(
-        "import sys, json; sys.path.insert(0, {:?}); from darkpyonix.kernel.protocol import canonical_path, kernel_id_for; \
+        "import sys, json, importlib.util as u; d = {:?}; \
+         s = u.spec_from_file_location('darkpyonix', d + '/__init__.py', submodule_search_locations=[d]); \
+         m = u.module_from_spec(s); sys.modules['darkpyonix'] = m; s.loader.exec_module(m); \
+         from darkpyonix._protocol import canonical_path, kernel_id_for; \
          print(json.dumps([[canonical_path(p), kernel_id_for(p)] for p in sys.argv[1:]]))",
         repo_root().join("darkpyonix/kernel").to_string_lossy()
     );
@@ -141,8 +144,7 @@ async fn fr_m2_start_kernel_is_idempotent_on_every_interpreter() {
         // Launched from the embedded sources extracted to <home>/runtime/<version>-<hash>/.
         let root = be.runtime_root().unwrap();
         assert!(root.starts_with(home.join("runtime")));
-        assert!(root.join("darkpyonix/kernel/__main__.py").is_file());
-        assert!(!root.join("darkpyonix/manager").exists());
+        assert!(root.join("darkpyonix/__main__.py").is_file());
         let cmd = std::process::Command::new("ps")
             .args(["-o", "command=", "-p", &first.kernel.pid.to_string()])
             .output()
@@ -316,7 +318,7 @@ fn kernel_pids_for(file: &Path) -> Vec<u32> {
     let needle = format!("--file {}", canonical_path(file));
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter(|l| l.contains("darkpyonix.kernel.__main__") && l.trim_end().ends_with(&needle))
+        .filter(|l| l.contains("darkpyonix.__main__") && l.trim_end().ends_with(&needle))
         .filter_map(|l| l.split_whitespace().next()?.parse().ok())
         .filter(|p| process::pid_alive(*p))
         .collect()

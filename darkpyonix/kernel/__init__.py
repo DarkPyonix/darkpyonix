@@ -1,11 +1,11 @@
 """DarkPyonix runtime API for notebook files (SPEC FR-F2..F6, FORMAT §4).
 
 Standard library only (INTENT §2). Importing this package must stay cheap and must never
-import ``darkpyonix.manager``: notebook code and the kernel import it from interpreters
-where nothing but the standard library is available. The public names are loaded lazily
+import any kernel-process module (``_server``, ``_executor``, ...): notebook code and the kernel
+import it from interpreters where nothing but the standard library is available. The public names are loaded lazily
 from private modules on first access (PEP 562).
 
-Inside a kernel the calls talk to ``darkpyonix.kernel.hostctx``; anywhere else they behave
+Inside a kernel the calls talk to ``darkpyonix._hostctx``; anywhere else they behave
 as under plain ``python file.py`` (SPEC FR-F5).
 """
 

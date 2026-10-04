@@ -1,6 +1,6 @@
 """The integrated kernel process over DKP/1: launch, run, log, interrupt, busy, survival.
 
-These drive the real kernel main (darkpyonix/kernel/darkpyonix/kernel/__main__.py) through the public
+These drive the real kernel main (darkpyonix/kernel/__main__.py) through the public
 surfaces: launcher, discovery, KernelClient.
 """
 from __future__ import annotations
@@ -15,11 +15,12 @@ import time
 
 import pytest
 
-from darkpyonix.kernel import launcher
-from darkpyonix.kernel.client import KernelClient
-from darkpyonix.kernel.discovery import discover
-from darkpyonix.kernel.protocol import DKPError, kernel_id_for
-from darkpyonix.kernel.runs import runs_dir_for
+from conftest import SRC_ROOT
+from darkpyonix import _launcher as launcher
+from darkpyonix._client import KernelClient
+from darkpyonix._discovery import discover
+from darkpyonix._protocol import DKPError, kernel_id_for
+from darkpyonix._runs import runs_dir_for
 
 NB = textwrap.dedent('''\
     import time
@@ -134,9 +135,9 @@ def test_fr_k4_kernel_survives_manager_kill(scratch, dp_home):
     driver = textwrap.dedent('''
         import sys, time
         sys.path.insert(0, %r)
-        from darkpyonix.kernel import launcher
-        from darkpyonix.kernel.client import KernelClient
-        from darkpyonix.kernel.protocol import kernel_id_for
+        from darkpyonix import _launcher as launcher
+        from darkpyonix._client import KernelClient
+        from darkpyonix._protocol import kernel_id_for
         p = %r
         pid = launcher.launch(p)
         info = launcher.wait_for_announce(kernel_id_for(p), pid=pid, timeout=15)
@@ -144,7 +145,7 @@ def test_fr_k4_kernel_survives_manager_kill(scratch, dp_home):
         c.request("run", {"mode": "all"})
         print(pid, flush=True)
         time.sleep(60)
-    ''') % (launcher.KERNEL_ROOT, path)
+    ''') % (SRC_ROOT, path)
     mgr = subprocess.Popen([sys.executable, "-c", driver], stdout=subprocess.PIPE, text=True,
                            env=dict(os.environ))
     kpid = int(mgr.stdout.readline())

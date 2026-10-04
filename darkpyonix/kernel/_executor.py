@@ -32,12 +32,12 @@ import types
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from darkpyonix import format as fmt
-from darkpyonix.kernel import figures, hostctx
-from darkpyonix.kernel.capture import FdCapture, OutputRouter, StreamCapture
-from darkpyonix.kernel.collab import by_of
-from darkpyonix.kernel.display import format_bundle
-from darkpyonix.kernel.model import CellRecord, Run, RunRequest
-from darkpyonix.kernel.protocol import DKPError, new_run_id, now_iso
+from darkpyonix import _figures as figures, _hostctx as hostctx
+from darkpyonix._capture import FdCapture, OutputRouter, StreamCapture
+from darkpyonix._collab import by_of
+from darkpyonix._display import format_bundle
+from darkpyonix._model import CellRecord, Run, RunRequest
+from darkpyonix._protocol import DKPError, new_run_id, now_iso
 
 _KERNEL_DIR = os.path.dirname(os.path.abspath(__file__))
 _FUTURE_MASK = 0

@@ -39,7 +39,9 @@ jobs:
           # The harness (pytest) runs on 3.13; the matrix version
           # is the interpreter the kernels run under (NFR-K1).
           uv venv --no-project -p 3.13 .scratch/venv
-          uv pip install -p .scratch/venv/bin/python -e ".[dev]"
+          # The package is not installed: tests/conftest.py links darkpyonix/kernel as `darkpyonix`
+          # under .scratch/src (hatchling cannot do an editable install of a renamed folder).
+          uv pip install -p .scratch/venv/bin/python "pytest>=8" "pyyaml>=6" "nbformat>=5" "jsonschema>=4"
       - name: Run the suite
         run: |
           # Kernel tests run against the bare interpreter, where darkpyonix is not installed

@@ -28,8 +28,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from darkpyonix.kernel.model import Run
-from darkpyonix.kernel.protocol import DKPError
+from darkpyonix._model import Run
+from darkpyonix._protocol import DKPError
 
 RUNS_DIRNAME = "__runs__"
 INDEX_NAME = "index.json"

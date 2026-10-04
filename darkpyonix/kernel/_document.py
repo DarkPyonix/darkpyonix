@@ -17,8 +17,8 @@ import os
 from typing import Any, Dict, List, Optional
 
 from darkpyonix import format as dpformat
-from darkpyonix.kernel import runs as _runs
-from darkpyonix.kernel.protocol import kernel_id_for
+from darkpyonix import _runs as _runs
+from darkpyonix._protocol import kernel_id_for
 
 MAX_RUNS_SCANNED = 20
 

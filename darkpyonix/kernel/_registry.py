@@ -43,7 +43,7 @@ def pid_alive(pid: int) -> bool:
     if os.name == "nt":
         return _pid_alive_windows(pid)
     # Reap our own exited children (kernels this process launched) so they read as dead.
-    from darkpyonix.kernel import launcher
+    from darkpyonix import _launcher as launcher
     launcher._reap(pid)
     try:
         os.kill(pid, 0)

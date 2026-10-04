@@ -53,7 +53,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from darkpyonix import format as dpformat
-from darkpyonix.kernel.protocol import DKPError, now_iso
+from darkpyonix._protocol import DKPError, now_iso
 
 Emit = Callable[[str, Dict[str, Any]], None]
 Handler = Callable[[Dict[str, Any]], Dict[str, Any]]

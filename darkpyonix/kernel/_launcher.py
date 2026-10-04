@@ -1,8 +1,8 @@
 """Start a kernel for a file in any interpreter, detached from the caller (FR-K1, FR-K4).
 
-The interpreter does not need DarkPyonix installed: the bootstrap puts the directory that
-contains the ``darkpyonix`` package at the front of ``sys.path``. Standard library only;
-Python 3.8+.
+The interpreter does not need DarkPyonix installed: the bootstrap loads the ``darkpyonix``
+package from this file's directory under that name (the equivalent of ``python -m darkpyonix``).
+Standard library only; Python 3.8+.
 """
 from __future__ import annotations
 
@@ -13,15 +13,18 @@ import time
 from typing import Any, Dict, List, Optional, Sequence
 
 from darkpyonix import _home
-from darkpyonix.kernel.protocol import canonical_path, kernel_id_for
+from darkpyonix._protocol import canonical_path, kernel_id_for
 
-# .../kernel (the directory holding the darkpyonix package)
-KERNEL_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The directory of the ``darkpyonix`` package (this file's directory). In a source checkout it
+# is named ``kernel``, so it cannot be put on ``sys.path``; the bootstrap loads it by path.
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-BOOTSTRAP_PRELUDE = "import sys; sys.path.insert(0, %r); " % KERNEL_ROOT
-BOOTSTRAP = BOOTSTRAP_PRELUDE + (
-    "from darkpyonix.kernel.__main__ import main; sys.exit(main(sys.argv[1:]))"
-)
+BOOTSTRAP_PRELUDE = (
+    "import sys, importlib.util as u; d = %r; "
+    "s = u.spec_from_file_location('darkpyonix', d + '/__init__.py', submodule_search_locations=[d]); "
+    "m = u.module_from_spec(s); sys.modules['darkpyonix'] = m; s.loader.exec_module(m); "
+) % PACKAGE_DIR
+BOOTSTRAP = BOOTSTRAP_PRELUDE + "from darkpyonix.__main__ import main; sys.exit(main(sys.argv[1:]))"
 
 READY_STATUSES = ("idle", "busy")
 
@@ -86,7 +89,7 @@ def wait_for_announce(kernel_id: str, pid: Optional[int] = None,
 
     With ``pid``, only an entry from that process counts, and the wait ends early if it dies.
     """
-    from darkpyonix.kernel import discovery, registry
+    from darkpyonix import _discovery as discovery, _registry as registry
 
     deadline = time.monotonic() + timeout
     while True:

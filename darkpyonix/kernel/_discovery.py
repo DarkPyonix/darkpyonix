@@ -18,8 +18,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from darkpyonix.kernel import registry
-from darkpyonix.kernel.protocol import (
+from darkpyonix import _registry as registry
+from darkpyonix._protocol import (
     ANNOUNCE_INTERVAL, DISCOVERY_GROUP, DISCOVERY_INTERFACE, DISCOVERY_PORT, DKP_VERSION,
     QUERY_TIMEOUT,
 )

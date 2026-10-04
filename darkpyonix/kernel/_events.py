@@ -9,7 +9,7 @@ import json
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .protocol import DKP_VERSION, EVENT_RING_MAX_BYTES, EVENT_RING_MAX_EVENTS, now_iso
+from ._protocol import DKP_VERSION, EVENT_RING_MAX_BYTES, EVENT_RING_MAX_EVENTS, now_iso
 
 Listener = Callable[[Dict[str, Any]], None]
 

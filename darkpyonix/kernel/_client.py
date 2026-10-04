@@ -15,8 +15,8 @@ import socket
 import threading
 from typing import Any, Dict, Iterator, Optional
 
-from .. import _home
-from .protocol import DKPError, auth_mac, encode, recv_frame
+from . import _home
+from ._protocol import DKPError, auth_mac, encode, recv_frame
 
 _CLOSED = object()
 

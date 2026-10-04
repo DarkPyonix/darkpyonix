@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Callable, Optional
 
-BACKEND_MODULE = "darkpyonix.kernel.mplbackend"
+BACKEND_MODULE = "darkpyonix._mplbackend"
 BACKEND = "module://" + BACKEND_MODULE
 
 

@@ -1,9 +1,9 @@
 """The DarkPyonix kernel process (INTENT D1–D3, D12; PROTOCOL §2–§3).
 
-Started by ``launcher.bootstrap_command``. Owns the per-file lock, the shared document
-(SPEC §10a, ``collab.DocumentState``), the run store, the executor (user code on the main
-thread), the DKP/1 control server and discovery. Standard
-library only; Python 3.8+.
+Started as ``python -m darkpyonix`` (or by ``_launcher.bootstrap_command``). Owns the per-file
+lock, the shared document (SPEC §10a, ``_collab.DocumentState``), the run store, the executor
+(user code on the main thread), the DKP/1 control server and discovery. Standard library only;
+Python 3.8+.
 """
 from __future__ import annotations
 
@@ -19,16 +19,16 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from darkpyonix import _home
-from darkpyonix.kernel import lock, registry
-from darkpyonix.kernel.collab import DocumentState
-from darkpyonix.kernel.discovery import DiscoveryResponder
-from darkpyonix.kernel.events import EventLog
-from darkpyonix.kernel.executor import Executor
-from darkpyonix.kernel.launcher import bootstrap_command
-from darkpyonix.kernel.protocol import (
+from darkpyonix import _lock as lock, _registry as registry
+from darkpyonix._collab import DocumentState
+from darkpyonix._discovery import DiscoveryResponder
+from darkpyonix._events import EventLog
+from darkpyonix._executor import Executor
+from darkpyonix._launcher import bootstrap_command
+from darkpyonix._protocol import (
     EXIT_ALREADY_RUNNING, KERNEL_VERSION, DKPError, canonical_path, kernel_id_for, now_iso,
 )
-from darkpyonix.kernel.runs import RunStore, runs_dir_for
+from darkpyonix._runs import RunStore, runs_dir_for
 
 FINISHED = ("ok", "error", "interrupted", "cancelled", "crashed")
 
@@ -203,7 +203,7 @@ class Kernel(object):
             self.executor.before_load = self._before_load
             self.diag = getattr(self.executor, "original_stderr", sys.stderr)
 
-            from darkpyonix.kernel.server import ControlServer
+            from darkpyonix._server import ControlServer
             self.server = ControlServer(self.kernel_id, self.key, self.events, self.handlers())
             self.collab.start()
             self.server.start()

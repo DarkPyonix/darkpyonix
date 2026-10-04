@@ -15,7 +15,7 @@ import socket
 import struct
 from typing import Any, Dict, Optional
 
-from .. import __version__
+from . import __version__
 
 DKP_VERSION = 1
 KERNEL_VERSION = __version__  # the kernel ships in the darkpyonix package

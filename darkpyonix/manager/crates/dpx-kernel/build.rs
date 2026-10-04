@@ -1,5 +1,5 @@
-//! Embeds the stdlib-Python kernel sources (`darkpyonix/kernel/darkpyonix`, without its
-//! `manager/`) into the binary (INTENT D3, D10). Generates `$OUT_DIR/embedded.rs` with the file
+//! Embeds the stdlib-Python kernel sources (the `darkpyonix/kernel` folder, which is the
+//! `darkpyonix` package) into the binary (INTENT D3, D10). Generates `$OUT_DIR/embedded.rs` with the file
 //! table and a content hash that names the extraction directory `<home>/runtime/<version>-<hash>/`.
 
 use std::fmt::Write as _;
@@ -20,8 +20,7 @@ fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>, dirs: &mut V
         let file_type = entry.file_type().expect("file type");
         let child = format!("{rel}/{name}");
         if file_type.is_dir() {
-            // The Python manager is a superseded prototype and not part of the kernel.
-            if name == "__pycache__" || name.starts_with('.') || child == "darkpyonix/manager" {
+            if name == "__pycache__" || name.starts_with('.') {
                 continue;
             }
             collect(&path, &child, out, dirs);
@@ -36,8 +35,8 @@ fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>, dirs: &mut V
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    // crates/dpx-kernel -> darkpyonix/manager/crates -> darkpyonix/ -> darkpyonix/kernel/darkpyonix
-    let root = manifest.join("../../../kernel/darkpyonix");
+    // crates/dpx-kernel -> darkpyonix/manager/crates -> darkpyonix/ -> darkpyonix/kernel (the `darkpyonix` package)
+    let root = manifest.join("../../../kernel");
     let root = root
         .canonicalize()
         .unwrap_or_else(|e| panic!("kernel sources {}: {e}", root.display()));
@@ -46,10 +45,8 @@ fn main() {
     let mut dirs = Vec::new();
     collect(&root, "darkpyonix", &mut files, &mut dirs);
     assert!(
-        files
-            .iter()
-            .any(|(rel, _)| rel == "darkpyonix/kernel/__main__.py"),
-        "darkpyonix/kernel/darkpyonix/kernel/__main__.py missing from the embedded sources"
+        files.iter().any(|(rel, _)| rel == "darkpyonix/__main__.py"),
+        "darkpyonix/kernel/__main__.py missing from the embedded sources"
     );
 
     let mut hasher = Sha256::new();
