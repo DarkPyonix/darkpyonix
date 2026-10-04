@@ -191,6 +191,7 @@ class Kernel(object):
             sys.stderr.flush()
             return EXIT_ALREADY_RUNNING
         try:
+            _home.expose_package()
             self.collab = DocumentState(self.path, self.events.append,
                                         seq_provider=lambda: self.events.seq)
             self.extra_handlers.update(self.collab.handlers())
