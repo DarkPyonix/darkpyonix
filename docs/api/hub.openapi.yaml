@@ -7,7 +7,7 @@ info:
     The hub connects a user's machines (the main server and its branch computers) and lets
     shared notebooks reach a dedicated manager, **without seeing their traffic** (SPEC NFR-H1).
 
-    **Hosts** (SPEC §10, INTENT D15 and its 2026-10-03 amendment, a proposal):
+    **Hosts** (SPEC §10, INTENT D15 and its 2026-10-03 amendment, approved 2026-10-05):
 
     - `https://darkpyonix.dev/` (the root) is the **main page** (the front): the landing page
       and the ash web app, static files only (SPEC FR-H12). darkpyonix-ash builds it and
@@ -16,16 +16,16 @@ info:
       `/s/{share_id}#<token>` (share links), `/link` (device approval) and `/new`; they call
       this API from the browser. Project guides stay at `https://darkpyonix.dev/<repo>/`
       (each repository's GitHub Pages project site) and are not part of this API either.
-    - `https://api.darkpyonix.dev` is a **Cloudflare Worker** (`hub/worker/`, TypeScript, D1
+    - `https://api.darkpyonix.dev` is a **Cloudflare Worker** (`darkpyonix/hub/worker/`, TypeScript, D1
       for metadata, a private R2 bucket for notebook content). It serves GitHub sign-in, the
       device registry, the address directory, share resolution, HTTPS names (ACME TXT through
       the Cloudflare DNS API) and hosted notebooks. It serves no HTML front.
-    - `https://relay.darkpyonix.dev` is the **relay host** (`hub/server/`, the `iroh-relay`
+    - `https://relay.darkpyonix.dev` is the **relay host** (`darkpyonix/hub/server/`, the `iroh-relay`
       server crate). Workers cannot accept UDP, and iroh's QUIC address discovery (QAD) needs
       UDP 7842, so the relay runs where it can. Operations served there carry a path-level
       `servers` entry. The relay asks the Worker whom to admit
-      (`/internal/v1/relay/admit`), and the Worker tells the relay to drop removed devices
-      (`/admin/v1/disconnect`).
+      (`/internal/relay/admit`), and the Worker tells the relay to drop removed devices
+      (`/admin/disconnect`).
 
     The peer-to-peer transport is **iroh 1.x** (PROJECT Q1). A device *is* an iroh endpoint:
     its id is the endpoint id, the lowercase hex of its ed25519 public key.
@@ -42,7 +42,7 @@ info:
     phone; may not publish shares or hold names). The `client` role is provisional.
     An account has at most one active `main_server` (Ember INTENT D3); a new one joins only
     as an explicit replacement of the current one (`replace` on approval).
-    A device asks to join with `POST /v1/device-links`, a signed-in person
+    A device asks to join with `POST /device-links`, a signed-in person
     (or the account's main server) approves the user code, and the device claims a device
     token by signing the challenge with its iroh key.
 
@@ -69,12 +69,16 @@ info:
     `private`, `unlisted` or `public`. The hub stores and serves notebooks; it never runs
     them. A notebook may point at a share (`share_id`) so that a link with the share token in
     its fragment opens the owner's live kernel through the relay.
+    **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
+    grows: fields, optional request fields, paths and error codes are added, never renamed,
+    retyped or removed. Clients ignore fields they do not know. A replaced field or path stays,
+    marked `deprecated: true`.
 
     **Errors.** Error bodies are `Error` objects. Every 401 carries a `code`:
     `device_removed` when the device token belongs to a removed device (stop retrying, drop
     the token), `invalid_credentials` for anything else (missing, unknown or expired).
   license:
-    name: MIT
+    name: Apache-2.0
     url: https://github.com/DarkPyonix/darkpyonix/blob/main/LICENSE
 servers:
   - url: https://api.darkpyonix.dev
@@ -117,15 +121,15 @@ paths:
                   status: {type: string, const: ok}
                   version: {type: string}
 
-  /v1/config:
+  /config:
     get:
       tags: [System]
       operationId: getHubConfig
       summary: Where the relays and the pkarr directory are (FR-H8)
       description: |
         Public and cacheable (5 minutes). Clients read their relay map and pkarr URL from here
-        instead of building them in. `api_version` is bumped only for a breaking change under
-        `/v1`.
+        instead of building them in. There is no API version (INTENT D16): the API only grows,
+        and clients look for the fields they need. `hub_version` is informational.
       security: []
       responses:
         "200":
@@ -134,9 +138,8 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [api_version, hub_version, api_url, front_url, relay_urls, pkarr_url, link_url]
+                required: [hub_version, api_url, front_url, relay_urls, pkarr_url, link_url]
                 properties:
-                  api_version: {type: integer, const: 1}
                   hub_version: {type: string}
                   api_url: {type: string, format: uri, example: "https://api.darkpyonix.dev", description: This API's base URL.}
                   front_url: {type: string, format: uri, example: "https://darkpyonix.dev", description: "The front (the main page with the ash web app, on GitHub Pages); share and notebook links live here."}
@@ -216,7 +219,7 @@ paths:
         "403":
           description: Cross-origin request.
 
-  /v1/me:
+  /me:
     get:
       tags: [Accounts]
       operationId: getMe
@@ -240,7 +243,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
-  /v1/me/resolve-token:
+  /me/resolve-token:
     post:
       tags: [Accounts]
       operationId: rotateResolveToken
@@ -268,7 +271,7 @@ paths:
 
   # ------------------------------------------------------------------ devices (FR-H1)
 
-  /v1/device-links:
+  /device-links:
     post:
       tags: [Devices]
       operationId: createDeviceLink
@@ -276,7 +279,7 @@ paths:
       description: |
         Unauthenticated (rate-limited). Show `user_code` (or open `verification_uri_complete`)
         to a person who is signed in, or hand it to the account's main server. Poll
-        `POST /v1/device-links/{link_id}/token` every `interval` seconds until `expires_at`
+        `POST /device-links/{link_id}/token` every `interval` seconds until `expires_at`
         (15 minutes).
       security: []
       requestBody:
@@ -315,7 +318,7 @@ paths:
         "503":
           description: Could not allocate a user code.
 
-  /v1/device-links/{link_id}:
+  /device-links/{link_id}:
     parameters:
       - name: link_id
         in: path
@@ -352,7 +355,7 @@ paths:
         "404":
           description: Unknown link, or an expired one already deleted.
 
-  /v1/device-links/{link_id}/token:
+  /device-links/{link_id}/token:
     parameters:
       - name: link_id
         in: path
@@ -408,7 +411,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
-  /v1/link-codes/{user_code}:
+  /link-codes/{user_code}:
     parameters:
       - name: user_code
         in: path
@@ -463,7 +466,7 @@ paths:
 
         An account has one main server (FR-H1, Ember INTENT D3). If it has one, approving a
         `main_server` link must name it in `replace`; the claim then removes it (its token gets
-        401 `device_removed`, it is listed in `/v1/removed-devices`, its shares and address
+        401 `device_removed`, it is listed in `/removed-devices`, its shares and address
         record go, its relay connections drop) and moves its names to the new main server, in
         one transaction.
       requestBody:
@@ -498,7 +501,7 @@ paths:
         "429":
           description: Too many code lookups or decisions from this account.
 
-  /v1/devices:
+  /devices:
     get:
       tags: [Devices]
       operationId: listDevices
@@ -547,7 +550,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
 
-  /v1/devices/{endpoint_id}:
+  /devices/{endpoint_id}:
     parameters:
       - $ref: "#/components/parameters/EndpointId"
     get:
@@ -618,7 +621,7 @@ paths:
         "404":
           description: No such device in the account.
 
-  /v1/devices/{endpoint_id}/readmit:
+  /devices/{endpoint_id}/readmit:
     parameters:
       - $ref: "#/components/parameters/EndpointId"
     post:
@@ -652,7 +655,7 @@ paths:
         "409":
           description: The device is not removed.
 
-  /v1/removed-devices:
+  /removed-devices:
     get:
       tags: [Devices]
       operationId: listRemovedDevices
@@ -660,7 +663,7 @@ paths:
       description: |
         A signed-in browser session only; device tokens (even the main server's) get 403.
         Newest removal first, at most 100. A re-admitted device that claimed its link is back
-        in `GET /v1/devices` and no longer here.
+        in `GET /devices` and no longer here.
       security:
         - session: []
       responses:
@@ -686,7 +689,7 @@ paths:
 
   # ------------------------------------------------------------------ directory (FR-H2)
 
-  /v1/devices/{endpoint_id}/addresses:
+  /devices/{endpoint_id}/addresses:
     parameters:
       - $ref: "#/components/parameters/EndpointId"
     get:
@@ -781,10 +784,10 @@ paths:
       summary: iroh relay (WebSocket upgrade, iroh relay protocol), on the relay host
       description: |
         Served by the `iroh-relay` crate on the relay host. The relay handshake proves the
-        client's endpoint id; the relay then asks `POST https://api.darkpyonix.dev/internal/v1/relay/admit`
+        client's endpoint id; the relay then asks `POST https://api.darkpyonix.dev/internal/relay/admit`
         (with the auth token the client presented, if any) and may cache an allow for
         `cache_secs`. Admitted: registered, non-removed devices; or any endpoint presenting
-        a valid guest relay pass from `GET /v1/shares/{share_id}` as `Authorization: Bearer`
+        a valid guest relay pass from `GET /shares/{share_id}` as `Authorization: Bearer`
         or `?token=`.
       security: []
       responses:
@@ -819,7 +822,7 @@ paths:
         "204":
           description: No content.
 
-  /admin/v1/disconnect:
+  /admin/disconnect:
     servers:
       - url: https://relay.darkpyonix.dev
     post:
@@ -845,7 +848,7 @@ paths:
         "401":
           description: Relay secret missing or wrong.
 
-  /internal/v1/relay/admit:
+  /internal/relay/admit:
     post:
       tags: [Relay]
       operationId: relayAdmit
@@ -880,7 +883,7 @@ paths:
         "401":
           description: Relay secret missing or wrong.
 
-  /internal/v1/relay/presence:
+  /internal/relay/presence:
     post:
       tags: [Relay]
       operationId: relayPresence
@@ -907,7 +910,7 @@ paths:
 
   # ------------------------------------------------------------------ shares (FR-H4)
 
-  /v1/shares:
+  /shares:
     post:
       tags: [Shares]
       operationId: publishShare
@@ -942,7 +945,7 @@ paths:
         "409":
           description: The share id is published by another device.
 
-  /v1/shares/{share_id}:
+  /shares/{share_id}:
     parameters:
       - $ref: "#/components/parameters/ShareId"
     get:
@@ -983,7 +986,7 @@ paths:
 
   # ------------------------------------------------------------------ notebooks (FR-H14..H19)
 
-  /v1/notebooks:
+  /notebooks:
     get:
       tags: [Notebooks]
       operationId: listMyNotebooks
@@ -1041,7 +1044,7 @@ paths:
         "429":
           description: Too many notebooks created this minute (FR-H19).
 
-  /v1/users/{github_login}/notebooks:
+  /users/{github_login}/notebooks:
     parameters:
       - name: github_login
         in: path
@@ -1069,7 +1072,7 @@ paths:
         "429":
           description: Too many anonymous reads (FR-H19).
 
-  /v1/notebooks/{notebook_id}:
+  /notebooks/{notebook_id}:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     get:
@@ -1152,7 +1155,7 @@ paths:
         "404":
           description: Unknown notebook in the caller's reach.
 
-  /v1/notebooks/{notebook_id}/versions:
+  /notebooks/{notebook_id}/versions:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1201,7 +1204,7 @@ paths:
         "429":
           description: Too many uploads this minute (FR-H19).
 
-  /v1/notebooks/{notebook_id}/versions/{version}:
+  /notebooks/{notebook_id}/versions/{version}:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1234,7 +1237,7 @@ paths:
         "404":
           description: Unknown version in the caller's reach.
 
-  /v1/notebooks/{notebook_id}/versions/{version}/source:
+  /notebooks/{notebook_id}/versions/{version}/source:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1260,7 +1263,7 @@ paths:
         "429":
           description: Too many anonymous reads (FR-H19).
 
-  /v1/notebooks/{notebook_id}/versions/{version}/run:
+  /notebooks/{notebook_id}/versions/{version}/run:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1283,7 +1286,7 @@ paths:
         "429":
           description: Too many anonymous reads (FR-H19).
 
-  /v1/notebooks/{notebook_id}/report:
+  /notebooks/{notebook_id}/report:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1311,7 +1314,7 @@ paths:
         "429":
           description: Too many reports from this address.
 
-  /admin/v1/notebooks/{notebook_id}/takedown:
+  /admin/notebooks/{notebook_id}/takedown:
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1344,7 +1347,7 @@ paths:
 
   # ------------------------------------------------------------------ names (FR-H5)
 
-  /v1/names:
+  /names:
     get:
       tags: [Names]
       operationId: listNames
@@ -1364,7 +1367,7 @@ paths:
         "401":
           description: No valid session or device token.
 
-  /v1/names/{name}:
+  /names/{name}:
     parameters:
       - $ref: "#/components/parameters/Name"
     put:
@@ -1406,7 +1409,7 @@ paths:
         "404":
           description: Not reserved in the caller's reach.
 
-  /v1/names/{name}/acme-challenge:
+  /names/{name}/acme-challenge:
     parameters:
       - $ref: "#/components/parameters/Name"
     put:
@@ -1541,7 +1544,7 @@ components:
         removed_at: {type: integer, description: Unix seconds it was removed.}
         readmit_until:
           type: [integer, "null"]
-          description: While a re-admission is open (`POST /v1/devices/{endpoint_id}/readmit`), its expiry in Unix seconds; else null.
+          description: While a re-admission is open (`POST /devices/{endpoint_id}/readmit`), its expiry in Unix seconds; else null.
     DeviceApp:
       type: object
       required: [kind, version, services]

@@ -1,5 +1,5 @@
 //! The runtime home (`DARKPYONIX_HOME`, default `~/.darkpyonix`), PROTOCOL §1.
-//! Mirrors `darkpyonix/kernel/darkpyonix/_home.py`.
+//! Mirrors `darkpyonix/kernel/_home.py`.
 
 use std::fs;
 use std::io::{self, Write};

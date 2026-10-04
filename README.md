@@ -1,54 +1,88 @@
 # darkpyonix
 
-DarkPyonix Kernel — a file-bound, manager-independent Python kernel for AI/ML work done by people and agents.
+DarkPyonix binds one Python kernel to one notebook file. Close the editor, lose the network or kill
+the manager: the run keeps going, and the next tool that opens the file finds the same kernel. It is
+built for long AI/ML runs shared by people and agents.
 
 ```
-darkpyonix run train.py          # runs in the file's kernel; logs land in __runs__/train.py/
-darkpyonix stop train.py         # interrupts the running cell — never kills
-darkpyonix logs train.py -f      # follow the latest run
-darkpyonix vars train.py         # what the kernel currently holds
+darkpyonix run train.py                  # run the whole file, follow the output
+darkpyonix run train.py --detach         # start it and return the run id
+darkpyonix logs train.py --follow        # follow the latest run
+darkpyonix stop train.py                 # interrupt the running cell; the kernel stays
+darkpyonix vars train.py                 # what the kernel holds now
 ```
 
-- **One kernel per file.** The kernel id comes from the file's path, so every IDE, agent and shared viewer finds the same kernel. Running the same file twice is refused, not duplicated.
-- **Kernels outlive managers.** Close the IDE, lose the network, kill the manager: the training keeps going, and the next manager finds it again.
-- **Stop means interrupt.** `KeyboardInterrupt` in the running cell; the namespace stays.
-- **Runs are recorded automatically** beside the file as `.ipynb` (nbformat 4), and inside the kernel as `__runs__`.
-- **Standard library only, Python 3.8+, nothing to install** in the interpreter that runs the kernel.
-- **Notebooks are plain `.py` / `.pynb`** with `# %% [type]` cells, valid Python under `python file.py`.
+- **One kernel per file.** The kernel id comes from the file's path. Every IDE, agent and shared
+  viewer reaches the same kernel, and a second run of a busy file is refused, not duplicated.
+- **Kernels outlive managers.** A kernel never depends on a manager being alive, so any manager
+  can come and go.
+- **Stop means interrupt.** Stopping raises `KeyboardInterrupt` in the running cell. The
+  variables stay, so the next run continues from them.
+- **Runs are recorded.** Each run is saved beside the file in `__runs__/` as an nbformat 4
+  `.ipynb`.
+- **Standard library only, Python 3.8+.** The kernel starts from any interpreter without being
+  installed there.
+- **Notebooks are plain `.py` / `.pynb` files** with `# %%` cells. They stay valid Python under
+  `python file.py`.
+
+## What this package is
+
+This package is the runtime API that a notebook imports as `darkpyonix` (`markdown`, `params`,
+`binding`, `display` and the rest). It has no dependencies. Inside a kernel, `import darkpyonix`
+works without it, because the kernel loads its own sources as `darkpyonix`. Install it so a notebook
+also runs outside a kernel, for example with `uv run python train.py` in CI.
+
+```
+uv add darkpyonix                         # into a uv project
+ppp core add "darkpyonix==0.2.0"          # with pypackpack
+tcl install darkpyonix                    # with toolchain-lite
+```
+
+The `darkpyonix` CLI and the manager are a separate Rust binary. It is not in this package yet,
+because prebuilt binaries are not published (planned). The
+[install guide](https://darkpyonix.dev/darkpyonix/en/getting-started.html) shows how to build it
+from a checkout.
 
 ## Status
 
-Design is fixed (milestone M0); implementation starts with M1. See [PROJECT.md](PROJECT.md).
+Version 0.2.0 is alpha. What works today and what is planned:
 
-## Documents
-
-| Document | Content |
+| Part | Status |
 |---|---|
-| [PROJECT.md](PROJECT.md) | Scope, milestones with dates, open questions |
-| [docs/INTENT.md](docs/INTENT.md) | Why, decisions (D1–D15), rejected alternatives |
-| [docs/SPEC.md](docs/SPEC.md) | Requirements and acceptance criteria |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How kernel, manager, hub, Ember and ash fit together |
-| [docs/PROTOCOL.md](docs/PROTOCOL.md) | DKP/1: discovery datagrams and the kernel control channel |
-| [docs/FORMAT.md](docs/FORMAT.md) | The notebook file format |
-| [docs/api/](docs/api/) | OpenAPI for the manager and the hub, rendered by `docs/api/index.html` |
-| [darkpyonix.mermaid](darkpyonix.mermaid) | Class diagram of the object model |
-| [docs/설계초안/](docs/설계초안/) | The 2025 design materials, kept for reference |
+| Kernel: one per file, outlives managers, interrupt, run logs | implemented |
+| Runtime API and notebook parser (this package) | implemented |
+| Rust manager and `darkpyonix` CLI | implemented, built from source |
+| Prebuilt CLI binary in a wheel | planned |
+| VS Code and IntelliJ notebook renderers | planned ([#22](https://github.com/DarkPyonix/darkpyonix/issues/22)) |
+| ash opening a shared kernel | planned ([#20](https://github.com/DarkPyonix/darkpyonix/issues/20)) |
+| darkpyonix.dev hub | planned ([#21](https://github.com/DarkPyonix/darkpyonix/issues/21)) |
 
-To browse the API locally: `python3 -m http.server -d docs/api 8000` and open <http://127.0.0.1:8000/>.
+Parts of the manager are being redesigned. The
+[guide's overview](https://darkpyonix.dev/darkpyonix/en/) lists each change with its issue.
+
+## Documentation
+
+- [User guide](https://darkpyonix.dev/darkpyonix/) (English and Korean): install, notebook files,
+  the CLI, run logs, the manager API, editors and agents.
+- [Notebook file format](https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/FORMAT.md)
+- [Kernel wire protocol](https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/PROTOCOL.md)
+- [Manager HTTP API (OpenAPI)](https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/api/manager.openapi.yaml)
+- [Architecture](https://github.com/DarkPyonix/darkpyonix/blob/develop/docs/ARCHITECTURE.md)
 
 ## Repository layout
 
 ```
-darkpyonix/kernel/darkpyonix/            runtime API + notebook parser (stdlib only)
-darkpyonix/kernel/darkpyonix/kernel/     the kernel process (stdlib only)
-darkpyonix/kernel/darkpyonix/manager/    the superseded Python manager prototype
+darkpyonix/kernel/                       the `darkpyonix` Python package (stdlib only): runtime API,
+                                         notebook parser (format/) and the kernel process (_*.py,
+                                         `python -m darkpyonix`)
 darkpyonix/manager/                      the manager and the darkpyonix CLI (Rust workspace)
-hub/worker/                              darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
-hub/server/                              relay.darkpyonix.dev iroh relay host (Rust)
-docs/                                    design documents
+darkpyonix/hub/worker/                   darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
+darkpyonix/hub/server/                   relay.darkpyonix.dev iroh relay host (Rust)
+docs/                                    design documents and the user guide
 tests/                                   Python test suite
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache License 2.0 (SPDX `Apache-2.0`). See
+[LICENSE](https://github.com/DarkPyonix/darkpyonix/blob/develop/LICENSE).

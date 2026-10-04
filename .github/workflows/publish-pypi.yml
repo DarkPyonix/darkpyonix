@@ -1,0 +1,76 @@
+name: Publish to PyPI
+
+# Publishing happens only when a GitHub Release is published. The upload uses PyPI trusted
+# publishing (OIDC); there is no API token anywhere in this repository.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build sdist and wheel
+        run: uv build -o dist
+
+      - name: Release tag must be v + package version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # The version is declared once, in darkpyonix/kernel/__init__.py, and pyproject.toml
+          # reads it from there ([tool.hatch.version]); the built wheel carries it.
+          version="$(python3 - <<'PY'
+          import glob, zipfile
+          whl, = glob.glob("dist/*.whl")
+          with zipfile.ZipFile(whl) as z:
+              meta = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+              for line in z.read(meta).decode().splitlines():
+                  if line.startswith("Version: "):
+                      print(line.split(": ", 1)[1])
+                      break
+          PY
+          )"
+          echo "tag=$TAG package=$version"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::release tag '$TAG' does not match package version 'v$version'"
+            exit 1
+          fi
+
+      - name: Smoke-test the wheel in a fresh environment
+        working-directory: ${{ runner.temp }}
+        run: |
+          # Run outside the checkout so the source tree cannot shadow the installed package.
+          uv venv --no-project -p 3.8 smoke
+          uv pip install -p smoke/bin/python "$GITHUB_WORKSPACE"/dist/*.whl
+          smoke/bin/python -c "import darkpyonix, darkpyonix._server, darkpyonix._protocol as p; assert p.KERNEL_VERSION == darkpyonix.__version__; print(darkpyonix.__version__, darkpyonix.__file__)"
+          # The kernel's launch command.
+          smoke/bin/python -m darkpyonix --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Upload to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/darkpyonix/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

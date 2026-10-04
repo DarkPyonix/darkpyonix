@@ -79,6 +79,8 @@ import torch
 
 "예약"은 문법상 받아들이고 보존하지만 v1 커널이 특별한 의미를 주지 않는다는 뜻입니다. 예약 타입의 본문도 유효한 파이썬이므로 `code`처럼 실행됩니다. `darkpyonix.run_cinterop()` 같은 API는 v1에서 `NotImplementedError`를 냅니다.
 
+예약 타입(`parallel`, `concurrent`, interop, 데이터 형식)과 `layout`의 실행 의미·계산 규칙은 SPEC FR-X7~X12, FR-F7~F13(`Draft`)과 [proposals/cells-parallel-interop.md](proposals/cells-parallel-interop.md)에 있습니다. 합의(`Agreed`)되면 이 표와 §2.3을 그 내용으로 바꿉니다.
+
 ### 3.1 레이아웃과 병렬은 다릅니다 (이슈 #7)
 
 - `layout: horizontal`은 **화면 배치**입니다. 셀은 여전히 차례대로 실행되고 실행 버튼도 셀마다 따로 있습니다.

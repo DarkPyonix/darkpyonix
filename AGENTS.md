@@ -7,18 +7,22 @@ Guidance for working in this repository.
 `darkpyonix` (repo `DarkPyonix/darkpyonix`, checked out as `darkpyonix-core`) is the
 DarkPyonix kernel stack:
 
-- `darkpyonix/kernel/darkpyonix/kernel/`: the **file-bound kernel**. One kernel per source
-  file, independent of any manager, standard library only, runnable by any Python 3.8+
-  interpreter without installation.
+- `darkpyonix/kernel/`: the **Python `darkpyonix` package**. The folder is named `kernel`, but
+  its contents ARE the package: the build maps the folder to the import name `darkpyonix`
+  (`pyproject.toml`, hatchling `sources`). Standard library only, runnable by any Python 3.8+
+  interpreter without installation. Two layers share the folder:
+  - the **file-bound kernel**: the private modules `_server.py`, `_executor.py`,
+    `_protocol.py`, ... and `__main__.py` (`python -m darkpyonix`). One kernel per source file,
+    independent of any manager;
+  - the **runtime API** that notebook files import (`darkpyonix.markdown`,
+    `darkpyonix.params`, `darkpyonix.binding`, ...) and the `format/` subpackage (notebook
+    parser). `import darkpyonix` never imports the kernel-process modules.
 - `darkpyonix/manager/`: the **kernel manager** and the `darkpyonix` CLI, a Rust workspace
   (INTENT D10). A disposable HTTP front for kernels. It discovers running kernels, launches
-  new ones, and serves the kernel access API to IDEs, agents and the shared notebook (ash); it does not host ash. It embeds the Python kernel
-  sources from `darkpyonix/kernel/`. `darkpyonix/kernel/darkpyonix/manager/` is the superseded
-  Python prototype.
-- `darkpyonix/kernel/darkpyonix/` (top level): the **runtime API** that notebook files import
-  (`darkpyonix.markdown`, `darkpyonix.params`, `darkpyonix.binding`, …). Standard library only.
-- `hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine connections, HTTPS,
-  and hosting of the official darkpyonix-ash viewer.
+  new ones, and serves the kernel access API to IDEs, agents and the shared notebook (ash); it
+  does not host ash. It embeds the Python package sources from `darkpyonix/kernel/`.
+- `darkpyonix/hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine
+  connections, HTTPS, and hosting of the official darkpyonix-ash viewer.
 
 The rest of the product lives in sibling repositories: `darkpyonix-ember` (IDE and agent
 workbench), `darkpyonix-ash` (shared WASM notebook), `vscode-darkpyonix`,
@@ -43,16 +47,18 @@ The root holds exactly these entries:
 - `.github/`: CI workflows (when present).
 - `AGENTS.md`: these working agreements.
 - `CLAUDE.md`: a pointer to `AGENTS.md`.
-- `LICENSE`: MIT.
+- `LICENSE`: Apache-2.0 (user decision 2026-10-03: core and ember are Apache-2.0, ash stays MPL-2.0).
 - `PROJECT.md`: scope, milestones, open questions.
 - `README.md`: what the project is and how it is laid out.
 - `darkpyonix.mermaid`: the class diagram of the object model.
-- `darkpyonix/`: the product code: `kernel/` (Python kernel and runtime API) and `manager/`
-  (Rust manager and CLI).
+- `darkpyonix/`: the product code, exactly three folders: `kernel/` (the Python `darkpyonix`
+  package: runtime API and kernel), `manager/` (Rust manager and CLI) and `hub/`
+  (`darkpyonix.dev`: Cloudflare Worker and relay host).
 - `docs/`: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT and the OpenAPI files.
-- `hub/`: `darkpyonix.dev` (Cloudflare Worker and relay host).
 - `pyproject.toml`: the Python package and pytest configuration.
-- `tests/`: the Python test suite.
+- `tests/`: the Python test suite. `tests/conftest.py` links `darkpyonix/kernel` as
+  `.scratch/src/darkpyonix` and puts `.scratch/src` on `sys.path` (and `PYTHONPATH` for the
+  bare interpreters it spawns), because the folder name differs from the import name.
 
 **Do not add a top-level folder or file without the user's approval.** Propose what you want
 to add and why, explain why no existing directory fits, then wait for the answer. Ignored
@@ -107,7 +113,7 @@ Never introduce anything that violates these. If a task seems to require it, sto
 2. Where inside:
    - worktrees: `.claude/worktrees/<name>/` (ignored by git);
    - throwaway work, probes, downloads, test run directories: `.scratch/<name>/` (ignored);
-   - Rust build output: `darkpyonix/manager/target/` and `hub/server/target/` (ignored);
+   - Rust build output: `darkpyonix/manager/target/` and `darkpyonix/hub/server/target/` (ignored);
    - experiments worth keeping: ask first (see "Repository root"); there is no top-level
      `experiments/` folder.
 3. The one exception is what the product itself writes at run time on a user's machine
@@ -154,6 +160,24 @@ Never introduce anything that violates these. If a task seems to require it, sto
 - **No `Co-Authored-By` trailer and no "Generated with" line** in commits or PR bodies.
 - One logical change per commit. Do not commit `.DS_Store`, `__pycache__`, `.scratch/`,
   `__runs__/` produced by tests, or local databases.
+
+## CI names
+
+Workflow files and names are the same in every thisisthepy and darkpyonix repository, so a
+status check means the same thing wherever it appears (owner-approved, 2026-10-04):
+
+- `test.yml`, "Test": the quality gate on every pull request.
+- `release-sync.yml`, "Release sync": develop to release, through
+  `.github/scripts/release/sync-release.sh`; a pull request then takes release to main.
+- `publish-pypi.yml`, "Publish to PyPI": a published GitHub Release uploads the package.
+- `pages.yml`, "Pages": the guide site.
+- `test-<target>.yml`, "<Target> test": a special check for one target.
+
+Job names are short sentence-case statements of what the job does ("Rust manager", "Hub
+worker", "Deploy the guide"); a matrix job is "<what> (<os>)" or "<what> (<os>, <version>)",
+such as "Python (ubuntu-latest, 3.8)". A job with the same role carries the same name in every
+repository. Renaming a job renames its status check, so the owner re-selects main's required
+checks.
 
 ## Verification
 

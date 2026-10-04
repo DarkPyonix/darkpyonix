@@ -41,7 +41,8 @@ async fn pr_2_handshake_and_requests_against_fake_kernel() {
     // get() enriches the announce with `status` over DKP.
     let info = be.get(&fake.kernel_id).await.unwrap();
     assert_eq!(info.status, "idle");
-    assert_eq!(info.kernel_version, "0.1.0");
+    // The fake speaks through darkpyonix._protocol, so it reports the package version.
+    assert_eq!(info.kernel_version, "0.2.0");
     assert!(
         info.runs_dir.ends_with("__runs__/nb.py"),
         "{}",

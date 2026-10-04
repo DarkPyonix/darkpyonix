@@ -12,10 +12,11 @@ import time
 
 import pytest
 
+from conftest import SRC_ROOT
 from darkpyonix import _home
-from darkpyonix.kernel import discovery, launcher, lock, registry
-from darkpyonix.kernel.protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
-from darkpyonix.kernel.runs import RunStore
+from darkpyonix import _discovery as discovery, _launcher as launcher, _lock as lock, _registry as registry
+from darkpyonix._protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
+from darkpyonix._runs import RunStore
 
 from kernel_procs import (
     connect, kill, notebook, reap, run_and_wait, start, stream_text, wait_pid_gone,
@@ -43,7 +44,7 @@ def test_fr_k1_kernel_runs_from_uninstalled_interpreter(python, dp_home, scratch
     probe[2] = launcher.BOOTSTRAP_PRELUDE + "import darkpyonix, sys; print(darkpyonix.__file__); sys.exit(0)"
     out = subprocess.run(probe, cwd=scratch, env=env, capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip().startswith(launcher.KERNEL_ROOT)
+    assert out.stdout.strip().startswith(launcher.PACKAGE_DIR)
 
     path = notebook(scratch)
     proc = subprocess.Popen(launcher.bootstrap_command(python, path), cwd=scratch, env=env,
@@ -59,6 +60,77 @@ def test_fr_k1_kernel_runs_from_uninstalled_interpreter(python, dp_home, scratch
         version = subprocess.run([python, "-c", "import platform; print(platform.python_version())"],
                                  env=env, capture_output=True, text=True, timeout=30).stdout.strip()
         assert info["python"]["version"] == version
+    finally:
+        reap(proc)
+
+
+def test_fr_k1_spawn_child_from_source_checkout_kernel_can_import_darkpyonix(
+        python, dp_home, scratch, monkeypatch):
+    """A multiprocessing spawn child of user code can ``import darkpyonix`` (issue #65)."""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    path = write_notebook(scratch, "spawn_nb.py", """
+        import multiprocessing
+
+        def child(q):
+            import darkpyonix
+            q.put("child imported " + darkpyonix.__name__)
+
+        # %% [code]
+        if __name__ == "__main__":
+            ctx = multiprocessing.get_context("spawn")
+            q = ctx.Queue()
+            p = ctx.Process(target=child, args=(q,))
+            p.start()
+            print(q.get(timeout=30))
+            p.join(30)
+            print("exit", p.exitcode)
+        """)
+    pid = launcher.launch(path, python=python)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=20)
+        assert info is not None, "kernel did not announce"
+        c = connect(info)
+        try:
+            status, _ = run_and_wait(c, timeout=60)
+            nb = c.request("runs.get", {"run_id": "latest"})
+        finally:
+            c.close()
+        assert status == "ok", [o.get("text") for c in nb["cells"] for o in c["outputs"]]
+        assert stream_text(nb).splitlines() == ["child imported darkpyonix", "exit 0"]
+    finally:
+        kill(pid, signal.SIGTERM)
+        if not wait_pid_gone(pid):
+            kill(pid, signal.SIGKILL)
+
+
+def test_fr_k1_installed_layout_kernel_leaves_pythonpath_unchanged(python, dp_home, scratch):
+    """A kernel whose package folder is named ``darkpyonix`` adds nothing to children's paths."""
+    root = os.path.join(scratch, "site")
+    os.makedirs(root)
+    import shutil
+    shutil.copytree(launcher.PACKAGE_DIR, os.path.join(root, "darkpyonix"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    path = write_notebook(scratch, "layout_nb.py", """
+        # %% [code]
+        import os
+        print(os.environ.get("PYTHONPATH"))
+        """)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = root
+    proc = subprocess.Popen([python, "-m", "darkpyonix", "--file", path], cwd=scratch, env=env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=proc.pid, timeout=20)
+        assert info is not None, "kernel did not announce"
+        c = connect(info)
+        try:
+            status, _ = run_and_wait(c)
+            nb = c.request("runs.get", {"run_id": "latest"})
+        finally:
+            c.close()
+        assert status == "ok"
+        assert stream_text(nb).strip() == root
+        assert not os.path.exists(os.path.join(dp_home, "src"))
     finally:
         reap(proc)
 
@@ -97,7 +169,7 @@ def test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell(python, dp_home, scratch
             c.close()
         assert status == "ok", nb
         module, prefix, in_venv = stream_text(nb).splitlines()
-        assert module.startswith(launcher.KERNEL_ROOT)
+        assert module.startswith(launcher.PACKAGE_DIR)
         assert os.path.realpath(prefix) == os.path.realpath(venv)
         assert in_venv == "True"
     finally:
@@ -153,8 +225,8 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
     path = notebook(scratch)
     kid = kernel_id_for(path)
     # A throwaway "manager" process launches the kernel and exits at once.
-    code = ("import sys; sys.path.insert(0, %r); from darkpyonix.kernel import launcher; "
-            "print(launcher.launch(%r, python=%r))" % (launcher.KERNEL_ROOT, path, python))
+    code = ("import sys; sys.path.insert(0, %r); from darkpyonix import _launcher as launcher; "
+            "print(launcher.launch(%r, python=%r))" % (SRC_ROOT, path, python))
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     pid = int(out.stdout.strip())

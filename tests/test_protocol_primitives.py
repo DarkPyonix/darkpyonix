@@ -8,7 +8,7 @@ import struct
 import pytest
 
 from darkpyonix import _home
-from darkpyonix.kernel import protocol as p
+from darkpyonix import _protocol as p
 
 
 def test_fr_k2_kernel_id_is_stable_across_path_spellings(scratch, monkeypatch):

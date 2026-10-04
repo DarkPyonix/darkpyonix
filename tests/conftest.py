@@ -11,11 +11,35 @@ import uuid
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KERNEL_ROOT = os.path.join(REPO, "darkpyonix", "kernel")
+# The package lives in darkpyonix/kernel/ but is imported as ``darkpyonix`` (the build maps the
+# folder to that name). Tests need a directory that *contains* a ``darkpyonix`` entry, both for
+# this process and for the bare interpreters they spawn (PYTHONPATH), so a symlink
+# ``.scratch/src/darkpyonix -> darkpyonix/kernel`` provides it (a copy where symlinks are not
+# allowed). SRC_ROOT is that directory; PACKAGE_DIR the real folder.
+PACKAGE_DIR = os.path.join(REPO, "darkpyonix", "kernel")
+SRC_ROOT = os.path.join(REPO, ".scratch", "src")
 SCRATCH = os.path.join(REPO, ".scratch", "tests")
 
-if KERNEL_ROOT not in sys.path:
-    sys.path.insert(0, KERNEL_ROOT)
+
+def _link_package():
+    link = os.path.join(SRC_ROOT, "darkpyonix")
+    if os.path.realpath(link) == os.path.realpath(PACKAGE_DIR):
+        return
+    os.makedirs(SRC_ROOT, exist_ok=True)
+    if os.path.lexists(link):
+        if os.path.islink(link):
+            os.unlink(link)
+        else:
+            shutil.rmtree(link)
+    try:
+        os.symlink(PACKAGE_DIR, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        shutil.copytree(PACKAGE_DIR, link, ignore=shutil.ignore_patterns("__pycache__"))
+
+
+_link_package()
+if SRC_ROOT not in sys.path:
+    sys.path.insert(0, SRC_ROOT)
 
 
 def _probe(executable: str):

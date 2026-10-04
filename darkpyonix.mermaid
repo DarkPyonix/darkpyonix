@@ -80,7 +80,7 @@ classDiagram
     RuntimeHost <|.. PlainHost
     Params ..> RuntimeHost
 
-    %% ───────────── Kernel (darkpyonix.kernel, stdlib only) ─────────────
+    %% ───────────── Kernel (darkpyonix/kernel/__main__.py and the _*.py modules, stdlib only) ─────────────
     namespace kernel {
         class Kernel {
             <<process main>>
@@ -213,8 +213,10 @@ classDiagram
             +result str|None
         }
         class ControlServer {
-            <<control thread>>
-            +port int
+            <<control thread, unix socket or named pipe>>
+            +address str
+            -same_account(conn) bool
+            -receive_fd(session ClientSession) int
             -sessions list~ClientSession~
             +serve_forever() None
             +broadcast(event Event) None
@@ -231,6 +233,46 @@ classDiagram
             +append(type str, data dict) Event
             +since(seq int) list~Event~
         }
+        class AdoptedStream {
+            <<handed-off connection>>
+            +stream_id str
+            +kind str
+            +label StreamLabel
+            +sock socket
+            +send(event Event) None
+            +close() None
+        }
+        class WebSocketSync {
+            <<2025 WS messages>>
+            +stream AdoptedStream
+            +on_message(msg dict) None
+            +translate(event Event, label StreamLabel) dict|None
+        }
+        class StreamLabel {
+            +capabilities set~Capability~
+            +client_id str|None
+            +user str|None
+            +nickname str|None
+            +share_id str|None
+            +allows(event Event) bool
+        }
+        class KernelTokenStore {
+            <<2025 File.tokens, kernel only, location provisional #48>>
+            +kernel_id str
+            +tokens list~KernelToken~
+            +load()$ KernelTokenStore
+            +issue(kind str, capabilities set~Capability~) str
+            +verify(token str) dict
+            +revoke(share_id str) int
+            +delete() None
+        }
+        class KernelToken {
+            +token_sha256 str
+            +kind str
+            +capabilities set~Capability~
+            +share_id str|None
+            +revoked_at datetime|None
+        }
         class DiscoveryResponder {
             <<discovery thread>>
             +group str
@@ -238,10 +280,6 @@ classDiagram
             +announce() None
             +bye() None
             -on_query(msg dict, addr) None
-        }
-        class Registry {
-            +write(info dict) None
-            +remove() None
         }
     }
     Kernel *-- KernelIdentity
@@ -252,6 +290,8 @@ classDiagram
     Kernel *-- ControlServer
     Kernel *-- DiscoveryResponder
     Kernel *-- EventLog
+    Kernel *-- KernelTokenStore
+    ClientSession ..> KernelTokenStore : tokens.*
     Kernel --> KernelStatus
     Executor ..> NotebookDocument : parses
     Executor --> RunRequest
@@ -273,11 +313,15 @@ classDiagram
     RunLog *-- CellLog : cells
     Executor ..> RunsMagic : injects as __runs__
     ControlServer *-- ClientSession
+    ControlServer *-- AdoptedStream : adopt
+    AdoptedStream *-- StreamLabel
+    WebSocketSync --> AdoptedStream : kind ws
+    WebSocketSync ..> ClientSession : start_typing / cell_focus as doc.* requests
+    AdoptedStream ..> EventLog : replay and live events
     ControlServer ..> EventLog : replay
     ClientSession ..> Executor : run / interrupt / restart
-    DiscoveryResponder ..> Registry : mirrors announce
 
-    %% ───────────── Manager (darkpyonix.manager) ─────────────
+    %% ───────────── Manager (Rust workspace darkpyonix/manager) ─────────────
     namespace manager {
         class ManagerApp {
             +mode ManagerMode
@@ -310,18 +354,17 @@ classDiagram
             +kernel_id str
             +path str
             +pid int
-            +port int
+            +control str
             +status str
             +python dict
         }
         class DiscoveryClient {
             +query(kernel_id str|None) list~dict~
             +listen() None
-            +scan_registry() list~dict~
         }
         class KernelLauncher {
             +python str
-            +bootstrap(kernel_root str) str
+            +bootstrap(package_root str) str
             +launch(path str, cwd str, env dict) int
         }
         class KernelClient {
@@ -331,46 +374,62 @@ classDiagram
             +close() None
         }
         class EventBroker {
-            +stream(kernel_id str, since int, permission Permission) AsyncIterator~Event~
+            +stream(kernel_id str, since int, capabilities set~Capability~) AsyncIterator~Event~
         }
         class AuthService {
             +master_token str
             +check(token str) Principal
-            +create_share(kernel_id str, permission Permission) ShareToken
+            +create_share(kernel_id str, capabilities set~Capability~) ShareToken
             +revoke(share_id str) None
+            +initial_token(kernel_id str) str
+            +set_password(token str, password str) None
+            +login(password str) str
+            +kernel_login(kernel_id str, password str) str
+            +reset_master(password str) str
+            +reset_shared(capabilities set~Capability~) ShareToken
+            +verify(kernel_id str, token str) dict
+            +forget_deleted_files() None
+        }
+        class ManagerCredentials {
+            <<one per manager, manager.db>>
+            +password_hash str|None
+            +master_token_hash str
         }
         class Principal {
-            +permission Permission
+            +capabilities set~Capability~
             +kernel_id str|None
-            +can(action str) bool
+            +is_master bool
+            +has(capability Capability) bool
         }
-        class Permission {
-            <<enumeration>>
-            ADMIN
-            VIEWER3
-            VIEWER2
-            VIEWER1
+        class Capability {
+            <<enumeration, no order>>
+            READ
+            HISTORY
+            EXECUTE
+            EDIT
+            MANAGE
         }
         class ShareToken {
             +share_id str
-            +kernel_id str
-            +permission Permission
+            +kernel_id str|None
+            +capabilities set~Capability~
             +token_hash str
             +expires_at datetime|None
+        }
+        class StreamHandoff {
+            +handoff(conn Connection, kernel KernelInfo, label StreamLabel) None
+            +pump(conn Connection, kernel KernelInfo, label StreamLabel) None
+            +close_share(share_id str) None
         }
         class LifecycleWatchdog {
             +idle_timeout int
             +touch() None
             +run() None
         }
-        class ManagerRegistry {
-            +publish(url str, token str) None
-            +find_alive()$ list~dict~
-        }
         class Cli {
             <<darkpyonix CLI>>
             +main(argv list) int
-            -ensure_manager() ManagerHandle
+            -spawn_manager() ManagerHandle
         }
     }
     ManagerApp --> ManagerMode
@@ -379,21 +438,28 @@ classDiagram
     ManagerApp *-- AuthService
     ManagerApp *-- EventBroker
     ManagerApp *-- LifecycleWatchdog
-    ManagerApp ..> ManagerRegistry : ephemeral only
+    ManagerApp *-- StreamHandoff
+    StreamHandoff ..> KernelClient : adopt / streams.close
+    AuthService ..> StreamHandoff : revoke closes streams
     KernelDirectory *-- DiscoveryClient
     KernelDirectory *-- KernelLauncher
     KernelDirectory --> KernelInfo
     KernelDirectory ..> KernelClient
     EventBroker ..> KernelClient
     AuthService --> Principal
-    AuthService *-- ShareToken
-    Principal --> Permission
-    ShareToken --> Permission
-    Cli ..> ManagerRegistry : finds or spawns
+    AuthService *-- ShareToken : manager shared tokens (manager.db)
+    AuthService *-- ManagerCredentials
+    AuthService ..> KernelClient : tokens.issue / verify / revoke / list
+    KernelTokenStore *-- KernelToken
+    KernelToken --> Capability
+    Principal --> Capability
+    ShareToken --> Capability
+    Cli ..> ManagerApp : spawns its own, reads url and token from stdout
     Cli ..> ManagerApp : HTTP
 
     %% ───────────── Wire boundaries ─────────────
-    KernelClient ..> ControlServer : DKP/1 over loopback TCP (HMAC handshake)
+    KernelClient ..> ControlServer : DKP/1 over unix socket or named pipe (same OS account)
+    StreamHandoff ..> ControlServer : adopt + POSIX SCM_RIGHTS / Windows WSADuplicateSocketW
     DiscoveryClient ..> DiscoveryResponder : UDP multicast 239.255.68.80 port 46880
     KernelLauncher ..> Kernel : spawns detached
 

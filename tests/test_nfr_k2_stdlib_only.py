@@ -5,19 +5,19 @@ import ast
 import os
 import sys
 
-from conftest import KERNEL_ROOT
+from conftest import PACKAGE_DIR
 
-PKG = os.path.join(KERNEL_ROOT, "darkpyonix")
-# Code that must stay importable by a bare interpreter. The manager is excluded.
+PKG = PACKAGE_DIR
+# Code that must stay importable by a bare interpreter.
 GUARDED = [PKG]
-EXCLUDED = [os.path.join(PKG, "manager")]
+EXCLUDED = []
 # FR-X6: the matplotlib backend is loaded by matplotlib itself, never by kernel code.
-MPLBACKEND = os.path.join(PKG, "kernel", "mplbackend.py")
+MPLBACKEND = os.path.join(PKG, "_mplbackend.py")
 
 # sys.stdlib_module_names exists from 3.10; this fallback covers what kernel code may use on 3.8/3.9.
 _FALLBACK = set("""
 __future__ _thread abc argparse array ast asyncio atexit base64 binascii bisect builtins
-codecs collections contextlib copy csv ctypes dataclasses datetime decimal difflib dis enum errno
+codecs collections concurrent contextlib copy csv ctypes dataclasses datetime decimal difflib dis enum errno
 faulthandler fcntl fnmatch functools gc getpass glob gzip hashlib heapq hmac html http importlib
 inspect io ipaddress itertools json keyword linecache locale logging marshal math mimetypes msvcrt
 multiprocessing numbers operator os pathlib pickle platform posixpath pprint queue random re
@@ -56,7 +56,7 @@ def test_nfr_k2_kernel_imports_stdlib_only():
                 continue
             if path == MPLBACKEND and mod == "matplotlib":
                 continue
-            offenders.append("%s:%d imports %s" % (os.path.relpath(path, KERNEL_ROOT), lineno, mod))
+            offenders.append("%s:%d imports %s" % (os.path.relpath(path, PACKAGE_DIR), lineno, mod))
     assert not offenders, "non-stdlib imports in kernel/runtime code:\n" + "\n".join(offenders)
 
 
@@ -72,5 +72,5 @@ def test_nfr_k2_no_kernel_code_imports_the_matplotlib_backend():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module] + [node.module + "." + a.name for a in node.names]
             if any(n.endswith("mplbackend") for n in names):
-                offenders.append("%s:%d" % (os.path.relpath(path, KERNEL_ROOT), node.lineno))
+                offenders.append("%s:%d" % (os.path.relpath(path, PACKAGE_DIR), node.lineno))
     assert not offenders, "kernel code imports mplbackend: " + ", ".join(offenders)

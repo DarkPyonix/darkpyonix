@@ -1,4 +1,4 @@
-//! Request latency of GET /api/v1/kernels with the fake backend under 100 concurrent clients.
+//! Request latency of GET /api/kernels with the fake backend under 100 concurrent clients.
 //! Measurement only: `cargo test --release -p dpx-server --test latency -- --ignored --nocapture`.
 
 mod common;
@@ -17,7 +17,7 @@ async fn measure_list_kernels_latency_100_clients() {
     }
     let clients = 100;
     let per_client = 200;
-    let url = format!("{}/api/v1/kernels", s.url);
+    let url = format!("{}/api/kernels", s.url);
     let start = Instant::now();
     let mut tasks = Vec::new();
     for _ in 0..clients {
@@ -44,7 +44,7 @@ async fn measure_list_kernels_latency_100_clients() {
     all.sort();
     let pct = |p: f64| all[((all.len() as f64 * p) as usize).min(all.len() - 1)];
     println!(
-        "GET /api/v1/kernels (20 kernels), {clients} clients x {per_client}: n={} p50={:?} p99={:?} max={:?} throughput={:.0} req/s",
+        "GET /api/kernels (20 kernels), {clients} clients x {per_client}: n={} p50={:?} p99={:?} max={:?} throughput={:.0} req/s",
         all.len(),
         pct(0.50),
         pct(0.99),

@@ -12,12 +12,12 @@ import time
 
 import pytest
 
-from conftest import KERNEL_ROOT
+from conftest import SRC_ROOT
 from kernel_procs import connect, kill, wait_pid_gone, write_notebook
 from darkpyonix import format as dpformat
-from darkpyonix.kernel import document, launcher, runs
-from darkpyonix.kernel.model import CellRecord, Run, RunRequest
-from darkpyonix.kernel.protocol import DKPError, kernel_id_for, new_run_id, now_iso
+from darkpyonix import _document as document, _launcher as launcher, _runs as runs
+from darkpyonix._model import CellRecord, Run, RunRequest
+from darkpyonix._protocol import DKPError, kernel_id_for, new_run_id, now_iso
 
 
 def sha(text):
@@ -129,9 +129,9 @@ def test_fr_r1_run_log_is_valid_nbformat(scratch):
 _CHILD = r"""
 import os, sys, time
 sys.path.insert(0, %(root)r)
-from darkpyonix.kernel import runs
-from darkpyonix.kernel.model import CellRecord, Run, RunRequest
-from darkpyonix.kernel.protocol import kernel_id_for, new_run_id, now_iso
+from darkpyonix import _runs as runs
+from darkpyonix._model import CellRecord, Run, RunRequest
+from darkpyonix._protocol import kernel_id_for, new_run_id, now_iso
 path = %(path)r
 store = runs.RunStore(path, kernel_id_for(path))
 run = Run(RunRequest(new_run_id()), kernel_id_for(path), path, "0" * 64,
@@ -152,7 +152,7 @@ while True:
 
 def test_fr_r2_log_survives_kernel_kill(scratch, python):
     path = notebook_file(scratch)
-    child = subprocess.Popen([python, "-c", _CHILD % {"root": KERNEL_ROOT, "path": path}],
+    child = subprocess.Popen([python, "-c", _CHILD % {"root": SRC_ROOT, "path": path}],
                              stdout=subprocess.PIPE, text=True)
     try:
         run_id = child.stdout.readline().strip()
@@ -316,7 +316,7 @@ def test_fr_r2_update_is_throttled(scratch):
     stop.set()
     t.join()
     writes = len(seen) - 1          # the first sample is the file written by begin()
-    assert n > 500
+    assert n > 100                  # far more updates than writes, even with coarse sleep timers (macOS CI)
     # ~3 s of updates → one rewrite per WRITE_INTERVAL (< 1 s), never one per update
     assert 2 <= writes <= 5, writes
     gaps = [b - a for a, b in zip(seen[1:], seen[2:])]
@@ -428,8 +428,8 @@ print(json.dumps(out))
 
 
 def test_fr_r3_runs_magic_attribute_access_in_kernel_cell(scratch, dp_home, python):
-    from darkpyonix.kernel import launcher
-    from darkpyonix.kernel.client import KernelClient
+    from darkpyonix import _launcher as launcher
+    from darkpyonix._client import KernelClient
 
     path = os.path.join(scratch, "train.py")
     with open(path, "w") as f:

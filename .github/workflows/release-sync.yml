@@ -1,0 +1,80 @@
+# Brings develop to main through a pull request.
+#
+# `main` is protected, so nothing pushes to it. On every push to develop this workflow
+# adds one commit to the append-only `release` branch (develop's tree minus the internal
+# planning documents, with develop and main as parents so authors are kept and it never conflicts) and opens or refreshes
+# the release -> main pull request. A human merges it; Pages then deploys docs/guide.
+#
+# The release branch is never force-pushed. Logic: .github/scripts/release/sync-release.sh
+#
+# Requires the repository setting "Allow GitHub Actions to create and approve pull
+# requests" (Settings > Actions > General). Without it the branch is still pushed and
+# the job warns; open the PR by hand: gh pr create --base main --head release
+name: Release sync
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add develop to the release branch
+        id: sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          .github/scripts/release/sync-release.sh --push
+
+      - name: Open or refresh the pull request into main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Nothing to propose when release carries no change relative to main.
+          if git rev-parse -q --verify origin/main >/dev/null \
+             && git diff --quiet origin/main "origin/release" 2>/dev/null; then
+            echo "release equals main; no pull request needed"
+            exit 0
+          fi
+          body="$(cat <<'BODY'
+          Brings `develop` to `main`. Maintained by `.github/workflows/release-sync.yml`; do not edit the `release` branch by hand.
+
+          **Excluded** (internal planning documents, kept on `develop` only): `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/INTENT.md`, `docs/SPEC.md`.
+          **Included**: source, `README.md`, the public references (`docs/ARCHITECTURE.md`, `PROTOCOL.md`, `FORMAT.md`, `docs/api/`) and `docs/guide/` (deployed to GitHub Pages by `pages.yml` once this is merged).
+
+          `release` is append-only (never force-pushed) and already contains `main`, so this PR does not conflict.
+
+          If this PR could not be opened automatically, enable Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
+          BODY
+          )"
+          body="$(printf '%s\n' "$body" | sed 's/^          //')"
+          set +e
+          n="$(gh pr list --base main --head release --state open --json number --jq '.[0].number')"
+          if [[ -n "$n" ]]; then
+            gh pr edit "$n" --title "Publish develop to main" --body "$body"
+            echo "refreshed pull request #$n"
+          else
+            gh pr create --base main --head release --title "Publish develop to main" --body "$body"
+          fi
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            echo "::warning::Could not open or update the pull request. Enable 'Allow GitHub Actions to create and approve pull requests' in Settings > Actions > General, or run: gh pr create --base main --head release"
+          fi

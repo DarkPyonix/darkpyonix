@@ -1,0 +1,75 @@
+# darkpyonix.dev hub API on Cloudflare Workers (SPEC §10, INTENT D15).
+# The iroh relay is NOT here: it runs on the relay host (relay.darkpyonix.dev, darkpyonix/hub/server).
+name = "darkpyonix-hub"
+main = "src/index.ts"
+compatibility_date = "2026-08-15"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+# The apex only. `relay.darkpyonix.dev` is a DNS-only (grey cloud) record to the relay host,
+# and `<name>.darkpyonix.dev` names are not routed to this Worker.
+routes = [{ pattern = "darkpyonix.dev", custom_domain = true }]
+
+[vars]
+PUBLIC_URL = "https://darkpyonix.dev"
+ZONE = "darkpyonix.dev"
+RELAY_URL = "https://relay.darkpyonix.dev/"
+RELAY_ADMIN_URL = "https://relay.darkpyonix.dev"
+GITHUB_ALLOWED_IDS = ""
+# Secrets (wrangler secret put <NAME>), never in this file:
+#   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET   GitHub OAuth App (FR-H6)
+#   RELAY_SHARED_SECRET                      shared with the relay host (FR-H3)
+#   CF_API_TOKEN, CF_ZONE_ID                 Zone -> DNS -> Edit on darkpyonix.dev only (FR-H5)
+#   FLATHUB_VERIFICATION_TOKEN               Flathub website verification of dev.darkpyonix.Ember
+#                                            (FR-H7; a secret or a dashboard var, unset = 404)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "darkpyonix-hub"
+database_id = "00000000-0000-0000-0000-000000000000" # replace with `wrangler d1 create darkpyonix-hub`
+migrations_dir = "migrations"
+
+# The ash viewer, built by darkpyonix-ash and copied to public/ash/ before deploy.
+# Assets answer first; requests with no matching file reach the Worker.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"
+
+# Unauthenticated writes (PUT /pkarr/{key}, POST /device-links), per key per minute.
+[[ratelimits]]
+name = "WRITE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+# NFR-H2: Workers Logs keeps console output only. Invocation logs record each request's URL,
+# and iroh's PkarrResolver puts its (resolve) token in the query of GET /pkarr/{key}. Do not
+# add a Logpush job with request URL fields for this Worker either.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+# Expired OAuth transactions, device links, relay passes and sessions.
+[triggers]
+crons = ["17 * * * *"]
+
+# No Durable Objects today: D1 gives every atomic step the hub needs (single-use rows with
+# DELETE ... RETURNING, "only if newer" upserts). If the NFR-N1 measurement lets the relay
+# move to Cloudflare Containers (SPEC FR-H3, option B), it is added here:
+#
+# [[containers]]
+# class_name = "IrohRelay"
+# image = "../server/Dockerfile.relay"
+# max_instances = 1
+#
+# [[durable_objects.bindings]]
+# name = "RELAY"
+# class_name = "IrohRelay"
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["IrohRelay"]

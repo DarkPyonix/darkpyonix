@@ -2,7 +2,7 @@
 
 Usage: python executor_driver.py PLAN.json OUT.json
 
-PLAN = {"path": notebook path, "kernel_root": .../kernel, "steps": [...]} where each step is
+PLAN = {"path": notebook path, "src_root": .../kernel, "steps": [...]} where each step is
 one of:
   {"op": "submit", "params": {...}}            -> {"result": ...} or {"error": {...}}
   {"op": "wait_event", "type": T, "count": n}  waits until n events of type T were emitted
@@ -21,10 +21,10 @@ import threading
 import time
 
 PLAN = json.load(open(sys.argv[1]))
-sys.path.insert(0, PLAN["kernel_root"])
+sys.path.insert(0, PLAN["src_root"])
 
-from darkpyonix.kernel.executor import Executor  # noqa: E402
-from darkpyonix.kernel.protocol import DKPError  # noqa: E402
+from darkpyonix._executor import Executor  # noqa: E402
+from darkpyonix._protocol import DKPError  # noqa: E402
 
 T0 = time.monotonic()
 EVENTS = []

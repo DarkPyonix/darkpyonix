@@ -214,4 +214,4 @@ __marimo__/
 darkpyonix/manager/target/
 
 # Rust hub build output
-hub/server/target/
+darkpyonix/hub/server/target/

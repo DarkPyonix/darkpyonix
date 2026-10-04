@@ -103,7 +103,7 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
     let http = http_client();
     let api = connect(&http, matches!(cmd, Command::Share(_))).await?;
     let label = file.as_deref().map(|f| f.display().to_string()).unwrap_or_default();
-    let kpath = |kid: &str, rest: &str| format!("/api/v1/kernels/{kid}{rest}");
+    let kpath = |kid: &str, rest: &str| format!("/api/kernels/{kid}{rest}");
     let (path, kid) = target.unwrap_or_default();
     let not_running = |e: CliError| {
         if e.is("not_found") {
@@ -136,8 +136,8 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
             Ok(EXIT_OK)
         }
         Command::Status(_) => {
-            let m = api.get("/api/v1/manager").await?;
-            let ks = api.get("/api/v1/kernels").await?;
+            let m = api.get("/api/manager").await?;
+            let ks = api.get("/api/kernels").await?;
             let list = ks["kernels"].as_array().cloned().unwrap_or_default();
             let human = format!(
                 "manager  {} {} (pid {}, version {})\n\n{}",
@@ -153,7 +153,7 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
             Ok(EXIT_OK)
         }
         Command::Ps => {
-            let ks = api.get("/api/v1/kernels").await?;
+            let ks = api.get("/api/kernels").await?;
             let list = ks["kernels"].as_array().cloned().unwrap_or_default();
             out.result(&render::kernels_table(&list), &ks);
             Ok(EXIT_OK)
@@ -236,13 +236,13 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
     }
 }
 
-/// `POST /api/v1/kernels`: the kernel for `path`, and whether it was launched now (201).
+/// `POST /api/kernels`: the kernel for `path`, and whether it was launched now (201).
 async fn ensure_kernel(api: &Api, path: &Path, python: Option<&str>) -> Result<(Value, bool), CliError> {
     let mut body = json!({"path": path.to_string_lossy()});
     if let Some(p) = python {
         body["python"] = json!(p);
     }
-    let (status, k) = api.post("/api/v1/kernels", &body).await?;
+    let (status, k) = api.post("/api/kernels", &body).await?;
     Ok((k, status == 201))
 }
 
@@ -265,7 +265,7 @@ async fn run(api: &Api, out: &Out, a: &RunArgs, path: &Path, label: &str) -> Res
     let resp = if a.detach { None } else { Some(api.events(&kid, None).await?) };
     // Ctrl-C from here on interrupts the run instead of killing this process.
     let ctrl = if a.detach { None } else { Some(CtrlC::install()?) };
-    let accepted = match api.post(&format!("/api/v1/kernels/{kid}/runs"), &req).await {
+    let accepted = match api.post(&format!("/api/kernels/{kid}/runs"), &req).await {
         Ok((_, v)) => v,
         Err(e) if e.is("busy") => return Ok(busy(out, &e, label)),
         Err(e) => return Err(e),
@@ -317,7 +317,7 @@ fn busy(out: &Out, e: &CliError, label: &str) -> i32 {
 
 async fn logs(api: &Api, out: &Out, a: &LogsArgs, path: &Path, kid: &str, label: &str) -> Result<i32, CliError> {
     if a.follow {
-        match api.get(&format!("/api/v1/kernels/{kid}")).await {
+        match api.get(&format!("/api/kernels/{kid}")).await {
             Ok(k) => {
                 let current = k.get("run_id").and_then(Value::as_str).map(str::to_string);
                 let wants_current = match a.run.as_deref() {
@@ -342,7 +342,7 @@ async fn logs(api: &Api, out: &Out, a: &LogsArgs, path: &Path, kid: &str, label:
         None => vec!["current".into(), "latest".into()],
     };
     for r in &refs {
-        match api.get(&format!("/api/v1/kernels/{kid}/runs/{r}")).await {
+        match api.get(&format!("/api/kernels/{kid}/runs/{r}")).await {
             Ok(nb) => {
                 print_cells(out, &nb);
                 return Ok(EXIT_OK);
@@ -353,7 +353,7 @@ async fn logs(api: &Api, out: &Out, a: &LogsArgs, path: &Path, kid: &str, label:
     }
     if a.run.as_deref().is_none_or(|r| r == "latest") {
         // No kernel (or no run in it): the manager reads `__runs__/` directly.
-        let q = format!("/api/v1/documents?path={}", urlencode(&path.to_string_lossy()));
+        let q = format!("/api/documents?path={}", urlencode(&path.to_string_lossy()));
         match api.get(&q).await {
             Ok(doc) if !doc.get("latest_run").is_none_or(Value::is_null) => {
                 print_cells(out, &doc);
@@ -455,7 +455,7 @@ async fn follow(
             _ = ctrl.pressed() => {
                 presses += 1;
                 if interrupt_on_ctrl_c && presses == 1 {
-                    match api.post(&format!("/api/v1/kernels/{kid}/interrupt"), &json!({})).await {
+                    match api.post(&format!("/api/kernels/{kid}/interrupt"), &json!({})).await {
                         Ok(_) => out.note(&format!(
                             "interrupting run {} of {label}; Ctrl-C again detaches (the run keeps going)",
                             run_id.unwrap_or("?"))),

@@ -1,6 +1,6 @@
 //! The embedded stdlib-Python kernel (INTENT D3, D10): extraction to the runtime home,
 //! interpreter selection, detached launch (FR-K1, FR-K4, FR-M2) and the FR-R4 document
-//! builder, which stays in Python (`darkpyonix.kernel.document` is the authority).
+//! builder, which stays in Python (`darkpyonix._document` is the authority).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -32,7 +32,7 @@ pub fn runtime_tag() -> String {
 pub fn extract_runtime(home: &Path) -> std::io::Result<PathBuf> {
     let runtime = crate::home::subdir(home, "runtime")?;
     let root = runtime.join(runtime_tag());
-    let marker = root.join("darkpyonix").join("kernel").join("__main__.py");
+    let marker = root.join("darkpyonix").join("__main__.py");
     if marker.is_file() {
         return Ok(root);
     }
@@ -62,11 +62,11 @@ fn py_str(s: &str) -> String {
     serde_json::to_string(s).expect("string serializes")
 }
 
-/// `import sys; sys.path.insert(0, ROOT); from darkpyonix.kernel.__main__ import main; ...`
+/// `import sys; sys.path.insert(0, ROOT); from darkpyonix.__main__ import main; ...`
 /// (launcher.py `BOOTSTRAP` with the extracted root).
 pub fn bootstrap(root: &Path) -> String {
     format!(
-        "import sys; sys.path.insert(0, {}); from darkpyonix.kernel.__main__ import main; sys.exit(main(sys.argv[1:]))",
+        "import sys; sys.path.insert(0, {}); from darkpyonix.__main__ import main; sys.exit(main(sys.argv[1:]))",
         py_str(&root.to_string_lossy())
     )
 }
@@ -214,7 +214,7 @@ const DOCUMENT_SCRIPT: &str = r#"
 import sys, json
 sys.path.insert(0, ROOT)
 try:
-    from darkpyonix.kernel.document import build_document
+    from darkpyonix._document import build_document
     out = {"ok": True, "result": build_document(sys.argv[1], viewer_outputs=sys.argv[2] == "1")}
 except FileNotFoundError as e:
     out = {"ok": False, "code": "not_found", "message": str(e)}
@@ -225,7 +225,7 @@ except Exception as e:
 sys.stdout.write(json.dumps(out))
 "#;
 
-/// FR-R4: run `darkpyonix.kernel.document.build_document` in `python`.
+/// FR-R4: run `darkpyonix._document.build_document` in `python`.
 pub async fn build_document(
     python: &str,
     home: &Path,

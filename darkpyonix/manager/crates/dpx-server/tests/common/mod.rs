@@ -668,9 +668,17 @@ impl KernelBackend for FakeBackend {
 // ------------------------------------------------------------------ contract checker (NFR-M3)
 
 pub struct Contract {
-    /// (path segments, method, documented statuses)
+    /// Served operations: (path segments, method, documented statuses).
     ops: Vec<(Vec<String>, String, Vec<u16>)>,
+    /// Operations marked `x-darkpyonix-status: planned`: (path, method, operationId). They are
+    /// not served yet, so they are left out of `ops` and must answer 404 (SPEC NFR-M3).
+    pub planned: Vec<(String, String, String)>,
     pub raw: serde_yaml::Value,
+}
+
+/// True for an operation marked `x-darkpyonix-status: planned` in the YAML.
+pub fn is_planned(op: &serde_yaml::Value) -> bool {
+    op.get("x-darkpyonix-status").and_then(|v| v.as_str()) == Some("planned")
 }
 
 pub fn contract() -> &'static Contract {
@@ -679,11 +687,17 @@ pub fn contract() -> &'static Contract {
         let text = std::fs::read_to_string(repo_root().join("docs/api/manager.openapi.yaml")).unwrap();
         let raw: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
         let mut ops = Vec::new();
+        let mut planned = Vec::new();
         for (path, item) in raw["paths"].as_mapping().unwrap() {
             let path = path.as_str().unwrap();
             for (method, op) in item.as_mapping().unwrap() {
                 let method = method.as_str().unwrap();
                 if !["get", "put", "post", "delete", "patch", "head", "options"].contains(&method) {
+                    continue;
+                }
+                if is_planned(op) {
+                    let op_id = op["operationId"].as_str().unwrap().to_string();
+                    planned.push((path.to_string(), method.to_uppercase(), op_id));
                     continue;
                 }
                 let statuses = op["responses"]
@@ -700,7 +714,7 @@ pub fn contract() -> &'static Contract {
                 ops.push((segs, method.to_uppercase(), statuses));
             }
         }
-        Contract { ops, raw }
+        Contract { ops, planned, raw }
     })
 }
 
@@ -710,7 +724,7 @@ impl Contract {
     }
 
     /// Documented statuses of the operation `method path` resolves to, if any. Literal
-    /// segments win over `{param}` ones (e.g. `/api/v1/documents`).
+    /// segments win over `{param}` ones (e.g. `/api/documents`).
     pub fn documented(&self, method: &str, path: &str) -> Option<&Vec<u16>> {
         let segs: Vec<&str> = path.split('?').next().unwrap().split('/').collect();
         let mut best: Option<(usize, &Vec<u16>)> = None;

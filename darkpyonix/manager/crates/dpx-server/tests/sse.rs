@@ -23,14 +23,14 @@ async fn open(s: &TestServer, path: &str, last_event_id: Option<&str>) -> reqwes
 async fn test_fr_m1_events_stream_resumes_with_last_event_id() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
-    let url = format!("/api/v1/kernels/{kid}/events");
+    let url = format!("/api/kernels/{kid}/events");
     let r = open(&s, &url, None).await;
     assert_eq!(r.status(), 200);
     assert_eq!(r.headers()["content-type"], "text/event-stream");
     assert_eq!(r.headers()["cache-control"], "no-cache");
     let mut sse = Sse::new(r);
     assert!(sse.next_block().await.unwrap().starts_with(": darkpyonix events"));
-    assert_eq!(s.admin().post(&format!("/api/v1/kernels/{kid}/runs"), json!({"mode": "all"})).await.status, 202);
+    assert_eq!(s.admin().post(&format!("/api/kernels/{kid}/runs"), json!({"mode": "all"})).await.status, 202);
     let live = sse.take(4).await;
     let kinds: Vec<_> = live.iter().map(|m| m.event.clone().unwrap()).collect();
     assert_eq!(kinds, ["kernel.status", "run.started", "cell.started", "output"]);
@@ -64,7 +64,7 @@ async fn test_pr3_resume_older_than_the_ring_reports_replay_truncated() {
     for i in 0..6 {
         s.backend.emit(&kid, "output", json!({"run_id": "x", "index": 1, "output": {"output_type": "stream", "name": "stdout", "text": format!("{i}\n")}}));
     }
-    let r = open(&s, &format!("/api/v1/kernels/{kid}/events?since=1"), None).await;
+    let r = open(&s, &format!("/api/kernels/{kid}/events?since=1"), None).await;
     let mut sse = Sse::new(r);
     let got = sse.take(4).await;
     assert_eq!(got[0], SseMsg { id: None, event: Some("replay_truncated".into()), data: json!({"oldest_seq": 4}) });
@@ -76,13 +76,13 @@ async fn test_pr3_resume_older_than_the_ring_reports_replay_truncated() {
 async fn test_fr_a3_viewer1_events_omit_outputs() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, _) = s.kernel("train.py");
-    let share = s.admin().post(&format!("/api/v1/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await;
+    let share = s.admin().post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await;
     let token = share.body["token"].as_str().unwrap();
     // ?token= works for share tokens too (EventSource).
-    let r = reqwest::get(format!("{}/api/v1/kernels/{kid}/events?token={token}", s.url)).await.unwrap();
+    let r = reqwest::get(format!("{}/api/kernels/{kid}/events?token={token}", s.url)).await.unwrap();
     assert_eq!(r.status(), 200);
     let mut sse = Sse::new(r);
-    s.admin().post(&format!("/api/v1/kernels/{kid}/runs"), json!({"mode": "all"})).await;
+    s.admin().post(&format!("/api/kernels/{kid}/runs"), json!({"mode": "all"})).await;
     s.backend.emit(&kid, "output.clear", json!({"run_id": "x", "index": 0}));
     s.backend.finish_run(&kid);
     let kinds: Vec<_> = sse.take(6).await.into_iter().map(|m| m.event.unwrap()).collect();
@@ -93,12 +93,12 @@ async fn test_fr_a3_viewer1_events_omit_outputs() {
 async fn test_fr_m1_events_errors_and_keepalive() {
     let s = TestServer::start_with(Mode::Ephemeral, |c| c.sse_keepalive = Duration::from_millis(200)).await;
     let (kid, _) = s.kernel("train.py");
-    s.admin().get("/api/v1/kernels/k_00000000000000000000/events").await.error(404, "not_found");
+    s.admin().get("/api/kernels/k_00000000000000000000/events").await.error(404, "not_found");
     s.backend.fail_on("subscribe", DpxError::new("kernel_unreachable", "lost"));
-    s.admin().get(&format!("/api/v1/kernels/{kid}/events")).await.error(502, "kernel_unreachable");
+    s.admin().get(&format!("/api/kernels/{kid}/events")).await.error(502, "kernel_unreachable");
     s.backend.clear_failures();
 
-    let mut sse = Sse::new(open(&s, &format!("/api/v1/kernels/{kid}/events"), None).await);
+    let mut sse = Sse::new(open(&s, &format!("/api/kernels/{kid}/events"), None).await);
     assert!(sse.next_block().await.unwrap().starts_with(": darkpyonix"));
     assert_eq!(sse.next_block().await.unwrap(), ": keepalive");
     assert_eq!(sse.next_block().await.unwrap(), ": keepalive");
@@ -108,7 +108,7 @@ async fn test_fr_m1_events_errors_and_keepalive() {
 async fn test_fr_m1_dropping_the_client_drops_only_its_subscription() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
-    let url = format!("/api/v1/kernels/{kid}/events");
+    let url = format!("/api/kernels/{kid}/events");
     let keep = Sse::new(open(&s, &url, None).await);
     let gone = open(&s, &url, None).await;
     assert!(wait_for(|| s.backend.subscribers.load(std::sync::atomic::Ordering::SeqCst) == 2, Duration::from_secs(5)).await);
@@ -119,5 +119,5 @@ async fn test_fr_m1_dropping_the_client_drops_only_its_subscription() {
     s.backend.emit(&kid, "kernel.status", json!({"status": "idle"}));
     assert_eq!(keep.next_msg().await.unwrap().event.as_deref(), Some("kernel.status"));
     assert!(s.backend.method_calls(&kid).is_empty());
-    assert_eq!(s.admin().get(&format!("/api/v1/kernels/{kid}")).await.status, 200);
+    assert_eq!(s.admin().get(&format!("/api/kernels/{kid}")).await.status, 200);
 }
