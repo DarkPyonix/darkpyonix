@@ -36,10 +36,10 @@ jobs:
         run: uv python install ${{ matrix.python }} 3.13
       - name: Create the test environment
         run: |
-          # The harness (pytest, the Python manager prototype) runs on 3.13; the matrix version
+          # The harness (pytest) runs on 3.13; the matrix version
           # is the interpreter the kernels run under (NFR-K1).
           uv venv --no-project -p 3.13 .scratch/venv
-          uv pip install -p .scratch/venv/bin/python -e ".[dev,manager]"
+          uv pip install -p .scratch/venv/bin/python -e ".[dev]"
       - name: Run the suite
         run: |
           # Kernel tests run against the bare interpreter, where darkpyonix is not installed

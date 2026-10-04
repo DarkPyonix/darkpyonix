@@ -8,9 +8,9 @@ import sys
 from conftest import KERNEL_ROOT
 
 PKG = os.path.join(KERNEL_ROOT, "darkpyonix")
-# Code that must stay importable by a bare interpreter. The manager is excluded.
+# Code that must stay importable by a bare interpreter.
 GUARDED = [PKG]
-EXCLUDED = [os.path.join(PKG, "manager")]
+EXCLUDED = []
 # FR-X6: the matplotlib backend is loaded by matplotlib itself, never by kernel code.
 MPLBACKEND = os.path.join(PKG, "kernel", "mplbackend.py")
 
