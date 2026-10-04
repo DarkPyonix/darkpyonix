@@ -48,6 +48,21 @@ async fn test_fr_m1_docs_page_is_served_outside_the_schema() {
 }
 
 #[tokio::test]
+async fn test_nfr_v1_versioned_manager_path_is_not_served() {
+    let s = TestServer::start(Mode::Ephemeral).await;
+    let (kid, _path) = s.kernel("train.py");
+    let a = s.admin();
+    assert_eq!(a.get("/api/manager").await.status, 200);
+    for p in [
+        "/api/v1/manager".to_string(),
+        "/api/v1/kernels".to_string(),
+        format!("/api/v1/kernels/{kid}/events"),
+    ] {
+        a.get(&p).await.error(404, "not_found");
+    }
+}
+
+#[tokio::test]
 async fn test_fr_m1_list_and_get_kernels() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, path) = s.kernel("train.py");
