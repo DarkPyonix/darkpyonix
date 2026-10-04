@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy the guide
     runs-on: ubuntu-latest
     permissions:
       pages: write
