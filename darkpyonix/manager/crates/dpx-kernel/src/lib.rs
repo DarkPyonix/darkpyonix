@@ -3,7 +3,7 @@
 //! * discovery: loopback UDP multicast merged with the registry (FR-D1, FR-D2);
 //! * one shared DKP/1 connection per kernel for requests and event fan-out (FR-M5, PR-2, PR-3);
 //! * idempotent start of the embedded stdlib-Python kernel (FR-M2, INTENT D3, D10);
-//! * the FR-R4 document via `darkpyonix.kernel.document` in Python.
+//! * the FR-R4 document via `darkpyonix._document` in Python.
 //!
 //! See dpx-core for the contract.
 

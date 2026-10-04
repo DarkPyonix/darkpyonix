@@ -24,8 +24,8 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          # The version is declared once, in darkpyonix/kernel/darkpyonix/__init__.py, and
-          # pyproject.toml reads it from there ([tool.pdm.version]); the built wheel carries it.
+          # The version is declared once, in darkpyonix/kernel/__init__.py, and pyproject.toml
+          # reads it from there ([tool.hatch.version]); the built wheel carries it.
           version="$(python3 - <<'PY'
           import glob, zipfile
           whl, = glob.glob("dist/*.whl")
@@ -49,7 +49,9 @@ jobs:
           # Run outside the checkout so the source tree cannot shadow the installed package.
           uv venv --no-project -p 3.8 smoke
           uv pip install -p smoke/bin/python "$GITHUB_WORKSPACE"/dist/*.whl
-          smoke/bin/python -c "import darkpyonix, darkpyonix.kernel, darkpyonix.kernel.protocol as p; assert p.KERNEL_VERSION == darkpyonix.__version__; print(darkpyonix.__version__, darkpyonix.__file__)"
+          smoke/bin/python -c "import darkpyonix, darkpyonix._server, darkpyonix._protocol as p; assert p.KERNEL_VERSION == darkpyonix.__version__; print(darkpyonix.__version__, darkpyonix.__file__)"
+          # The kernel's launch command.
+          smoke/bin/python -m darkpyonix --help
 
       - uses: actions/upload-artifact@v4
         with:

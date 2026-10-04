@@ -453,7 +453,7 @@ SQL 규칙
 - 테스트: `test_fr_f13_sql_default_sqlite_and_params`, `test_fr_f13_sql_result_renders_html`
 
 ### NFR-K2 개정안
-`importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `darkpyonix/kernel/darkpyonix/interop.py`, `darkpyonix/kernel/darkpyonix/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다.
+`importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `darkpyonix/kernel/interop.py`, `darkpyonix/kernel/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다.
 
 ## 7. 10-18까지의 순서
 

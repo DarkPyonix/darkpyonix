@@ -1,6 +1,6 @@
 """The shared document and run attribution through a real kernel process (SPEC §10a FR-S1..S8).
 
-These launch the kernel main (darkpyonix/kernel/darkpyonix/kernel/__main__.py) and drive it with several
+These launch the kernel main (darkpyonix/kernel/__main__.py) and drive it with several
 ``KernelClient`` connections, the way managers do: ``doc.*``/``presence.*`` methods, the
 event stream, ``run`` with ``cell_ids`` and ``client``, ``interrupt``, ``runs.get``/``runs.wait``.
 """
@@ -14,9 +14,9 @@ import time
 
 import pytest
 
-from darkpyonix.kernel import launcher
-from darkpyonix.kernel.client import KernelClient
-from darkpyonix.kernel.protocol import DKPError, kernel_id_for
+from darkpyonix import _launcher as launcher
+from darkpyonix._client import KernelClient
+from darkpyonix._protocol import DKPError, kernel_id_for
 
 from test_fr_s_collab import Replica, external_write, read_file, state_of
 
@@ -307,8 +307,8 @@ def test_fr_s6_run_and_output_events_carry_cell_ids(kernel):
 
 
 def test_fr_s6_output_clear_carries_cell_id():
-    from darkpyonix.kernel.capture import OutputRouter
-    from darkpyonix.kernel.model import CellRecord
+    from darkpyonix._capture import OutputRouter
+    from darkpyonix._model import CellRecord
 
     class _Run(object):
         run_id = "r1"

@@ -80,7 +80,7 @@ classDiagram
     RuntimeHost <|.. PlainHost
     Params ..> RuntimeHost
 
-    %% ───────────── Kernel (darkpyonix.kernel, stdlib only) ─────────────
+    %% ───────────── Kernel (darkpyonix/kernel/__main__.py and the _*.py modules, stdlib only) ─────────────
     namespace kernel {
         class Kernel {
             <<process main>>
@@ -321,7 +321,7 @@ classDiagram
     ControlServer ..> EventLog : replay
     ClientSession ..> Executor : run / interrupt / restart
 
-    %% ───────────── Manager (darkpyonix.manager) ─────────────
+    %% ───────────── Manager (Rust workspace darkpyonix/manager) ─────────────
     namespace manager {
         class ManagerApp {
             +mode ManagerMode
@@ -364,7 +364,7 @@ classDiagram
         }
         class KernelLauncher {
             +python str
-            +bootstrap(kernel_root str) str
+            +bootstrap(package_root str) str
             +launch(path str, cwd str, env dict) int
         }
         class KernelClient {

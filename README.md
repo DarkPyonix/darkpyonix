@@ -29,7 +29,7 @@ darkpyonix vars train.py                 # what the kernel holds now
 
 This package is the runtime API that a notebook imports as `darkpyonix` (`markdown`, `params`,
 `binding`, `display` and the rest). It has no dependencies. Inside a kernel, `import darkpyonix`
-works without it, because the kernel puts its own sources on `sys.path`. Install it so a notebook
+works without it, because the kernel loads its own sources as `darkpyonix`. Install it so a notebook
 also runs outside a kernel, for example with `uv run python train.py` in CI.
 
 ```
@@ -72,12 +72,12 @@ Parts of the manager are being redesigned. The
 ## Repository layout
 
 ```
-darkpyonix/kernel/darkpyonix/            runtime API + notebook parser (stdlib only)
-darkpyonix/kernel/darkpyonix/kernel/     the kernel process (stdlib only)
-darkpyonix/kernel/darkpyonix/manager/    the superseded Python manager prototype
+darkpyonix/kernel/                       the `darkpyonix` Python package (stdlib only): runtime API,
+                                         notebook parser (format/) and the kernel process (_*.py,
+                                         `python -m darkpyonix`)
 darkpyonix/manager/                      the manager and the darkpyonix CLI (Rust workspace)
-hub/worker/                              darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
-hub/server/                              relay.darkpyonix.dev iroh relay host (Rust)
+darkpyonix/hub/worker/                   darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
+darkpyonix/hub/server/                   relay.darkpyonix.dev iroh relay host (Rust)
 docs/                                    design documents and the user guide
 tests/                                   Python test suite
 ```
