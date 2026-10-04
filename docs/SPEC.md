@@ -714,7 +714,7 @@ iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{ke
 ### NFR-V1 버전 없는 REST API — `Done`
 INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, …)이 없습니다. 매니저는 `/api/...`, 허브는 접두 없이 `/devices`, `/config`처럼 씁니다. 계약은 더하기만 합니다: 필드·선택 요청 필드·경로·오류 `code`를 더할 수 있고, 있는 것의 이름·타입·뜻을 바꾸거나 지우지 않습니다. 클라이언트는 모르는 필드를 무시합니다. 바꿔야 하면 새 필드나 경로를 더하고 옛것은 OpenAPI에서 `deprecated: true`로 남깁니다.
 - 수용 기준: `docs/api/manager.openapi.yaml`과 `docs/api/hub.openapi.yaml`의 어떤 경로에도 `v<숫자>` 조각이 없습니다. 예전 버전 경로(`/api/v1/manager`, `/v1/config`)는 404입니다.
-- 테스트: `test_nfr_v1_no_version_segment_in_any_rest_path`, `test_nfr_v1_versioned_manager_path_is_not_served`(`darkpyonix/manager/crates/dpx-server/tests/`에는 아직 없음, 후속 이슈), `test_nfr_v1_versioned_hub_path_is_not_served`(`darkpyonix/hub/worker/test/config.test.ts`)
+- 테스트: `test_nfr_v1_no_version_segment_in_any_rest_path`(`tests/test_nfr_v1_rest_paths.py`), 매니저의 `test_nfr_v1_versioned_manager_path_is_not_served`는 Rust 테스트가 아직 없음(#63), `test_nfr_v1_versioned_hub_path_is_not_served`(`darkpyonix/hub/worker/test/config.test.ts`)
 
 ## 12. 프로토콜 요구사항
 
