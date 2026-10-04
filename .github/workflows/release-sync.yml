@@ -2,7 +2,7 @@
 #
 # `main` is protected, so nothing pushes to it. On every push to develop this workflow
 # adds one commit to the append-only `release` branch (develop's tree minus the internal
-# planning documents, with main merged in so it never conflicts) and opens or refreshes
+# planning documents, with develop and main as parents so authors are kept and it never conflicts) and opens or refreshes
 # the release -> main pull request. A human merges it; Pages then deploys docs/guide.
 #
 # The release branch is never force-pushed. Logic: .github/scripts/release/sync-release.sh
