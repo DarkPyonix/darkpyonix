@@ -7,18 +7,22 @@ Guidance for working in this repository.
 `darkpyonix` (repo `DarkPyonix/darkpyonix`, checked out as `darkpyonix-core`) is the
 DarkPyonix kernel stack:
 
-- `darkpyonix/kernel/darkpyonix/kernel/`: the **file-bound kernel**. One kernel per source
-  file, independent of any manager, standard library only, runnable by any Python 3.8+
-  interpreter without installation.
+- `darkpyonix/kernel/`: the **Python `darkpyonix` package**. The folder is named `kernel`, but
+  its contents ARE the package: the build maps the folder to the import name `darkpyonix`
+  (`pyproject.toml`, hatchling `sources`). Standard library only, runnable by any Python 3.8+
+  interpreter without installation. Two layers share the folder:
+  - the **file-bound kernel**: the private modules `_server.py`, `_executor.py`,
+    `_protocol.py`, ... and `__main__.py` (`python -m darkpyonix`). One kernel per source file,
+    independent of any manager;
+  - the **runtime API** that notebook files import (`darkpyonix.markdown`,
+    `darkpyonix.params`, `darkpyonix.binding`, ...) and the `format/` subpackage (notebook
+    parser). `import darkpyonix` never imports the kernel-process modules.
 - `darkpyonix/manager/`: the **kernel manager** and the `darkpyonix` CLI, a Rust workspace
   (INTENT D10). A disposable HTTP front for kernels. It discovers running kernels, launches
-  new ones, and serves the kernel access API to IDEs, agents and the shared notebook (ash); it does not host ash. It embeds the Python kernel
-  sources from `darkpyonix/kernel/`. `darkpyonix/kernel/darkpyonix/manager/` is the superseded
-  Python prototype.
-- `darkpyonix/kernel/darkpyonix/` (top level): the **runtime API** that notebook files import
-  (`darkpyonix.markdown`, `darkpyonix.params`, `darkpyonix.binding`, …). Standard library only.
-- `darkpyonix/hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine connections, HTTPS,
-  and hosting of the official darkpyonix-ash viewer.
+  new ones, and serves the kernel access API to IDEs, agents and the shared notebook (ash); it
+  does not host ash. It embeds the Python package sources from `darkpyonix/kernel/`.
+- `darkpyonix/hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine
+  connections, HTTPS, and hosting of the official darkpyonix-ash viewer.
 
 The rest of the product lives in sibling repositories: `darkpyonix-ember` (IDE and agent
 workbench), `darkpyonix-ash` (shared WASM notebook), `vscode-darkpyonix`,
@@ -52,7 +56,9 @@ The root holds exactly these entries:
   (`darkpyonix.dev`: Cloudflare Worker and relay host).
 - `docs/`: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT and the OpenAPI files.
 - `pyproject.toml`: the Python package and pytest configuration.
-- `tests/`: the Python test suite.
+- `tests/`: the Python test suite. `tests/conftest.py` links `darkpyonix/kernel` as
+  `.scratch/src/darkpyonix` and puts `.scratch/src` on `sys.path` (and `PYTHONPATH` for the
+  bare interpreters it spawns), because the folder name differs from the import name.
 
 **Do not add a top-level folder or file without the user's approval.** Propose what you want
 to add and why, explain why no existing directory fits, then wait for the answer. Ignored

@@ -73,8 +73,8 @@ cargo build --release --manifest-path darkpyonix/manager/Cargo.toml
     <p><code>darkpyonix/manager/target/release/darkpyonix</code>를 <code>PATH</code>에 넣습니다.</p>
 
     <h2 id="runtime">런타임 API</h2>
-    <p>커널 안에서는 <code>import darkpyonix</code>가 항상 됩니다. 커널이 자기 소스를 <code>sys.path</code>에 넣기
-      때문입니다. 패키지를 설치하는 것은 커널 밖에서 노트북을 돌릴 때뿐입니다. 예를 들어 CI에서
+    <p>커널 안에서는 <code>import darkpyonix</code>가 항상 됩니다. 커널이 자기 소스를 <code>darkpyonix</code>
+      이름으로 불러오기 때문입니다. 패키지를 설치하는 것은 커널 밖에서 노트북을 돌릴 때뿐입니다. 예를 들어 CI에서
       <code>python train.py</code>로 실행할 때입니다.</p>
     <figure class="codeblock" data-copy="복사" data-copied="복사됨">
       <figcaption>shell</figcaption>

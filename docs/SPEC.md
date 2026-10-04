@@ -22,7 +22,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 ## 2. 커널 (K)
 
 ### FR-K1 설치 없이 어떤 인터프리터로도 실행 — `Done`
-매니저는 사용자가 고른 인터프리터에, 커널 소스 루트를 `sys.path` 앞에 넣는 부트스트랩(`-c`)으로 커널을 띄웁니다. 그 인터프리터에 DarkPyonix가 설치되어 있지 않아도 됩니다.
+매니저는 사용자가 고른 인터프리터에, 패키지 소스를 `darkpyonix`라는 이름으로 불러오는 부트스트랩(`-c`)으로 커널을 띄웁니다. 실행하는 모듈은 `darkpyonix.__main__`이라 설치된 환경에서는 `python -m darkpyonix --file <경로>`와 같습니다. 그 인터프리터에 DarkPyonix가 설치되어 있지 않아도 됩니다.
 - 수용 기준: DarkPyonix가 설치되지 않은 가상환경의 인터프리터로 커널을 띄우고 셀을 실행할 수 있습니다. 사용자 코드의 `import darkpyonix`가 성공합니다.
 - 테스트: `test_fr_k1_kernel_runs_from_uninstalled_interpreter`, `test_fr_k1_kernel_from_uninstalled_venv_runs_a_cell`(인터프리터마다 `.scratch/` 아래에 `--without-pip` 가상환경을 만들고, 그 인터프리터로 띄운 커널의 셀에서 `import darkpyonix`가 커널 소스 루트에서 불러와지고 `sys.prefix`가 그 가상환경임을 확인)
 
@@ -111,7 +111,7 @@ INTENT D17, PROTOCOL §6. 사용자 결정(2026-10-04): "커널이 들고 있게
 ### FR-X6 matplotlib — `Done`
 matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 끝에 남은 그림을 `image/png` `display_data`로 냅니다(`text/plain`은 그림의 `repr`). 낸 그림은 닫으므로 다음 셀이 같은 그림을 다시 내지 않습니다. 셀이 오류로 끝나도 그때까지 그린 그림은 냅니다.
 
-커널은 matplotlib을 import하지 않습니다. 사용자 코드가 `matplotlib.pyplot`을 처음 import할 때, 그 시점에 백엔드가 아직 정해지지 않았으면(`MPLBACKEND`, matplotlibrc, `matplotlib.use()` 어디에서도 정하지 않음) 커널의 백엔드 `module://darkpyonix.kernel.mplbackend`를 고릅니다. 사용자가 백엔드를 정했으면 그대로 둡니다. 커널은 환경 변수를 바꾸지 않으므로 하위 프로세스의 matplotlib에는 영향이 없습니다. `darkpyonix.kernel.mplbackend`는 matplotlib이 불러오는 모듈이라 `matplotlib`을 import할 수 있는 유일한 커널 모듈입니다(NFR-K2의 예외).
+커널은 matplotlib을 import하지 않습니다. 사용자 코드가 `matplotlib.pyplot`을 처음 import할 때, 그 시점에 백엔드가 아직 정해지지 않았으면(`MPLBACKEND`, matplotlibrc, `matplotlib.use()` 어디에서도 정하지 않음) 커널의 백엔드 `module://darkpyonix._mplbackend`를 고릅니다. 사용자가 백엔드를 정했으면 그대로 둡니다. 커널은 환경 변수를 바꾸지 않으므로 하위 프로세스의 matplotlib에는 영향이 없습니다. `darkpyonix._mplbackend`는 matplotlib이 불러오는 모듈이라 `matplotlib`을 import할 수 있는 유일한 커널 모듈입니다(NFR-K2의 예외).
 - 수용 기준:
   - `plt.plot([1,2]); plt.show()` 셀이 PNG `display_data` 하나를 내고, 실행 기록에도 남습니다.
   - `show()` 없이 `plt.plot([1,2])`로 끝나는 셀도 셀 끝에 PNG 하나를 내고, 다음 셀은 그 그림을 다시 내지 않습니다.
@@ -324,15 +324,15 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 ### FR-M1 HTTP API — `Agreed` (스트림 넘김으로 바뀜, 구현 대기 #47)
 매니저는 [api/manager.openapi.yaml](api/manager.openapi.yaml)의 경로를 모두, 그리고 그 경로만 냅니다. 이벤트 스트림은 SSE(`text/event-stream`)이고 SSE `id`는 커널의 `seq`입니다. `Last-Event-ID` 헤더나 `since` 쿼리로 이어 받습니다. OpenAPI에 `x-darkpyonix-handoff: kernel`로 표시한 연산(이벤트 스트림, WebSocket 동기화, 실행 대기)은 매니저가 인증·권한 검사만 하고 연결을 커널에 넘깁니다(FR-M6). 응답은 커널이 씁니다.
 - 상태 메모 (2026-10-03): 아래 테스트는 매니저가 이벤트를 중계하던 구현을 검증합니다. 사용자 결정 "스트림만 넘김"(INTENT D6)으로 이벤트 스트림의 응답 주체가 커널로 바뀌므로, 넘김 구현(#47)과 함께 다시 통과해야 `Done`입니다.
-- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), `test_fr_m1_events_stream_resumes_with_last_event_id`, `test_fr_m1_events_errors_and_keepalive`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`), 각 경로의 동작 테스트(`darkpyonix/manager/crates/dpx-server/tests/api.rs`). 파이썬 시제품 기준 `test_fr_m1_*`(`tests/test_fr_m_manager.py`)
+- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), `test_fr_m1_events_stream_resumes_with_last_event_id`, `test_fr_m1_events_errors_and_keepalive`(`darkpyonix/manager/crates/dpx-server/tests/sse.rs`), 각 경로의 동작 테스트(`darkpyonix/manager/crates/dpx-server/tests/api.rs`). 파이썬 시제품 기준 `test_fr_m1_*`(`darkpyonix/manager/crates/dpx-server/tests/`에는 아직 없음, 후속 이슈)
 
 ### FR-M2 커널 시작은 멱등 — `Done`
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
-- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현 대기 #47)
 임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, 구현 대기 #50). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6, 구현 대기 #47). 끝날 때 커널은 건드리지 않습니다.
-- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`, 파이썬 시제품), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`(등록 파일을 지우므로 #50에서 `test_fr_m3_url_and_token_are_printed_on_stdout`, `test_fr_m3_writes_no_registry_file`로 바꿉니다)
+- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`(등록 파일을 지우므로 #50에서 `test_fr_m3_url_and_token_are_printed_on_stdout`, `test_fr_m3_writes_no_registry_file`로 바꿉니다)
 
 ### FR-M4 전용 모드 — `Done`
 `darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다. 2025 비밀번호 로그인과 마스터·공유 토큰 재설정은 매니저 단위이고 전용 매니저가 맡습니다(FR-A4, 구현 대기 #48). 커널 접근 토큰(FR-A6)은 매니저가 아니라 커널에 묶입니다.
@@ -340,7 +340,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ### FR-M5 매니저 여러 개 공존 — `Done`
 같은 사용자의 매니저 여러 개가 같은 커널에 동시에 붙을 수 있고, 각자 같은 이벤트를 받습니다.
-- 테스트: `test_fr_m5_two_managers_share_one_kernel`(파이썬 시제품), Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
+- 테스트: `test_fr_m5_two_managers_share_one_kernel`, Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
 
 ### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
 INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는 이벤트 스트림(`GET /api/kernels/{kernel_id}/events`), WebSocket 동기화(`GET /api/ws/kernels/{kernel_id}`), 실행 대기(`GET /api/kernels/{kernel_id}/runs/{run_ref}/wait`)를 인증하고 권한을 검사한 뒤 연결을 커널에 넘깁니다. 이미 읽은 요청 바이트와 `{capabilities, client_id, user, nickname, share_id}`를 함께 보냅니다(FR-A3). 나머지 REST 호출은 매니저가 DKP/1 요청으로 처리합니다.
@@ -398,7 +398,7 @@ INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 �
 
 ### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 넷만 `Authorization: Bearer` 없이 열립니다. 초기 토큰 발급(FR-A6)은 인증이 없고, 매니저 로그인 `GET /api/auth`와 마스터 토큰 재설정 `PUT /api/auth/tokens/master`(FR-A4)는 `Authorization: Basic`의 비밀번호로, 커널 로그인 `POST /api/kernels/{kernel_id}/tokens/auth`(FR-A6)는 본문의 비밀번호로 인증합니다.
-- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`, 파이썬 시제품), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`, 등록 파일 제거와 함께 #50에서 `test_fr_a2_cli_uses_the_token_from_stdout`으로 바꿈)
+- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`, 등록 파일 제거와 함께 #50에서 `test_fr_a2_cli_uses_the_token_from_stdout`으로 바꿈)
 
 ### FR-A3 권한: 능력의 집합 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #49)
 INTENT D18. 사용자 결정(2026-10-04): "권한 이름 저따위 아니거든? 시멘틱하게 다시 추론해 … 실행 권한이랑 코드 수정 권한은 다른거야. 권한 등급 개념 아니니까 이상한 방향으로 가지 마." 승인한 능력은 다섯이고 등급이 아닙니다. 토큰은 능력의 집합을 가지고, 매니저는 작업마다 그 작업의 능력 하나가 집합에 있는지만 봅니다. 능력 사이에 순서나 포함 관계는 없습니다.
@@ -669,9 +669,9 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 측정 기록 (2026-10-03, macOS arm64): `DARKPYONIX_TEST_PYTHONS`에 CPython 3.8.20, 3.9.6, 3.10.20, 3.11.10, 3.12.13, 3.13.0(intel64), 3.14.7, 3.15.0rc1을 넣어 39개 × 8개 인터프리터 = 312개 중 304개 통과, 8개는 `DARKPYONIX_SKIP_PERF=1`로 뺀 NFR-K3 측정입니다(NFR-K3는 따로 돌려 통과). 3.8·3.10·3.12는 `uv python install`로 `.scratch/` 아래에 받은 인터프리터입니다.
 
 ### NFR-K2 표준 라이브러리 전용 — `Done`
-`darkpyonix/kernel/darkpyonix/kernel/`, `darkpyonix/kernel/darkpyonix/*.py`, `darkpyonix/kernel/darkpyonix/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `darkpyonix/kernel/darkpyonix/kernel/mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
+`darkpyonix/kernel/*.py`(런타임 API와 커널 프로세스 모듈), `darkpyonix/kernel/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `darkpyonix/kernel/_mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
 - 테스트: `test_nfr_k2_kernel_imports_stdlib_only`, `test_nfr_k2_no_kernel_code_imports_the_matplotlib_backend`
-- 개정안 — `Draft` (FR-F8~F13, INTENT D14): `importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `darkpyonix/kernel/darkpyonix/interop.py`와 `darkpyonix/kernel/darkpyonix/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다. 테스트: `test_nfr_k2_dynamic_imports_are_allowlisted`
+- 개정안 — `Draft` (FR-F8~F13, INTENT D14): `importlib.import_module` 호출은 문자열 상수 인자만 쓰고, 그 값이 허용 목록(`cppyy`, `yaml`)에 있을 때만 허용합니다. 위치는 `darkpyonix/kernel/interop.py`와 `darkpyonix/kernel/data.py`의 함수 본문으로 한정합니다. 정적 `import` 문의 규칙은 그대로입니다. 테스트: `test_nfr_k2_dynamic_imports_are_allowlisted`
 
 ### NFR-K3 출력 오버헤드 — `Done`
 `print`를 100,000번 하는 셀의 실행 시간이 같은 인터프리터의 일반 실행 대비 1.5배를 넘지 않습니다. 구독자가 느려도 메인 스레드가 막히지 않습니다(출력 큐 상한을 넘으면 기록은 계속하되 실시간 이벤트를 합칩니다).
@@ -681,7 +681,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 ### NFR-K4 시작 시간 — `Agreed` (재측정 대기 #50)
 커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다. 측정점은 프로세스를 실행한 순간부터 멀티캐스트 그룹의 리스너가 그 커널의 첫 announce를 받은 순간까지입니다.
 - 상태 메모 (2026-10-03): 아래 기록은 등록 파일이 생긴 순간을 측정점으로 썼습니다. 등록 파일을 지우므로(FR-D2) 첫 announce 수신 시각으로 다시 재야 `Done`입니다.
-- 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 4): `bootstrap_command`로 프로세스를 실행한 순간부터 등록 파일이 생길 때까지(등록 파일은 첫 멀티캐스트 announce 직전에 씁니다, `discovery.announce_now`) 7회 중앙값이 3.8 38 ms, 3.9 63 ms, 3.11 54 ms, 3.12 39 ms, 3.13 56 ms, 3.14 46 ms입니다. 같은 인터프리터의 `python -c pass`는 13~22 ms였습니다. 측정 스크립트는 `.scratch/k4/measure.py`(커밋하지 않음)입니다.
+- 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 4): `bootstrap_command`로 프로세스를 실행한 순간부터 등록 파일이 생길 때까지(등록 파일은 첫 멀티캐스트 announce 직전에 씁니다, `_discovery.announce_now`) 7회 중앙값이 3.8 38 ms, 3.9 63 ms, 3.11 54 ms, 3.12 39 ms, 3.13 56 ms, 3.14 46 ms입니다. 같은 인터프리터의 `python -c pass`는 13~22 ms였습니다. 측정 스크립트는 `.scratch/k4/measure.py`(커밋하지 않음)입니다.
 - 참고: Rust 매니저의 `ensure()`는 처음에 300~344 ms였습니다. 커널을 띄우기 전에 보내는 표적 멀티캐스트 질의가 없는 커널을 기다리느라 늘 200 ms(`QUERY_TIMEOUT`)를 썼기 때문입니다. 질의를 없앤 뒤(FR-M2, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`) 호출부터 인터프리터 실행까지 5~8 ms, 전체 92~120 ms입니다(2026-10-03, 부하 평균 약 1.5, `/usr/bin/python3` 셈은 Xcode 셈 때문에 170~600 ms).
 
 ### NFR-M1 발견 지연 — `Done`
@@ -696,7 +696,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 
 ### NFR-M3 문서와 코드의 일치 — `Done`
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다. 설계했지만 아직 구현하지 않은 연산은 OpenAPI에 `x-darkpyonix-status: planned`와 `x-darkpyonix-issue: <번호>`를 달아 둡니다. 테스트는 이 연산을 서빙 검사에서 빼고, 대신 404로 답하는지 확인합니다. 그래서 연산을 구현한 변경에서 `planned` 표시를 지우지 않으면 테스트가 실패합니다(#56).
-- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`), 파이썬 시제품 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
+- 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`) 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
 
 ### NFR-H1 종단 간 암호화 — `Agreed`
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
@@ -714,7 +714,7 @@ iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{ke
 ### NFR-V1 버전 없는 REST API — `Done`
 INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, …)이 없습니다. 매니저는 `/api/...`, 허브는 접두 없이 `/devices`, `/config`처럼 씁니다. 계약은 더하기만 합니다: 필드·선택 요청 필드·경로·오류 `code`를 더할 수 있고, 있는 것의 이름·타입·뜻을 바꾸거나 지우지 않습니다. 클라이언트는 모르는 필드를 무시합니다. 바꿔야 하면 새 필드나 경로를 더하고 옛것은 OpenAPI에서 `deprecated: true`로 남깁니다.
 - 수용 기준: `docs/api/manager.openapi.yaml`과 `docs/api/hub.openapi.yaml`의 어떤 경로에도 `v<숫자>` 조각이 없습니다. 예전 버전 경로(`/api/v1/manager`, `/v1/config`)는 404입니다.
-- 테스트: `test_nfr_v1_no_version_segment_in_any_rest_path`, `test_nfr_v1_versioned_manager_path_is_not_served`(`tests/test_fr_m_manager.py`), `test_nfr_v1_versioned_hub_path_is_not_served`(`darkpyonix/hub/worker/test/config.test.ts`)
+- 테스트: `test_nfr_v1_no_version_segment_in_any_rest_path`, `test_nfr_v1_versioned_manager_path_is_not_served`(`darkpyonix/manager/crates/dpx-server/tests/`에는 아직 없음, 후속 이슈), `test_nfr_v1_versioned_hub_path_is_not_served`(`darkpyonix/hub/worker/test/config.test.ts`)
 
 ## 12. 프로토콜 요구사항
 

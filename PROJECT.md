@@ -11,9 +11,9 @@
 ## 범위
 
 **포함**
-- `darkpyonix/kernel/darkpyonix/kernel`: 파일에 묶인 커널(표준 라이브러리 전용, 3.8+)
+- `darkpyonix/kernel/`: 파이썬 `darkpyonix` 패키지(폴더 이름은 `kernel`, 빌드가 import 이름 `darkpyonix`로 매핑합니다). 파일에 묶인 커널(비공개 모듈 `_server.py` 등과 `__main__.py`, `python -m darkpyonix`, 표준 라이브러리 전용, 3.8+)
 - `darkpyonix/manager`: 임시/전용 매니저, HTTP API, `darkpyonix` CLI(Rust 워크스페이스)
-- `darkpyonix/kernel/darkpyonix`: 노트북 파일이 쓰는 런타임 API와 셀 파서
+  - 같은 패키지의 런타임 API와 셀 파서(`format/`): 노트북 파일이 씁니다. `import darkpyonix`는 커널 프로세스 모듈을 가져오지 않습니다
 - `darkpyonix/hub/`: darkpyonix.dev(시그널링, 중계, HTTPS, ash 호스팅)
 - 문서: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT, OpenAPI, 클래스 다이어그램(`darkpyonix.mermaid`)
 

@@ -48,7 +48,7 @@ DarkPyonix 전체는 **에이전트 대화가 먼저이고, 필요할 때 코딩
 
 ### D3. 커널은 설치되지 않은 채로 실행됩니다
 
-매니저는 커널을 띄울 때 사용자가 고른 인터프리터에 커널 소스 루트를 `sys.path` 앞에 넣는 부트스트랩을 넘깁니다(SPEC FR-K1). 그래서 그 인터프리터에 DarkPyonix가 설치되어 있을 필요가 없고, 사용자 코드의 `import darkpyonix`도 같은 경로로 풀립니다. 커널 코드는 3.8 문법과 3.8 표준 라이브러리 API만 씁니다. `match`, `X | Y` 타입 표기의 런타임 평가, `tomllib`, `asyncio.TaskGroup` 등은 쓰지 않습니다.
+매니저는 커널을 띄울 때 사용자가 고른 인터프리터에 패키지 소스를 `darkpyonix`라는 이름으로 불러오는 부트스트랩을 넘깁니다(SPEC FR-K1). 그래서 그 인터프리터에 DarkPyonix가 설치되어 있을 필요가 없고, 사용자 코드의 `import darkpyonix`도 같은 모듈로 풀립니다. 소스 폴더 이름(`darkpyonix/kernel/`)이 import 이름과 달라서 `sys.path`에 폴더를 넣는 방식은 쓰지 않습니다. 커널 코드는 3.8 문법과 3.8 표준 라이브러리 API만 씁니다. `match`, `X | Y` 타입 표기의 런타임 평가, `tomllib`, `asyncio.TaskGroup` 등은 쓰지 않습니다.
 
 ### D4. 발견은 루프백 멀티캐스트 하나로 합니다
 
