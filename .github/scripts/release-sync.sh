@@ -14,9 +14,9 @@
 #   - release always has origin/main as an ancestor (merged with `-s ours`, then the
 #     tree is replaced), so a release -> main pull request cannot conflict, whether
 #     main took the previous PR by merge commit, squash or rebase.
-#   - Internal planning documents are dropped: PROJECT.md, AGENTS.md, CLAUDE.md and every
-#     file directly under docs/ (INTENT.md, SPEC.md, ...). docs/guide/ and other
-#     subdirectories are kept, so the Pages site is published.
+#   - Internal planning documents are dropped: PROJECT.md, AGENTS.md, CLAUDE.md,
+#     docs/INTENT.md and docs/SPEC.md. The public references (docs/ARCHITECTURE.md,
+#     PROTOCOL.md, FORMAT.md, docs/api/) and docs/guide/ are kept.
 #   - Prints `changed=true|false` lines for the caller (also appended to $GITHUB_OUTPUT).
 set -euo pipefail
 
@@ -52,8 +52,7 @@ fi
 
 # 3. Replace the content with develop's tree, minus the internal documents.
 git read-tree --reset -u "$src"
-private=(PROJECT.md AGENTS.md CLAUDE.md)
-while IFS= read -r f; do private+=("$f"); done < <(git ls-tree --name-only -r "$src" -- docs | awk -F/ 'NF==2')
+private=(PROJECT.md AGENTS.md CLAUDE.md docs/INTENT.md docs/SPEC.md)
 git rm -q --cached --ignore-unmatch -- "${private[@]}"
 for f in "${private[@]}"; do rm -f -- "$f"; done
 

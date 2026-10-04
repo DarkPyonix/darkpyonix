@@ -55,8 +55,8 @@ jobs:
           body="$(cat <<'BODY'
           Brings `develop` to `main`. Maintained by `.github/workflows/release-sync.yml`; do not edit the `release` branch by hand.
 
-          **Excluded** (internal planning documents, kept on `develop` only): `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, and every file directly under `docs/` (`INTENT.md`, `SPEC.md`, ...).
-          **Included**: source, `README.md`, and `docs/guide/` (deployed to GitHub Pages by `pages.yml` once this is merged).
+          **Excluded** (internal planning documents, kept on `develop` only): `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/INTENT.md`, `docs/SPEC.md`.
+          **Included**: source, `README.md`, the public references (`docs/ARCHITECTURE.md`, `PROTOCOL.md`, `FORMAT.md`, `docs/api/`) and `docs/guide/` (deployed to GitHub Pages by `pages.yml` once this is merged).
 
           `release` is append-only (never force-pushed) and already contains `main`, so this PR does not conflict.
 
