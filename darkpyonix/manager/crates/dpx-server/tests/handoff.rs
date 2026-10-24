@@ -317,8 +317,19 @@ async fn test_fr_m6_tls_http2_stream_is_pumped_and_ends_with_manager() {
     assert_eq!(&next[..], b"data: through the pump\n\n");
 
     rig.stop().await; // pumped streams end with the manager
-    let end = tokio::time::timeout(Duration::from_secs(5), resp.chunk()).await.expect("stream did not end");
-    assert!(matches!(end, Ok(None) | Err(_)));
+    // The body ends; an empty trailing DATA frame may come first, but no payload bytes.
+    let drained = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match resp.chunk().await {
+                Ok(Some(c)) if c.is_empty() => continue,
+                Ok(Some(c)) => break Some(c),
+                Ok(None) | Err(_) => break None,
+            }
+        }
+    })
+    .await
+    .expect("stream did not end");
+    assert_eq!(drained, None, "payload bytes after the manager ended");
 }
 
 #[tokio::test]
