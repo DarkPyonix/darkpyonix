@@ -172,7 +172,8 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ### FR-R1 자동 기록 — `Done`
 모든 실행은 `<파일 폴더>/__runs__/<파일 이름>/<run_id>.ipynb`에 nbformat 4.5 노트북으로 기록됩니다. `run_id`는 `YYYYMMDD-HHMMSS-<4 hex>`(UTC)입니다. 노트북 `metadata.darkpyonix`에는 `run_id`, `kernel_id`, `file`, `file_sha256`, `mode`, `params`, `status`, `started_at`, `ended_at`, `python`, `host`가 들어갑니다. 셀마다 `metadata.darkpyonix`에 `index`, `type`, `title`, `source_sha256`, `status`, `started_at`, `ended_at`이 들어갑니다.
 - 수용 기준: 실행 기록이 `nbformat.validate`를 통과합니다(테스트 환경에 nbformat이 있을 때). 표준 라이브러리 `json`으로 읽은 구조가 위 필드를 모두 가집니다.
-- 테스트: `test_fr_r1_run_log_is_valid_nbformat`, `test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt`
+- 구현 메모: 4 hex 접미사는 무작위라 한 초에 30번 실행하면 약 1% 확률로 `run_id`가 겹쳐 기록 하나가 덮어써집니다(#57). 한 프로세스 안에서는 같은 초에 이미 쓴 접미사를 건너뛰어 `run_id`가 겹치지 않게 합니다.
+- 테스트: `test_fr_r1_run_ids_are_unique_within_a_second`, `test_fr_r1_run_log_is_valid_nbformat`, `test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt`
 
 ### FR-R2 실행 중 저장 — `Done`
 커널은 실행 중에도 기록을 최대 1초 간격으로 원자적으로(임시 파일 → `os.replace`) 다시 씁니다. `index.json`에는 최신순 실행 요약(`run_id`, `status`, `started_at`, `ended_at`, `mode`)을 둡니다.
