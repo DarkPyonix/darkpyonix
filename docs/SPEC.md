@@ -227,6 +227,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ### FR-D1 멀티캐스트 발견 — `Done`
 PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다. 발견은 이 루프백 멀티캐스트 하나입니다(INTENT D4). 그룹 주소와 포트(`239.255.68.80:46880`)는 사용자 결정입니다(2026-10-04, "그대로 사용", PROJECT Q14).
 - 수용 기준: 커널 세 개를 띄우고 query 하나를 보내면 세 개의 announce를 받습니다. 다른 `user_tag`의 query에는 응답하지 않습니다.
+  - `user_tag`는 OS 계정에서 만들어 홈이 달라도 같으므로(FR-A1), 홈을 지정한 매니저는 announce의 `home`이 자기 홈(심볼릭 링크를 푼 경로)과 다르거나 없으면 버립니다. 응답 수에도 세지 않습니다(PROTOCOL §2.2).
 - 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-D2 등록 파일 보조 — `Withdrawn` (사용자 지시 2026-10-03, 코드 제거 대기 #50)
