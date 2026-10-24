@@ -11,6 +11,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import socket
 import struct
 from typing import Any, Dict, Optional
@@ -167,6 +168,26 @@ def now_iso() -> str:
     """UTC timestamp with milliseconds and a ``Z`` suffix."""
     t = datetime.datetime.now(datetime.timezone.utc)
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (t.microsecond // 1000)
+
+
+_start_lock = threading.Lock()
+_last_start_ms = [0]
+
+
+def run_start_iso() -> str:
+    """``now_iso()`` for a run start, strictly increasing within the process (FR-R3).
+
+    Runs sort by ``started_at`` and then by run id, whose suffix is random, so two runs
+    started in the same millisecond would otherwise order by chance.
+    """
+    t = datetime.datetime.now(datetime.timezone.utc)
+    ms = int(t.timestamp() * 1000)
+    with _start_lock:
+        if ms <= _last_start_ms[0]:
+            ms = _last_start_ms[0] + 1
+        _last_start_ms[0] = ms
+    t = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(milliseconds=ms)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (ms % 1000)
 
 
 def new_run_id() -> str:
