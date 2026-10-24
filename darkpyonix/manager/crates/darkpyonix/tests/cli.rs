@@ -230,7 +230,7 @@ fn test_fr_c2_cli_commands() {
     assert_eq!(deletes, vec![json!({}), json!({"force": "true"})]);
 
     // The fake is ephemeral: share needs a dedicated manager.
-    let o = run(h, &["share", "train.py", "--permission", "viewer1"]);
+    let o = run(h, &["share", "train.py", "--capabilities", "read"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("dedicated manager"), "{}", text(&o.stderr));
     // The given manager is asked once and refuses; the CLI cannot tell its mode beforehand.
@@ -242,7 +242,7 @@ fn test_fr_c2_cli_commands() {
     notebook(&home);
     let exe = home.join("must-not-run.sh");
     write_script(&exe, "touch \"$DARKPYONIX_HOME/spawned\"\nexit 9\n");
-    let o = cli(&home).args(["share", "train.py", "--permission", "viewer1"]).env("DARKPYONIX_SELF_EXE", &exe).output().unwrap();
+    let o = cli(&home).args(["share", "train.py", "--capabilities", "read"]).env("DARKPYONIX_SELF_EXE", &exe).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("dedicated manager"), "{}", text(&o.stderr));
     assert!(!home.join("spawned").exists(), "share must not spawn a manager");

@@ -1,8 +1,8 @@
 //! Every operation of `docs/api/manager.openapi.yaml` (SPEC FR-M1) with the per-operation
-//! minimum permission of SPEC FR-A3 / FR-S8.
+//! required capability of SPEC FR-A3 / FR-S8.
 //!
 //! Collaborative operations (SPEC §10a, PROTOCOL §4) are thin: the kernel holds the shared
-//! document, locks and presence; the manager checks the permission, builds the `client`
+//! document, locks and presence; the manager checks the capability, builds the `client`
 //! object from the token and the `X-DarkPyonix-Client` / `X-DarkPyonix-Nickname` headers,
 //! and forwards.
 
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use tokio::sync::watch;
 
-use crate::auth::{self, Auth, PasswordCheck, Permission, Principal};
+use crate::auth::{self, Auth, Capability, Caps, PasswordCheck, Principal};
 use crate::error::{ApiError, ApiResult};
 use crate::{sse, util, Mode, VERSION};
 
@@ -66,6 +66,8 @@ const OP_CANCEL_RUN: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_EVENTS: &[u16] = &[200, 400, 401, 404, 500, 502];
 const OP_LIST_SHARES: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_CREATE_SHARE: &[u16] = &[201, 400, 401, 403, 404, 500, 502];
+const OP_CREATE_SHARE_TOKEN: &[u16] = &[201, 400, 401, 403, 404, 500, 502, 504];
+const OP_SYNC_WS: &[u16] = &[101, 400, 401, 403, 404, 500, 502];
 const OP_REVOKE_SHARE: &[u16] = &[204, 401, 403, 404, 500, 502];
 const OP_CREATE_CELL: &[u16] = &[201, 400, 401, 403, 404, 500, 502];
 const OP_UPDATE_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
@@ -75,7 +77,7 @@ const OP_LOCK_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
 const OP_UNLOCK_CELL: &[u16] = &[200, 400, 401, 403, 404, 409, 500, 502];
 const OP_UPDATE_PRESENCE: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_LEAVE_PRESENCE: &[u16] = &[204, 400, 401, 403, 404, 500, 502];
-const OP_WAIT_RUN: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
+const OP_WAIT_RUN: &[u16] = &[200, 400, 401, 403, 404, 429, 500, 502];
 
 fn finish(r: ApiResult<Response>, documented: &[u16]) -> Response {
     match r {
@@ -141,12 +143,38 @@ fn check_id(p: &Principal, kernel_id: &str) -> ApiResult<()> {
     }
 }
 
-fn require(p: &Principal, perm: Permission) -> ApiResult<()> {
-    if p.at_least(perm) {
+fn require(p: &Principal, cap: Capability) -> ApiResult<()> {
+    if p.has(cap) {
         Ok(())
     } else {
-        Err(ApiError::forbidden(format!("permission {} required", perm.as_str())))
+        Err(ApiError::forbidden(format!("capability {} required", cap.as_str())))
     }
+}
+
+/// The 2025 request argument `user_permission` (SPEC FR-A3): when given it names the capability
+/// the operation needs. Any other value is `400`; the token's set decides allow or deny.
+fn check_user_permission(given: Option<&str>, need: Capability) -> ApiResult<()> {
+    match given {
+        None => Ok(()),
+        Some(g) if g == need.as_str() => Ok(()),
+        Some(g) => Err(ApiError::invalid(format!(
+            "user_permission: expected {} for this operation, got {g}",
+            need.as_str()
+        ))),
+    }
+}
+
+/// `capabilities` of a request body: a non-empty list of the five names, nothing else.
+fn parse_capabilities(names: &[String]) -> ApiResult<Caps> {
+    Caps::from_names(names).ok_or_else(|| {
+        ApiError::invalid("capabilities: expected a non-empty list of read, history, execute, edit, manage")
+    })
+}
+
+/// `user_permission` from a JSON body that is optional as a whole (`null`, empty or not an
+/// object counts as absent here; the operation's own parsing reports malformed bodies).
+fn body_user_permission(body: &[u8]) -> Option<String> {
+    serde_json::from_slice::<Value>(body).ok()?.get("user_permission")?.as_str().map(String::from)
 }
 
 async fn visible(st: &AppState, p: &Principal, kernel_id: &str) -> ApiResult<KernelInfo> {
@@ -205,7 +233,7 @@ fn check_nickname(nickname: Option<&str>) -> ApiResult<()> {
     }
 }
 
-/// The PROTOCOL §4 `client` object: `{client_id, nickname, user, avatar?, permission}`.
+/// The PROTOCOL §4 `client` object: `{client_id, nickname, user, avatar?, capabilities}`.
 /// The user is the OS user for the master token and the share label (or `guest`) for a
 /// share token; the avatar is the last one this client gave with `updatePresence`.
 pub fn client_value(
@@ -237,7 +265,7 @@ pub fn client_value(
             c.insert("avatar".into(), Value::String(a.clone()));
         }
     }
-    c.insert("permission".into(), Value::String(p.permission.as_str().to_string()));
+    c.insert("capabilities".into(), json!(p.caps.names()));
     Value::Object(c)
 }
 
@@ -302,7 +330,7 @@ pub async fn get_manager(State(st): St, Extension(p): Extension<Principal>) -> R
                 "pid": st.pid,
                 "started_at": st.started_at,
                 "idle_timeout": idle.unwrap_or(Value::Null),
-                "permission": p.permission.as_str(),
+                "capabilities": p.caps.names(),
                 "host": st.host,
             }),
         ),
@@ -314,6 +342,7 @@ pub async fn get_manager(State(st): St, Extension(p): Extension<Principal>) -> R
 
 pub async fn list_kernels(State(st): St, Extension(p): Extension<Principal>, uri: Uri) -> Response {
     let r = async {
+        require(&p, Capability::Read)?;
         let refresh = flag(&query(&uri)?, "refresh")?;
         let kernels = st.backend.list(refresh).await?;
         let out: Vec<Value> = kernels.iter().filter(|k| p.can_see(&k.kernel_id)).map(kernel_json).collect();
@@ -335,7 +364,10 @@ struct StartKernelBody {
 
 pub async fn start_kernel(State(st): St, Extension(p): Extension<Principal>, RawBody(body): RawBody) -> Response {
     let r = async {
-        require(&p, Permission::Admin)?;
+        require(&p, Capability::Execute)?;
+        if p.kernel_id.is_some() {
+            return Err(ApiError::forbidden("a token bound to one kernel cannot start kernels"));
+        }
         let b: StartKernelBody = parse_json(&body)?;
         if b.path.is_empty() {
             return Err(ApiError::invalid("path: must not be empty"));
@@ -357,6 +389,8 @@ pub async fn start_kernel(State(st): St, Extension(p): Extension<Principal>, Raw
 
 pub async fn get_kernel(State(st): St, Extension(p): Extension<Principal>, Path(kid): Path<String>) -> Response {
     let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Capability::Read)?;
         let k = visible(&st, &p, &kid).await?;
         ok_json(StatusCode::OK, kernel_json(&k))
     };
@@ -374,7 +408,7 @@ pub async fn shutdown_kernel(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Admin)?;
+        require(&p, Capability::Execute)?;
         let force = flag(&query(&uri)?, "force")?;
         visible(&st, &p, &kid).await?;
         match call(&st, &kid, "shutdown", json!({})).await {
@@ -410,10 +444,12 @@ pub async fn interrupt_kernel(
     Extension(p): Extension<Principal>,
     Path(kid): Path<String>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer3)?;
+        require(&p, Capability::Execute)?;
+        check_user_permission(query(&uri)?.get("user_permission").map(String::as_str), Capability::Execute)?;
         visible(&st, &p, &kid).await?;
         // `interrupted_by` (FR-S6).
         let client = optional_client(&st, &p, &kid, &headers);
@@ -439,7 +475,8 @@ pub async fn restart_kernel(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Admin)?;
+        require(&p, Capability::Execute)?;
+        check_user_permission(body_user_permission(&body).as_deref(), Capability::Execute)?;
         let hard = if body.iter().all(u8::is_ascii_whitespace) {
             false
         } else {
@@ -478,7 +515,7 @@ pub async fn get_namespace(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer2)?;
+        require(&p, Capability::History)?;
         let limit = clamp(&query(&uri)?, "limit", 200, 1, 1000);
         visible(&st, &p, &kid).await?;
         let res = call(&st, &kid, "namespace", json!({ "limit": limit })).await?;
@@ -603,8 +640,10 @@ pub async fn get_kernel_document(
     Path(kid): Path<String>,
 ) -> Response {
     let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Capability::Read)?;
         let k = visible(&st, &p, &kid).await?;
-        let outputs = p.at_least(Permission::Viewer2);
+        let outputs = p.has(Capability::History);
         let (snap, doc) =
             tokio::join!(st.backend.request(&kid, "doc.snapshot", json!({})), st.backend.document(&k.path, outputs));
         let doc = doc?;
@@ -621,7 +660,10 @@ pub async fn get_kernel_document(
 
 pub async fn get_document(State(st): St, Extension(p): Extension<Principal>, uri: Uri) -> Response {
     let r = async {
-        require(&p, Permission::Admin)?;
+        require(&p, Capability::Read)?;
+        if p.kernel_id.is_some() {
+            return Err(ApiError::forbidden("a token bound to one kernel cannot read files by path"));
+        }
         let q = query(&uri)?;
         let path = q.get("path").filter(|s| !s.is_empty()).ok_or_else(|| ApiError::invalid("path: required"))?;
         if !(path.ends_with(".py") || path.ends_with(".pynb")) {
@@ -642,7 +684,7 @@ pub async fn get_document(State(st): St, Extension(p): Extension<Principal>, uri
 pub async fn list_runs(State(st): St, Extension(p): Extension<Principal>, Path(kid): Path<String>, uri: Uri) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer2)?;
+        require(&p, Capability::History)?;
         let limit = clamp(&query(&uri)?, "limit", 20, 1, 500);
         visible(&st, &p, &kid).await?;
         let res = call(&st, &kid, "runs.list", json!({ "limit": limit })).await?;
@@ -692,7 +734,8 @@ pub async fn start_run(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer3)?;
+        require(&p, Capability::Execute)?;
+        check_user_permission(body_user_permission(&body).as_deref(), Capability::Execute)?;
         let b: RunBody = parse_json(&body)?;
         if b.cells.is_some() && b.cell_ids.is_some() {
             return Err(ApiError::invalid("cells, cell_ids: give one of them, not both"));
@@ -767,7 +810,7 @@ pub async fn get_run(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer2)?;
+        require(&p, Capability::History)?;
         check_run_ref(&run_ref)?;
         if st.backend.supports_handoff() {
             let plan = plan_handoff(&st, &p, HandoffKind::Wait, &kid, Some(run_ref.as_str()), &uri, &headers).await?;
@@ -799,7 +842,7 @@ pub async fn cancel_run(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer3)?;
+        require(&p, Capability::Execute)?;
         check_run_ref(&run_ref)?;
         visible(&st, &p, &kid).await?;
         if !util::is_run_id(&run_ref) {
@@ -824,6 +867,7 @@ pub async fn stream_events(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
+        require(&p, Capability::Read)?;
         let q = query(&uri)?;
         // Last-Event-ID takes precedence over ?since=.
         let from_header = headers
@@ -863,7 +907,7 @@ pub async fn stream_events(
             return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
         }
         let events = st.backend.subscribe(&kid, since).await?;
-        let hide_outputs = !p.at_least(Permission::Viewer2);
+        let hide_outputs = !p.has(Capability::History);
         let guard = client_id.map(|id| {
             let task = tokio::spawn(presence_heartbeat(st.clone(), p.clone(), kid.clone(), id, nickname));
             sse::AbortOnDrop(task.abort_handle())
@@ -871,6 +915,35 @@ pub async fn stream_events(
         Ok(sse::response(events, &kid, hide_outputs, st.sse_keepalive, st.shutdown.clone(), guard))
     };
     finish(r.await, OP_EVENTS)
+}
+
+/// The 2025 WebSocket sync (SPEC FR-S9): the kernel answers the upgrade. Plain TCP connections
+/// are handed off before they get here (handoff.rs); this handler serves TLS, HTTP/2 and tunnels
+/// through the socket pair pump.
+pub async fn sync_ws(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(kid): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Capability::Read)?;
+        let upgrade = headers
+            .get(axum::http::header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+        if !upgrade || !headers.contains_key("sec-websocket-key") {
+            return Err(ApiError::invalid("a WebSocket upgrade request is required (Upgrade, Sec-WebSocket-Key)"));
+        }
+        if !st.backend.supports_handoff() {
+            return Err(ApiError::internal("the WebSocket sync needs a backend that can hand off streams"));
+        }
+        let plan = plan_handoff(&st, &p, HandoffKind::Ws, &kid, None, &uri, &headers).await?;
+        crate::handoff::pump_response(&st, plan, &uri, &headers).await
+    };
+    finish(r.await, OP_SYNC_WS)
 }
 
 /// `presence.update {client}` now and every `presence_heartbeat` until aborted (the event
@@ -1128,14 +1201,39 @@ pub async fn verify_token(
 
 // ------------------------------------------------------------------ Sharing
 
+/// A kernel-held share (`tokens.list`) as an OpenAPI `Share`.
+fn kernel_share(kid: &str, v: &Value) -> Value {
+    json!({
+        "share_id": v["share_id"],
+        "kernel_id": kid,
+        "capabilities": v["capabilities"],
+        "label": v["label"],
+        "created_at": v["created_at"],
+        "expires_at": v["expires_at"],
+    })
+}
+
 pub async fn list_shares(State(st): St, Extension(p): Extension<Principal>, Path(kid): Path<String>) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Admin)?;
-        let shares = match &st.auth.shares {
+        require(&p, Capability::Manage)?;
+        let mut shares: Vec<Value> = match &st.auth.shares {
             None => Vec::new(),
-            Some(store) => store.list(&kid).map_err(|e| ApiError::internal(e.to_string()))?,
+            Some(store) => store
+                .list(&kid)
+                .map_err(|e| ApiError::internal(e.to_string()))?
+                .iter()
+                .map(|s| serde_json::to_value(s).unwrap_or_default())
+                .collect(),
         };
+        if st.auth.shares.is_some() {
+            // Kernel-held shares (tokens/share, PROTOCOL §6); a kernel that cannot answer adds none.
+            if let Ok(v) = st.backend.request(&kid, "tokens.list", json!({})).await {
+                if let Some(list) = v["shares"].as_array() {
+                    shares.extend(list.iter().filter(|t| t["revoked_at"].is_null()).map(|t| kernel_share(&kid, t)));
+                }
+            }
+        }
         ok_json(StatusCode::OK, json!({ "shares": shares }))
     };
     finish(r.await, OP_LIST_SHARES)
@@ -1143,11 +1241,16 @@ pub async fn list_shares(State(st): St, Extension(p): Extension<Principal>, Path
 
 #[derive(Deserialize)]
 struct ShareBody {
-    permission: String,
+    capabilities: Vec<String>,
     #[serde(default)]
     label: Option<String>,
     #[serde(default)]
     expires_at: Option<String>,
+    #[serde(default)]
+    user_permission: Option<String>,
+    /// `tokens/share` only: the 2025 body field, must equal the path parameter.
+    #[serde(default)]
+    kernel_id: Option<String>,
 }
 
 pub async fn create_share(
@@ -1158,13 +1261,13 @@ pub async fn create_share(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Admin)?;
+        require(&p, Capability::Manage)?;
         let Some(store) = &st.auth.shares else {
             return Err(ApiError::forbidden("share tokens need a dedicated manager (FR-A3)"));
         };
         let b: ShareBody = parse_json(&body)?;
-        let permission = Permission::parse_share(&b.permission)
-            .ok_or_else(|| ApiError::invalid("permission: expected viewer1, viewer2, viewer3 or editor"))?;
+        check_user_permission(b.user_permission.as_deref(), Capability::Manage)?;
+        let caps = parse_capabilities(&b.capabilities)?;
         if b.label.as_ref().is_some_and(|l| l.chars().count() > 120) {
             return Err(ApiError::invalid("label: at most 120 characters"));
         }
@@ -1174,7 +1277,7 @@ pub async fn create_share(
         };
         visible(&st, &p, &kid).await?;
         let (share, token) =
-            store.create(&kid, permission, b.label, expires).map_err(|e| ApiError::internal(e.to_string()))?;
+            store.create(&kid, caps, b.label, expires).map_err(|e| ApiError::internal(e.to_string()))?;
         let mut v = serde_json::to_value(&share).unwrap_or_default();
         if let Value::Object(m) = &mut v {
             let url = format!("{}/{}#{}", st.share_base.trim_end_matches('/'), share.share_id, token);
@@ -1186,6 +1289,62 @@ pub async fn create_share(
     finish(r.await, OP_CREATE_SHARE)
 }
 
+/// The 2025 `POST /kernels/{kernel_id}/tokens/share`: the kernel issues and holds the token, so
+/// it works through any manager (SPEC FR-A6, PROTOCOL §6).
+pub async fn create_share_token(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(kid): Path<String>,
+    RawBody(body): RawBody,
+) -> Response {
+    let r = async {
+        check_id(&p, &kid)?;
+        require(&p, Capability::Manage)?;
+        if st.auth.shares.is_none() {
+            return Err(ApiError::forbidden("share tokens need a dedicated manager (FR-A3)"));
+        }
+        let b: ShareBody = parse_json(&body)?;
+        check_user_permission(b.user_permission.as_deref(), Capability::Manage)?;
+        if b.kernel_id.as_deref().is_some_and(|k| k != kid) {
+            return Err(ApiError::invalid("kernel_id: must equal the kernel in the path"));
+        }
+        let caps = parse_capabilities(&b.capabilities)?;
+        if b.label.as_ref().is_some_and(|l| l.chars().count() > 120) {
+            return Err(ApiError::invalid("label: at most 120 characters"));
+        }
+        if let Some(s) = &b.expires_at {
+            util::parse_datetime(s).ok_or_else(|| ApiError::invalid("expires_at: expected RFC 3339 date-time"))?;
+        }
+        visible(&st, &p, &kid).await?;
+        let mut params = Map::new();
+        params.insert("kind".into(), json!("share"));
+        params.insert("capabilities".into(), json!(caps.names()));
+        if let Some(l) = &b.label {
+            params.insert("label".into(), Value::String(l.clone()));
+        }
+        if let Some(e) = &b.expires_at {
+            params.insert("expires_at".into(), Value::String(e.clone()));
+        }
+        let v = call(&st, &kid, "tokens.issue", Value::Object(params)).await?;
+        let token = issued_token(&v)?;
+        let share_id = v["share_id"]
+            .as_str()
+            .ok_or_else(|| ApiError::internal("kernel answer has no share_id"))?
+            .to_string();
+        let url = format!("{}/{}#{}", st.share_base.trim_end_matches('/'), share_id, token);
+        ok_json(
+            StatusCode::CREATED,
+            json!({
+                "share_id": share_id,
+                "share_token": token,
+                "capabilities": caps.names(),
+                "share_url": url,
+            }),
+        )
+    };
+    finish(r.await, OP_CREATE_SHARE_TOKEN)
+}
+
 pub async fn revoke_share(
     State(st): St,
     Extension(p): Extension<Principal>,
@@ -1193,14 +1352,22 @@ pub async fn revoke_share(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Admin)?;
+        require(&p, Capability::Manage)?;
         let gone = ApiError::not_found(format!("no such share: {share_id}"));
         let Some(store) = &st.auth.shares else { return Err(gone) };
         if !util::is_share_id(&share_id) {
             return Err(gone);
         }
         if !store.revoke(&kid, &share_id).map_err(|e| ApiError::internal(e.to_string()))? {
-            return Err(gone);
+            // Not a manager share: maybe one the kernel holds (tokens/share). The kernel closes
+            // its streams itself when it revokes.
+            let v = call(&st, &kid, "tokens.revoke", json!({ "share_id": share_id })).await.map_err(|_| {
+                ApiError::not_found(format!("no such share: {share_id}"))
+            })?;
+            if v["revoked"].as_u64().unwrap_or(0) == 0 {
+                return Err(gone);
+            }
+            return Ok(StatusCode::NO_CONTENT.into_response());
         }
         close_share_streams(&st, &kid, &share_id).await;
         Ok(StatusCode::NO_CONTENT.into_response())
@@ -1279,7 +1446,8 @@ pub async fn create_cell(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Editor)?;
+        require(&p, Capability::Edit)?;
+        check_user_permission(body_user_permission(&body).as_deref(), Capability::Edit)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         let b: CellEditBody = parse_json(&body)?;
         if b.after.is_some() && b.before.is_some() {
@@ -1308,7 +1476,8 @@ pub async fn update_cell(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Editor)?;
+        require(&p, Capability::Edit)?;
+        check_user_permission(body_user_permission(&body).as_deref(), Capability::Edit)?;
         check_cell(&cell_id)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         let b: CellEditBody = parse_json(&body)?;
@@ -1332,7 +1501,7 @@ pub async fn delete_cell(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Editor)?;
+        require(&p, Capability::Edit)?;
         check_cell(&cell_id)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         let base = query(&uri)?
@@ -1363,7 +1532,8 @@ pub async fn move_cell(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Editor)?;
+        require(&p, Capability::Edit)?;
+        check_user_permission(body_user_permission(&body).as_deref(), Capability::Edit)?;
         check_cell(&cell_id)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         #[derive(Deserialize)]
@@ -1392,10 +1562,12 @@ pub async fn lock_cell(
     Extension(p): Extension<Principal>,
     Path((kid, cell_id)): Path<(String, String)>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Editor)?;
+        require(&p, Capability::Edit)?;
+        check_user_permission(query(&uri)?.get("user_permission").map(String::as_str), Capability::Edit)?;
         check_cell(&cell_id)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         visible(&st, &p, &kid).await?;
@@ -1414,7 +1586,8 @@ pub async fn unlock_cell(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Editor)?;
+        require(&p, Capability::Edit)?;
+        check_user_permission(body_user_permission(&body).as_deref(), Capability::Edit)?;
         check_cell(&cell_id)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         #[derive(Deserialize, Default)]
@@ -1487,7 +1660,7 @@ pub async fn update_presence(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer1)?;
+        require(&p, Capability::Read)?;
         let (client_id, nickname) = client_ident(&headers)?;
         let b: Map<String, Value> = parse_json(&body)?;
         if b.get("focused_cell_id").is_some_and(|v| !(v.is_null() || v.is_string())) {
@@ -1540,7 +1713,7 @@ pub async fn leave_presence(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer1)?;
+        require(&p, Capability::Read)?;
         let client = required_client(&st, &p, &kid, &headers)?;
         visible(&st, &p, &kid).await?;
         call(&st, &kid, "presence.leave", with_rid(json!({ "client": client.clone() }), &headers)).await?;
@@ -1559,6 +1732,35 @@ const WAIT_DEFAULT: i64 = 60;
 const WAIT_MAX: i64 = 300;
 const FINISHED: [&str; 5] = ["ok", "error", "interrupted", "cancelled", "crashed"];
 
+/// 2025 alarm limits (SPEC FR-S7): `poll_sequence` above `POLL_MAX` is `429`.
+const POLL_MAX: i64 = 100;
+const POLL_DELAY: u64 = 5;
+
+/// `poll_sequence` (integer >= 1, default 1) and the optional `client_id` of a wait request.
+fn poll_params(q: &BTreeMap<String, String>) -> ApiResult<(i64, Option<String>)> {
+    let seq = match q.get("poll_sequence") {
+        None => 1,
+        Some(v) => v
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .filter(|n| *n >= 1)
+            .ok_or_else(|| ApiError::invalid("poll_sequence: expected an integer >= 1"))?,
+    };
+    let client_id = q.get("client_id").map(|v| v.trim()).filter(|v| !v.is_empty()).map(String::from);
+    if let Some(id) = &client_id {
+        check_client_id(id)?;
+    }
+    if seq > POLL_MAX {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "poll_limit_exceeded",
+            format!("poll_sequence {seq} is above {POLL_MAX}"),
+        ));
+    }
+    Ok((seq, client_id))
+}
+
 pub async fn wait_run(
     State(st): St,
     Extension(p): Extension<Principal>,
@@ -1567,8 +1769,9 @@ pub async fn wait_run(
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
-        require(&p, Permission::Viewer2)?;
+        require(&p, Capability::History)?;
         check_run_ref(&run_ref)?;
+        let (poll_seq, poll_client) = poll_params(&query(&uri)?)?;
         let timeout = match query(&uri)?.get("timeout") {
             None => WAIT_DEFAULT,
             Some(v) => v
@@ -1590,10 +1793,31 @@ pub async fn wait_run(
         } else {
             Value::String(format!("/api/kernels/{kid}/runs/{run_id}/wait?timeout={timeout}"))
         };
+        let (next_seq, auto_repoll) = match &next {
+            Value::String(url) => {
+                let mut repoll = format!("{url}&poll_sequence={}", poll_seq + 1);
+                if let Some(id) = &poll_client {
+                    repoll.push_str(&format!("&client_id={id}"));
+                }
+                (
+                    json!(poll_seq + 1),
+                    json!({
+                        "enabled": true,
+                        "next_poll_url": repoll,
+                        "recommended_delay": POLL_DELAY,
+                        "max_polls": POLL_MAX,
+                    }),
+                )
+            }
+            _ => (Value::Null, Value::Null),
+        };
         out.insert("status".into(), Value::String(status));
         out.insert("run_id".into(), Value::String(run_id));
         out.entry("run").or_insert(Value::Null);
         out.insert("next".into(), next);
+        out.insert("poll_sequence".into(), json!(poll_seq));
+        out.insert("next_poll_sequence".into(), next_seq);
+        out.insert("auto_repoll".into(), auto_repoll);
         ok_json(StatusCode::OK, Value::Object(out))
     };
     finish(r.await, OP_WAIT_RUN)
@@ -1627,27 +1851,13 @@ pub struct HandoffPlan {
     pub label: Value,
 }
 
-/// FR-A3 capability names of a principal. The manager still stores the viewer ladder (#48,
-/// #49 move it to capability sets); the kernel only filters by these names (FR-K9).
+/// FR-A3 capability names of a principal; the kernel only filters by these names (FR-K9).
 pub fn capabilities(p: &Principal) -> Vec<&'static str> {
-    let mut caps = vec!["read"];
-    if p.at_least(Permission::Viewer2) {
-        caps.push("history");
-    }
-    if p.at_least(Permission::Viewer3) {
-        caps.push("execute");
-    }
-    if p.at_least(Permission::Editor) {
-        caps.push("edit");
-    }
-    if p.at_least(Permission::Admin) {
-        caps.push("manage");
-    }
-    caps
+    p.caps.names()
 }
 
 /// The checks the three stream operations make, without touching the kernel's stream: who may
-/// see which kernel, the minimum permission, valid parameters. An `Err` is the HTTP answer.
+/// see which kernel, the required capability, valid parameters. An `Err` is the HTTP answer.
 pub async fn plan_handoff(
     st: &AppState,
     p: &Principal,
@@ -1661,20 +1871,22 @@ pub async fn plan_handoff(
     let q = query(uri)?;
     match kind {
         HandoffKind::Events => {
+            require(p, Capability::Read)?;
             if let Some(v) = q.get("since") {
                 v.trim().parse::<u64>().map_err(|_| ApiError::invalid("since: expected an integer >= 0"))?;
             }
         }
         HandoffKind::Wait => {
-            require(p, Permission::Viewer2)?;
+            require(p, Capability::History)?;
             check_run_ref(run_ref.unwrap_or(""))?;
+            poll_params(&q)?;
             if let Some(v) = q.get("timeout") {
                 v.trim()
                     .parse::<i64>()
                     .map_err(|_| ApiError::invalid("timeout: expected an integer number of seconds"))?;
             }
         }
-        HandoffKind::Ws => {}
+        HandoffKind::Ws => require(p, Capability::Read)?,
     }
     let client_id = q
         .get("client_id")

@@ -14,58 +14,76 @@ use sha2::{Digest, Sha256};
 
 use crate::util;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Permission {
-    Viewer1 = 1,
-    Viewer2 = 2,
-    Viewer3 = 3,
-    /// `viewer3` plus cell edits and locks (SPEC FR-S8).
-    Editor = 4,
-    Admin = 5,
+/// One of the five capabilities of SPEC FR-A3 (INTENT D18). They have no order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capability {
+    Read,
+    History,
+    Execute,
+    Edit,
+    Manage,
 }
 
-impl Permission {
+impl Capability {
+    pub const ALL: [Capability; 5] =
+        [Capability::Read, Capability::History, Capability::Execute, Capability::Edit, Capability::Manage];
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Permission::Viewer1 => "viewer1",
-            Permission::Viewer2 => "viewer2",
-            Permission::Viewer3 => "viewer3",
-            Permission::Editor => "editor",
-            Permission::Admin => "admin",
+            Capability::Read => "read",
+            Capability::History => "history",
+            Capability::Execute => "execute",
+            Capability::Edit => "edit",
+            Capability::Manage => "manage",
         }
     }
-    pub fn parse_share(s: &str) -> Option<Self> {
-        match s {
-            "viewer1" => Some(Permission::Viewer1),
-            "viewer2" => Some(Permission::Viewer2),
-            "viewer3" => Some(Permission::Viewer3),
-            "editor" => Some(Permission::Editor),
-            _ => None,
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == s)
+    }
+
+    fn bit(self) -> u8 {
+        1 << (self as u8)
+    }
+}
+
+/// A set of capabilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Caps(u8);
+
+impl Caps {
+    pub fn all() -> Self {
+        Caps(Capability::ALL.iter().fold(0, |acc, c| acc | c.bit()))
+    }
+
+    /// `None` when a name is unknown (tier names included) or the list is empty.
+    pub fn from_names<S: AsRef<str>>(names: &[S]) -> Option<Self> {
+        if names.is_empty() {
+            return None;
         }
+        let mut bits = 0u8;
+        for n in names {
+            bits |= Capability::parse(n.as_ref())?.bit();
+        }
+        Some(Caps(bits))
+    }
+
+    pub fn has(self, c: Capability) -> bool {
+        self.0 & c.bit() != 0
+    }
+
+    /// Names in the canonical order of [`CAPABILITIES`].
+    pub fn names(self) -> Vec<&'static str> {
+        Capability::ALL.iter().filter(|c| self.has(**c)).map(|c| c.as_str()).collect()
+    }
+
+    pub fn joined(self, sep: &str) -> String {
+        self.names().join(sep)
     }
 }
 
 /// The five capabilities of SPEC FR-A3, in their canonical order.
 pub const CAPABILITIES: [&str; 5] = ["read", "history", "execute", "edit", "manage"];
-
-/// Bridge until the permission model of #49 lands: the tier that a capability set maps onto.
-/// All five are `admin`; `edit` with `execute` is `editor`; `execute` is `viewer3`; `history`
-/// is `viewer2`; anything else is `viewer1`. Replaced by capability checks in #49.
-pub fn tier_for(caps: &[String]) -> Permission {
-    let has = |c: &str| caps.iter().any(|x| x == c);
-    if CAPABILITIES.iter().all(|c| has(c)) {
-        Permission::Admin
-    } else if has("edit") && has("execute") {
-        Permission::Editor
-    } else if has("execute") {
-        Permission::Viewer3
-    } else if has("history") {
-        Permission::Viewer2
-    } else {
-        Permission::Viewer1
-    }
-}
 
 /// `read+history` to `["read", "history"]`; `None` unless the names are known, unique and in
 /// the canonical order of [`CAPABILITIES`] (SPEC FR-A4).
@@ -82,10 +100,10 @@ pub fn parse_token_type(s: &str) -> Option<Vec<String>> {
     Some(names.into_iter().map(String::from).collect())
 }
 
-/// Who is calling: the master token (`admin`) or a share bound to one kernel.
+/// Who is calling: the master token (all capabilities) or a token bound to one kernel.
 #[derive(Debug, Clone)]
 pub struct Principal {
-    pub permission: Permission,
+    pub caps: Caps,
     pub kernel_id: Option<String>,
     pub share_id: Option<String>,
     /// The share's label (shown as the user name of its clients, FR-S4).
@@ -98,14 +116,20 @@ pub struct Principal {
 
 impl Principal {
     pub fn admin() -> Self {
-        Self { permission: Permission::Admin, kernel_id: None, share_id: None, label: None, master: true, initial: false }
+        Self { caps: Caps::all(), kernel_id: None, share_id: None, label: None, master: true, initial: false }
     }
-    pub fn at_least(&self, p: Permission) -> bool {
-        self.permission >= p
+    pub fn has(&self, c: Capability) -> bool {
+        self.caps.has(c)
     }
     pub fn can_see(&self, kernel_id: &str) -> bool {
         self.kernel_id.as_deref().is_none_or(|k| k == kernel_id)
     }
+}
+
+/// `read+history` as stored in `manager.db`; `None` unless every name is a capability.
+fn parse_caps(s: &str) -> Option<Caps> {
+    let names: Vec<&str> = s.split('+').collect();
+    Caps::from_names(&names)
 }
 
 pub fn sha256_hex(s: &str) -> String {
@@ -226,7 +250,7 @@ pub enum PasswordCheck {
 pub struct Share {
     pub share_id: String,
     pub kernel_id: String,
-    pub permission: String,
+    pub capabilities: Vec<String>,
     pub label: Option<String>,
     pub created_at: String,
     pub expires_at: Option<String>,
@@ -295,7 +319,7 @@ impl ShareStore {
             }
         }
         Some(Principal {
-            permission: Permission::parse_share(&permission)?,
+            caps: parse_caps(&permission)?,
             kernel_id: Some(kernel_id),
             share_id: Some(share_id),
             label,
@@ -338,9 +362,9 @@ impl ShareStore {
         if revoked.is_some() {
             return Lookup::Revoked;
         }
-        let caps: Vec<String> = caps.split('+').map(String::from).collect();
+        let Some(caps) = parse_caps(&caps) else { return Lookup::Unknown };
         Lookup::Found(Principal {
-            permission: tier_for(&caps),
+            caps,
             kernel_id: None,
             share_id: Some(share_id),
             label: None,
@@ -388,7 +412,7 @@ impl ShareStore {
             Ok(Share {
                 share_id: r.get(0)?,
                 kernel_id: r.get(1)?,
-                permission: r.get(2)?,
+                capabilities: r.get::<_, String>(2)?.split('+').map(String::from).collect(),
                 label: r.get(3)?,
                 created_at: r.get(4)?,
                 expires_at: r.get(5)?,
@@ -401,14 +425,14 @@ impl ShareStore {
     pub fn create(
         &self,
         kernel_id: &str,
-        permission: Permission,
+        caps: Caps,
         label: Option<String>,
         expires: Option<time::OffsetDateTime>,
     ) -> rusqlite::Result<(Share, String)> {
         let share = Share {
             share_id: format!("s_{}", random_hex(8)),
             kernel_id: kernel_id.to_string(),
-            permission: permission.as_str().to_string(),
+            capabilities: caps.names().into_iter().map(String::from).collect(),
             label,
             created_at: util::now_iso(),
             expires_at: expires.map(util::iso),
@@ -421,7 +445,7 @@ impl ShareStore {
             params![
                 share.share_id,
                 share.kernel_id,
-                share.permission,
+                caps.joined("+"),
                 share.label,
                 share.created_at,
                 share.expires_at,

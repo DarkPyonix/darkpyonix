@@ -245,6 +245,66 @@ async fn test_fr_m6_plain_stream_is_handed_off_and_survives_the_manager() {
     assert!(more.contains("data: after the manager ended"));
 }
 
+fn ws_request(kid: &str, query: &str, auth: Option<&str>) -> String {
+    let bearer = auth.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+    format!(
+        "GET /api/ws/kernels/{kid}{query} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n{bearer}\r\n"
+    )
+}
+
+#[tokio::test]
+async fn test_fr_s9_ws_route_hands_the_upgrade_to_the_kernel_with_the_label() {
+    let rig = start(true, |_| {}).await;
+    let token = rig.h().token.clone();
+    let mut c = rig.raw(&ws_request(&rig.kid, &format!("?token={token}&client_id=dev_8f2c1a&nickname=phone"), None)).await;
+    read_until(&mut c, ": hello").await;
+    let (kind, transport, request, label) = rig.backend.adopted(0);
+    assert_eq!((kind.as_str(), transport.as_str()), ("ws", "fd"));
+    assert!(request.starts_with(&format!("GET /api/ws/kernels/{}?client_id=dev_8f2c1a&nickname=phone HTTP/1.1", rig.kid)), "{request}");
+    assert!(!request.contains(&token), "token leaked to the kernel: {request}");
+    assert!(request.contains("sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ=="), "{request}");
+    assert_eq!(label["capabilities"], json!(["read", "history", "execute", "edit", "manage"]));
+    assert_eq!(label["client_id"], "dev_8f2c1a");
+    assert_eq!(label["nickname"], "phone");
+}
+
+#[tokio::test]
+async fn test_fr_s9_ws_needs_read_and_a_valid_token() {
+    let rig = start(true, |_| {}).await;
+    let http = reqwest::Client::new();
+    let share: Value = http
+        .post(format!("{}/api/kernels/{}/shares", rig.h().url, rig.kid))
+        .bearer_auth(&rig.h().token)
+        .json(&json!({"capabilities": ["history", "execute"]}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = share["token"].as_str().unwrap();
+    let mut c = rig.raw(&ws_request(&rig.kid, "", Some(token))).await;
+    assert!(read_until(&mut c, "\r\n\r\n").await.starts_with("HTTP/1.1 403"));
+    let mut c = rig.raw(&ws_request(&rig.kid, "?token=nope", None)).await;
+    assert!(read_until(&mut c, "\r\n\r\n").await.starts_with("HTTP/1.1 401"));
+    assert_eq!(rig.backend.adopted_count(), 0);
+}
+
+#[tokio::test]
+async fn test_fr_s7_wait_past_the_poll_limit_is_refused_before_the_kernel() {
+    let rig = start(false, |_| {}).await;
+    let token = rig.h().token.clone();
+    let mut c = rig
+        .raw(&format!(
+            "GET /api/kernels/{}/runs/latest/wait?poll_sequence=101 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\n\r\n",
+            rig.kid
+        ))
+        .await;
+    assert!(read_until(&mut c, "\r\n\r\n").await.starts_with("HTTP/1.1 429"));
+    assert_eq!(rig.backend.adopted_count(), 0);
+}
+
 #[tokio::test]
 async fn test_fr_m6_unauthenticated_stream_never_reaches_kernel() {
     let rig = start(false, |_| {}).await;
@@ -340,7 +400,7 @@ async fn test_fr_m6_revoking_a_share_closes_its_streams() {
     let share: Value = http
         .post(format!("{}/api/kernels/{}/shares", rig.h().url, rig.kid))
         .bearer_auth(&admin)
-        .json(&json!({"permission": "viewer2", "label": "guest"}))
+        .json(&json!({"capabilities": ["read", "history"], "label": "guest"}))
         .send()
         .await
         .unwrap()
@@ -377,7 +437,7 @@ async fn test_fr_m6_a_viewer_without_history_cannot_wait() {
     let share: Value = http
         .post(format!("{}/api/kernels/{}/shares", rig.h().url, rig.kid))
         .bearer_auth(&rig.h().token)
-        .json(&json!({"permission": "viewer1"}))
+        .json(&json!({"capabilities": ["read"]}))
         .send()
         .await
         .unwrap()

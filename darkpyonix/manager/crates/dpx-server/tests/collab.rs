@@ -147,7 +147,7 @@ async fn test_fr_s2_cell_edits_versions_and_events() {
     assert_eq!(m, "doc.cell.create");
     assert_eq!(
         p,
-        json!({"client": {"client_id": A, "nickname": format!("{A}-device"), "user": os_user(), "permission": "admin"},
+        json!({"client": {"client_id": A, "nickname": format!("{A}-device"), "user": os_user(), "capabilities": ["read", "history", "execute", "edit", "manage"]},
                "type": "code", "source": "y = 2\n", "after": "c_preamble"})
     );
     let ev = sse.next_msg().await.unwrap();
@@ -294,7 +294,7 @@ async fn test_fr_s4_presence_update_and_leave() {
     assert_eq!(presence[0]["client_id"], A);
     assert_eq!(presence[0]["nickname"], format!("{A}-device"));
     assert_eq!(presence[0]["user"], os_user());
-    assert_eq!(presence[0]["permission"], "admin");
+    assert_eq!(presence[0]["capabilities"], json!(["read", "history", "execute", "edit", "manage"]));
     assert_eq!(presence[0]["avatar"], "https://example.test/a.png");
     assert_eq!(presence[0]["focused_cell_id"], "c_second");
     assert_eq!(presence[0]["cursor"], cursor);
@@ -349,7 +349,7 @@ async fn test_fr_s4_event_stream_with_client_id_heartbeats_presence() {
     let first = s.backend.calls_of(&kid, "presence.update")[0].clone();
     assert_eq!(
         first,
-        json!({"client": {"client_id": "tablet-0001", "nickname": "Tab", "user": os_user(), "permission": "admin"}})
+        json!({"client": {"client_id": "tablet-0001", "nickname": "Tab", "user": os_user(), "capabilities": ["read", "history", "execute", "edit", "manage"]}})
     );
     let doc = a.get(&format!("/api/kernels/{kid}/document")).await;
     assert_eq!(doc.body["presence"][0]["client_id"], "tablet-0001");
@@ -389,7 +389,7 @@ async fn test_fr_s6_runs_and_interrupts_carry_the_client() {
     assert!(p.get("cells").is_none());
     assert_eq!(
         p["client"],
-        json!({"client_id": A, "nickname": format!("{A}-device"), "user": os_user(), "permission": "admin"})
+        json!({"client_id": A, "nickname": format!("{A}-device"), "user": os_user(), "capabilities": ["read", "history", "execute", "edit", "manage"]})
     );
     send_as(&a, Some(A), "POST", &runs, Some(json!({"mode": "cells", "cells": [1], "cell_ids": ["c_second"]})))
         .await
@@ -463,9 +463,12 @@ async fn test_fr_s7_wait_returns_on_finish_or_timeout() {
     a.get(&format!("{base}/runs/latest/wait")).await.error(502, "kernel_unreachable");
 }
 
-/// FR-A3 + FR-S8: edits and locks need `editor`, presence `viewer1`, waiting `viewer2`.
+const CAPS: [&str; 5] = ["read", "history", "execute", "edit", "manage"];
+
+/// FR-A3 + FR-S8: edits and locks need `edit`, presence `read`, waiting `history`, runs `execute`.
+/// Each token holds exactly one capability, so the capabilities are independent.
 #[tokio::test]
-async fn test_fr_s8_permission_matrix_for_collaboration() {
+async fn test_fr_s8_edit_is_checked_by_the_manager() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
@@ -474,58 +477,58 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
     s.backend.finish_run(&kid);
 
     let mut tokens = vec![];
-    for perm in ["viewer1", "viewer2", "viewer3", "editor"] {
-        let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": perm, "label": perm})).await;
+    for cap in CAPS {
+        let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": [cap], "label": cap})).await;
         assert_eq!(c.status, 201, "{}", c.text);
-        assert_eq!(c.body["permission"], perm);
-        tokens.push((perm, c.body["token"].as_str().unwrap().to_string()));
+        assert_eq!(c.body["capabilities"], json!([cap]));
+        tokens.push((cap, c.body["token"].as_str().unwrap().to_string()));
     }
     let listed = a.get(&format!("/api/kernels/{kid}/shares")).await;
-    assert!(listed.body["shares"].as_array().unwrap().iter().any(|s| s["permission"] == "editor"));
-    let rank = |p: &str| match p {
-        "viewer1" => 1,
-        "viewer2" => 2,
-        "viewer3" => 3,
-        "editor" => 4,
-        _ => 5,
-    };
+    assert!(listed.body["shares"].as_array().unwrap().iter().any(|s| s["capabilities"] == json!(["edit"])));
     let b = format!("/api/kernels/{kid}");
-    // (method, path, body, minimum permission)
+    // (method, path, body, the one capability it needs)
     let ops: Vec<(&str, String, Option<Value>, &str)> = vec![
-        ("GET", format!("{b}/document"), None, "viewer1"),
-        ("PUT", format!("{b}/presence"), Some(json!({"focused_cell_id": "c_second"})), "viewer1"),
-        ("GET", format!("{b}/runs/latest/wait?timeout=1"), None, "viewer2"),
-        ("POST", format!("{b}/runs"), Some(json!({"mode": "all", "on_busy": "queue"})), "viewer3"),
-        ("POST", format!("{b}/cells"), Some(json!({"source": "z = 0\n"})), "editor"),
-        ("PATCH", format!("{b}/cells/c_second"), Some(json!({"source": "x = 1\n", "base_version": 99})), "editor"),
-        ("POST", format!("{b}/cells/c_second/move"), Some(json!({"to_index": 1})), "editor"),
-        ("PUT", format!("{b}/cells/c_second/lock"), None, "editor"),
-        ("DELETE", format!("{b}/cells/c_second/lock"), None, "editor"),
-        ("DELETE", format!("{b}/cells/c_second?base_version=99"), None, "editor"),
-        ("DELETE", format!("{b}/presence"), None, "viewer1"),
-        ("POST", format!("{b}/restart"), Some(json!({})), "admin"),
+        ("GET", format!("{b}/document"), None, "read"),
+        ("PUT", format!("{b}/presence"), Some(json!({"focused_cell_id": "c_second"})), "read"),
+        ("GET", format!("{b}/runs/latest/wait?timeout=1"), None, "history"),
+        ("POST", format!("{b}/runs"), Some(json!({"mode": "all", "on_busy": "queue"})), "execute"),
+        ("POST", format!("{b}/cells"), Some(json!({"source": "z = 0\n"})), "edit"),
+        ("PATCH", format!("{b}/cells/c_second"), Some(json!({"source": "x = 1\n", "base_version": 99})), "edit"),
+        ("POST", format!("{b}/cells/c_second/move"), Some(json!({"to_index": 1})), "edit"),
+        ("PUT", format!("{b}/cells/c_second/lock"), None, "edit"),
+        ("DELETE", format!("{b}/cells/c_second/lock"), None, "edit"),
+        ("DELETE", format!("{b}/cells/c_second?base_version=99"), None, "edit"),
+        ("DELETE", format!("{b}/presence"), None, "read"),
+        ("POST", format!("{b}/restart"), Some(json!({})), "execute"),
     ];
-    for (perm, token) in &tokens {
+    for (cap, token) in &tokens {
         let v = s.with_token(token);
-        assert_eq!(v.get("/api/manager").await.body["permission"], *perm);
-        let me = format!("client-{perm}");
-        for (m, p, body, min) in &ops {
+        let me = format!("client-{cap}");
+        let before = s.backend.method_calls(&kid).len();
+        for (m, p, body, need) in &ops {
             let r = send_as(&v, Some(me.as_str()), m, p, body.clone()).await;
-            if rank(perm) >= rank(min) {
+            if need == cap {
                 // 409: the stale base_version on purpose.
-                assert!(r.status < 400 || r.status == 409, "{perm} {m} {p}: {}", r.text);
+                assert!(r.status < 400 || r.status == 409, "{cap} {m} {p}: {}", r.text);
             } else {
                 r.error(403, "forbidden");
             }
         }
-        // Share clients are named after the share label.
-        let sent = s.backend.calls_of(&kid, "presence.update").pop().unwrap();
-        assert_eq!(sent["client"]["user"], *perm);
-        assert_eq!(sent["client"]["permission"], *perm);
-        assert_eq!(sent["client"]["client_id"], me.as_str());
+        if *cap == "read" {
+            // Share clients are named after the share label and carry their capability set.
+            let sent = s.backend.calls_of(&kid, "presence.update").pop().unwrap();
+            assert_eq!(sent["client"]["user"], *cap);
+            assert_eq!(sent["client"]["capabilities"], json!(["read"]));
+            assert_eq!(sent["client"]["client_id"], me.as_str());
+        }
+        if *cap == "history" || *cap == "manage" {
+            // Refused requests never reach the kernel.
+            let calls = s.backend.method_calls(&kid);
+            assert!(!calls[before..].iter().any(|c| c.starts_with("doc.") || c == "run" || c == "restart"), "{calls:?}");
+        }
     }
     // Without a label the user is "guest"; the master token is the OS user.
-    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await;
+    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"]})).await;
     let guest = s.with_token(c.body["token"].as_str().unwrap());
     assert_eq!(send_as(&guest, Some("guest-device"), "PUT", &format!("{b}/presence"), Some(json!({}))).await.status, 200);
     assert_eq!(s.backend.calls_of(&kid, "presence.update").pop().unwrap()["client"]["user"], "guest");
@@ -537,4 +540,56 @@ async fn test_fr_s8_permission_matrix_for_collaboration() {
     send_as(&editor, Some("client-editor"), "POST", &format!("/api/kernels/{other}/cells"), Some(json!({})))
         .await
         .error(404, "not_found");
+}
+
+#[tokio::test]
+async fn test_fr_s8_execute_does_not_grant_edit() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let b = format!("/api/kernels/{kid}");
+    let c = a.post(&format!("{b}/shares"), json!({"capabilities": ["read", "execute"]})).await;
+    let runner = s.with_token(c.body["token"].as_str().unwrap());
+    send_as(&runner, Some("runner-0001"), "PUT", &format!("{b}/cells/c_second/lock"), None).await.error(403, "forbidden");
+    send_as(&runner, Some("runner-0001"), "POST", &format!("{b}/cells"), Some(json!({"source": "z = 0\n"})))
+        .await
+        .error(403, "forbidden");
+    assert_eq!(send_as(&runner, Some("runner-0001"), "POST", &format!("{b}/runs"), Some(json!({"mode": "all"}))).await.status, 202);
+    // And the other way round: edit does not run.
+    let c = a.post(&format!("{b}/shares"), json!({"capabilities": ["read", "edit"]})).await;
+    let editor = s.with_token(c.body["token"].as_str().unwrap());
+    assert_eq!(send_as(&editor, Some("editor-0001"), "PUT", &format!("{b}/cells/c_second/lock"), None).await.status, 200);
+    send_as(&editor, Some("editor-0001"), "POST", &format!("{b}/runs"), Some(json!({"mode": "all"}))).await.error(403, "forbidden");
+}
+
+#[tokio::test]
+async fn test_fr_s7_wait_carries_2025_poll_fields() {
+    let s = TestServer::start(Mode::Ephemeral).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let base = format!("/api/kernels/{kid}");
+    a.post(&format!("{base}/runs"), json!({"mode": "all"})).await;
+    // Still running: the 2025 alarm fields.
+    let w = a.get(&format!("{base}/runs/current/wait?timeout=1&client_id=alarm-0001&poll_sequence=3")).await;
+    assert_eq!(w.status, 200, "{}", w.text);
+    assert_eq!(w.body["status"], "running");
+    assert_eq!(w.body["poll_sequence"], 3);
+    assert_eq!(w.body["next_poll_sequence"], 4);
+    let ar = &w.body["auto_repoll"];
+    assert_eq!(ar["enabled"], true);
+    assert_eq!(ar["max_polls"], 100);
+    assert_eq!(ar["recommended_delay"], 5);
+    let url = ar["next_poll_url"].as_str().unwrap();
+    assert!(url.contains("poll_sequence=4") && url.contains("client_id=alarm-0001"), "{url}");
+    // Default sequence is 1; finished runs have no next poll.
+    s.backend.finish_run(&kid);
+    let w = a.get(&format!("{base}/runs/latest/wait?timeout=1")).await;
+    assert_eq!(w.body["poll_sequence"], 1);
+    assert_eq!(w.body["next_poll_sequence"], json!(null));
+    assert_eq!(w.body["auto_repoll"], json!(null));
+    // Limits and validation.
+    a.get(&format!("{base}/runs/latest/wait?poll_sequence=101")).await.error(429, "poll_limit_exceeded");
+    a.get(&format!("{base}/runs/latest/wait?poll_sequence=0")).await.error(400, "bad_request");
+    a.get(&format!("{base}/runs/latest/wait?poll_sequence=x")).await.error(400, "bad_request");
+    assert_eq!(a.get(&format!("{base}/runs/latest/wait?poll_sequence=100&timeout=1")).await.status, 200);
 }

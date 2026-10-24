@@ -233,7 +233,8 @@ async fn health() -> Json<Value> {
 
 async fn manager_info() -> Json<Value> {
     Json(json!({"version": "0.0.0-fake", "mode": "ephemeral", "pid": std::process::id(),
-                "started_at": "2026-10-03T00:00:00Z", "idle_timeout": 120, "permission": "admin"}))
+                "started_at": "2026-10-03T00:00:00Z", "idle_timeout": 120,
+                "capabilities": ["read", "history", "execute", "edit", "manage"]}))
 }
 
 fn kernel_json(path: &str, status: &str, run_id: Option<&str>) -> Value {
