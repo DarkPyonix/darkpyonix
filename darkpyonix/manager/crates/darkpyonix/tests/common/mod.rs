@@ -148,7 +148,7 @@ impl Fake {
     }
 
     pub fn register(&self) {
-        known().lock().unwrap().insert(self.home.clone(), self.url());
+        fake_managers().lock().unwrap().insert(self.home.clone(), self.url());
     }
 
     pub fn file(&self) -> PathBuf {
@@ -157,7 +157,7 @@ impl Fake {
 }
 
 /// Fake managers by scratch home, in memory only.
-fn known() -> &'static Mutex<HashMap<PathBuf, String>> {
+fn fake_managers() -> &'static Mutex<HashMap<PathBuf, String>> {
     static KNOWN: std::sync::OnceLock<Mutex<HashMap<PathBuf, String>>> = std::sync::OnceLock::new();
     KNOWN.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -171,7 +171,7 @@ pub fn cli(home: &Path) -> Command {
         .env_remove("DARKPYONIX_MANAGER_URL")
         .env_remove("DARKPYONIX_TOKEN")
         .current_dir(home);
-    if let Some(url) = known().lock().unwrap().get(home) {
+    if let Some(url) = fake_managers().lock().unwrap().get(home) {
         c.env("DARKPYONIX_MANAGER_URL", url).env("DARKPYONIX_TOKEN", TOKEN);
     }
     c
