@@ -660,7 +660,8 @@ pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest) 
             }
             if frame.get("ok").and_then(Value::as_bool) == Some(true) {
                 let id = frame
-                    .pointer("/result/stream_id")
+                    .get("result")
+                    .and_then(|r| r.get("stream_id"))
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 return Ok(id.to_string());

@@ -163,6 +163,7 @@ mod unix {
     use tokio::net::{TcpStream, UnixStream};
 
     use super::{build_request, find, parse_head, token_of, Handoff, MAX_HEAD};
+    use crate::auth::Lookup;
     use crate::api::{plan_handoff, AppState, HandoffKind, HandoffPlan};
     use crate::error::{ApiError, ApiResult};
     use crate::Activity;
@@ -204,7 +205,18 @@ mod unix {
         let Some(head) = peek_head(&stream).await else { return Some(stream) };
         let Some(parsed) = parse_head(&head) else { return Some(stream) };
         let token = token_of(parsed.kind, &parsed.uri, &parsed.headers);
-        let Some(principal) = st.auth.authenticate(token.as_deref()) else { return Some(stream) };
+        let principal = match st.auth.lookup(token.as_deref()) {
+            Lookup::Found(p) => p,
+            // A kernel-held token (FR-A6): ask the kernel the way the auth gate does.
+            Lookup::Unknown => match token.as_deref().filter(|t| !t.is_empty()) {
+                Some(t) => match crate::kernel_principal(st, &parsed.kernel_id, t).await {
+                    Ok(Some(p)) => p,
+                    _ => return Some(stream),
+                },
+                None => return Some(stream),
+            },
+            Lookup::Revoked => return Some(stream),
+        };
         let plan = match plan_handoff(
             st,
             &principal,
@@ -326,15 +338,17 @@ mod unix {
                 }
             }
             let mut buf = vec![0u8; 16 * 1024];
-            tokio::select! {
-                r = s.sock.read(&mut buf) => match r {
-                    Ok(0) | Err(_) => None,
-                    Ok(n) => {
-                        buf.truncate(n);
-                        Some((Ok(Bytes::from(buf)), s))
-                    }
-                },
+            // Finish the select (and its borrows of `s`) before `s` moves into the result.
+            let read = tokio::select! {
+                r = s.sock.read(&mut buf) => Some(r),
                 _ = s.shutdown.wait_for(|v| *v) => None,
+            };
+            match read {
+                Some(Ok(n)) if n > 0 => {
+                    buf.truncate(n);
+                    Some((Ok(Bytes::from(buf)), s))
+                }
+                _ => None,
             }
         });
         let mut resp = Response::new(Body::from_stream(body));
