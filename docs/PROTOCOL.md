@@ -142,10 +142,10 @@ INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 �
 | `unsubscribe` | `{}` | `{}` | |
 | `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. 구현 대기(#47) |
 | `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현 대기(#47) |
-| `tokens.issue` | `kind: "initial"\|"login"\|"share"`, `capabilities: [str]`, `label?`, `expires_at?` | `{token, share_id?}` | 커널이 토큰을 만들고 해시만 영속화(§6). 구현 대기(#48) |
-| `tokens.verify` | `token` | `{valid, revoked, kind?, capabilities?, share_id?}` | 커널 접근 토큰 확인(§6). 구현 대기(#48) |
-| `tokens.revoke` | `share_id` | `{revoked: int, closed: int}` | 그 공유의 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫음(§6). 구현 대기(#48) |
-| `tokens.list` | `{}` | `{shares: [{share_id, capabilities, label, created_at, expires_at, revoked_at}]}` | 토큰 값과 해시는 주지 않음. 구현 대기(#48) |
+| `tokens.issue` | `kind: "initial"\|"login"\|"share"`, `capabilities: [str]`, `label?`, `expires_at?` | `{token, share_id?}` | 커널이 토큰을 만들고 해시만 영속화(§6). 커널 구현됨(#48) |
+| `tokens.verify` | `token` | `{valid, revoked, kind?, capabilities?, share_id?}` | 커널 접근 토큰 확인(§6). 커널 구현됨(#48) |
+| `tokens.revoke` | `share_id` | `{revoked: int, closed: int}` | 그 공유의 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫음(§6). 커널 구현됨(#48) |
+| `tokens.list` | `{}` | `{shares: [{share_id, capabilities, label, created_at, expires_at, revoked_at}]}` | 토큰 값과 해시는 주지 않음. 커널 구현됨(#48) |
 
 오류 코드: `bad_request`, `unknown_method`, `busy`, `not_found`, `frame_too_large`, `shutting_down`, `internal`.
 
@@ -347,7 +347,7 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 
 ## 6. 커널 접근 토큰
 
-SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그인, 공유)은 커널에 묶이고, 어느 매니저로 들어와도 통해야 합니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아." 그리고 사용자 결정(2026-10-04): "커널이 들고 있게". 구현 대기(#48).
+SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그인, 공유)은 커널에 묶이고, 어느 매니저로 들어와도 통해야 합니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아." 그리고 사용자 결정(2026-10-04): "커널이 들고 있게". 커널 쪽은 구현됨(#48, `darkpyonix/kernel/_tokens.py`).
 
 - **커널이 주인입니다.** 커널이 토큰을 만들고, 확인하고, 거두고, 영속화합니다. 매니저는 토큰 파일을 읽거나 쓰지 않고, 제어 채널(§3)의 `tokens.*` 메서드로 요청합니다. 같은 계정의 어느 매니저든 같은 커널에 묻으므로 같은 토큰이 통합니다.
 - **커널이 꺼져 있으면.** 매니저가 그 커널을 먼저 띄웁니다(SPEC FR-M2의 ensure). 커널은 뜨면서 저장소를 읽어 옵니다.
@@ -358,6 +358,7 @@ SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그
   - 요청마다 확인: 매니저는 클라이언트가 낸 토큰이 마스터 토큰이나 매니저 공유 토큰(`manager.db`)이 아니면 `tokens.verify {token}`을 보냅니다. `valid`이면 `capabilities`로 권한을 검사합니다(SPEC FR-A3). `revoked`이면 `401 token_revoked`입니다.
   - 철회: `tokens.revoke {share_id}`. 커널은 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫습니다(§3.7.4와 같은 일).
 - **영속화.** 커널은 토큰 값을 두지 않고 SHA-256 해시, `kind`, `capabilities`, `share_id`, `label`, `created_at`, `expires_at`, `revoked_at`만 둡니다. 토큰은 `secrets.token_urlsafe(32)`이라 소금 없는 SHA-256으로 충분하고, 비교는 `hmac.compare_digest`입니다. 쓸 때는 임시 파일에 쓰고 `os.replace`로 바꿉니다. 거둔 토큰은 거둔 표시로 남깁니다(2025 `blacklisted`).
-- **저장소 위치 [provisional].** 원칙: 커널만 읽고 쓴다. 노트북 파일과 수명을 같이 한다(커널이 꺼져도 남고, 파일이 지워지면 지워진다). 정확한 위치는 구현 이슈 #48에서 정합니다. 커널은 자기 파일이 지워진 것을 알아채면(SPEC FR-S5) 저장소를 지웁니다. 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다.
+- **저장소 위치 [provisional].** `<노트북 옆 __runs__/파일이름/>tokens.json`(런타임 홈이 아니라 실행 기록 폴더, 권한 0600). 커널만 읽고 쓰고, 노트북 파일 옆에 있어 커널이 꺼져도 남고 홈이 달라도 같은 파일의 토큰입니다. 커널은 0.5초마다 자기 파일이 있는지 보고, 지워진 것을 알아채면 저장소를 지웁니다(SPEC FR-S5 감시와 별개의 스레드). 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 커널이 꺼져 있는 동안 파일이 지워졌다 같은 경로에 다시 만들어지면 옛 토큰이 되살아납니다(알려진 한계, 사용자 확인 대기).
+- **스트림 닫기 연결점.** `TokenStore(close_streams=...)`가 `tokens.revoke`의 `closed` 수를 정합니다. 넘겨받은 스트림(§3.7)을 닫는 코드(#47)가 이 함수를 채웁니다. 그 전에는 0입니다.
 - **지운 설계.** 2026-10-04 초안의 런타임 홈 `tokens/<kernel_id>.json`(같은 계정의 모든 매니저가 함께 읽고 쓰는 파일)과 `tokens/<kernel_id>.lock`은 지웁니다.
 - **측정.** 매니저는 요청마다 커널에 한 번 묻습니다. 커널은 메모리에서 답하므로 제어 채널 왕복 한 번입니다. 지연은 #48 구현 때 재고 SPEC NFR-M2 옆에 적습니다.
