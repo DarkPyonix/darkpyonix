@@ -61,9 +61,9 @@ pub struct KernelInfo {
     pub kernel_version: String,
     #[serde(default)]
     pub runs_dir: String,
-    /// Control-channel port on 127.0.0.1 (not exposed over HTTP).
+    /// Control channel address: a Unix socket path (not exposed over HTTP, PROTOCOL §3.1).
     #[serde(skip_serializing, default)]
-    pub port: u16,
+    pub control: String,
 }
 
 /// `POST /api/kernels` body.

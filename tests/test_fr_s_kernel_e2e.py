@@ -63,10 +63,10 @@ def kernel(scratch, dp_home):
         pid = launcher.launch(path, python=sys.executable)
         state["pid"] = pid
         info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=15.0)
-        assert info is not None and info["port"] > 0, "kernel did not announce"
+        assert info is not None and info["control"], "kernel did not announce"
 
         def connect():
-            c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+            c = KernelClient(info["control"], info["kernel_id"], name="test", kind="cli")
             c.connect()
             state["clients"].append(c)
             return c

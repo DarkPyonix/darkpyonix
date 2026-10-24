@@ -20,7 +20,6 @@ from darkpyonix._events import EventLog
 from darkpyonix._server import ControlServer
 
 KID = "k_0123456789abcdef0123"
-KEY = b"k" * 32
 
 NOTEBOOK = (
     '"""Doc."""\n'
@@ -852,17 +851,17 @@ def test_fr_s8_client_is_required_and_checked(nb):
 
 
 @pytest.fixture
-def served(nb):
+def served(nb, dp_home):
     events = EventLog()
     ds = DocumentState(nb, events.append, seq_provider=lambda: events.seq,
                        save_debounce=0.3, poll_interval=0.1)
-    srv = ControlServer(KID, KEY, events, ds.handlers())
+    srv = ControlServer(KID, events, ds.handlers())
     ds.start()
     srv.start()
     conns = []
 
     def connect():
-        c = KernelClient(srv.port, KID, key=KEY)
+        c = KernelClient(srv.address, KID)
         c.connect()
         conns.append(c)
         return c

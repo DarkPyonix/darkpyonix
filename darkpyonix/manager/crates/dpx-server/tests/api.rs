@@ -72,7 +72,7 @@ async fn test_fr_m1_list_and_get_kernels() {
     let ks = list.body["kernels"].as_array().unwrap();
     assert_eq!(ks.len(), 1);
     assert_eq!(ks[0]["kernel_id"], kid);
-    assert!(ks[0].get("port").is_none());
+    assert!(ks[0].get("port").is_none() && ks[0].get("control").is_none());
     assert_eq!(ks[0]["run_id"], json!(null));
     let runs_dir = std::path::Path::new(&path).parent().unwrap().join("__runs__").join("train.py");
     assert_eq!(ks[0]["runs_dir"], runs_dir.to_string_lossy().as_ref());

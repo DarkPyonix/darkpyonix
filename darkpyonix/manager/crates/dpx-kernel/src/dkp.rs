@@ -1,4 +1,4 @@
-//! DKP/1 client (PROTOCOL §3): length-prefixed JSON frames, HMAC handshake, request/response
+//! DKP/1 client (PROTOCOL §3): length-prefixed JSON frames, peer-account check, request/response
 //! by id and event fan-out.
 //!
 //! One [`Connection`] per kernel is shared by every request and every event subscriber of
@@ -13,14 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use base64::Engine as _;
 use dpx_core::{DpxError, EventStream, KernelEvent, Result};
-use hmac::{Hmac, Mac};
 use serde_json::{json, Value};
-use sha2::Sha256;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
@@ -65,8 +60,8 @@ pub fn encode(msg: &Value) -> Result<Vec<u8>> {
 }
 
 /// Read one frame; returns the parsed object and its payload size.
-async fn read_frame(
-    reader: &mut OwnedReadHalf,
+async fn read_frame<R: AsyncRead + Unpin>(
+    reader: &mut R,
 ) -> std::io::Result<(serde_json::Map<String, Value>, usize)> {
     let len = reader.read_u32().await? as usize;
     if len > MAX_FRAME {
@@ -86,12 +81,44 @@ async fn read_frame(
     }
 }
 
-/// `hex(HMAC-SHA256(user.key, nonce || kernel_id))` (PROTOCOL §3.2).
-pub fn auth_mac(key: &[u8], nonce: &[u8], kernel_id: &str) -> String {
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac accepts any key length");
-    mac.update(nonce);
-    mac.update(kernel_id.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+/// Open the kernel's Unix socket and ask the OS who serves it (PROTOCOL §3.2, FR-A1): a socket
+/// of another account is refused before a single byte is sent, so that account cannot pose as
+/// the kernel.
+#[cfg(unix)]
+async fn open_stream(control: &str) -> Result<tokio::net::UnixStream> {
+    let stream = tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        tokio::net::UnixStream::connect(control),
+    )
+    .await
+    .map_err(|_| unreachable("connect timed out"))?
+    .map_err(|e| unreachable(format!("cannot connect to kernel: {e}")))?;
+    let cred = stream
+        .peer_cred()
+        .map_err(|e| unreachable(format!("cannot read the kernel's account: {e}")))?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    require_same_account(control, cred.uid(), unsafe { libc::geteuid() })?;
+    Ok(stream)
+}
+
+/// The kernel's account must be ours; otherwise nothing is sent to it (FR-A1).
+#[cfg(unix)]
+fn require_same_account(control: &str, peer_uid: u32, my_uid: u32) -> Result<()> {
+    if peer_uid == my_uid {
+        Ok(())
+    } else {
+        Err(unreachable(format!(
+            "{control} is served by another OS account (uid {peer_uid}), not uid {my_uid}"
+        )))
+    }
+}
+
+/// Windows would use a named pipe with a server SID check; not implemented yet (#55 follow-up).
+#[cfg(not(unix))]
+async fn open_stream(_control: &str) -> Result<tokio::io::DuplexStream> {
+    Err(unreachable(
+        "the Windows named-pipe control channel is not implemented yet",
+    ))
 }
 
 /// UTC now as `YYYY-MM-DDTHH:MM:SS.mmmZ`.
@@ -268,7 +295,7 @@ impl Shared {
     }
 }
 
-/// An authenticated control connection to one kernel.
+/// A control connection to one kernel.
 pub struct Connection {
     shared: Arc<Shared>,
     tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -278,20 +305,15 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Connect to `127.0.0.1:port` and complete hello → auth → welcome (PROTOCOL §3.2).
+    /// Connect to the kernel's control socket and complete hello → auth → welcome
+    /// (PROTOCOL §3.2). `control` is the announce's `control` field.
     pub async fn connect(
-        port: u16,
+        control: &str,
         kernel_id: &str,
-        key: &[u8],
         fanout: FanoutConfig,
     ) -> Result<Arc<Connection>> {
-        let stream =
-            tokio::time::timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(("127.0.0.1", port)))
-                .await
-                .map_err(|_| unreachable("connect timed out"))?
-                .map_err(|e| unreachable(format!("cannot connect to kernel: {e}")))?;
-        let _ = stream.set_nodelay(true);
-        let (mut reader, mut writer) = stream.into_split();
+        let stream = open_stream(control).await?;
+        let (mut reader, mut writer) = tokio::io::split(stream);
         let handshake = async {
             let (hello, _) = read_frame(&mut reader)
                 .await
@@ -305,16 +327,12 @@ impl Connection {
             let kid = hello.get("kernel_id").and_then(Value::as_str).unwrap_or("");
             if kid != kernel_id {
                 return Err(unreachable(format!(
-                    "port {port} belongs to {kid}, not {kernel_id}"
+                    "{control} belongs to {kid}, not {kernel_id}"
                 )));
             }
-            let nonce = base64::engine::general_purpose::STANDARD
-                .decode(hello.get("nonce").and_then(Value::as_str).unwrap_or(""))
-                .map_err(|e| unreachable(format!("bad hello nonce: {e}")))?;
             let auth = json!({
                 "dkp": 1, "op": "auth",
                 "client": {"name": "darkpyonix-manager", "kind": "manager", "pid": std::process::id()},
-                "mac": auth_mac(key, &nonce, kernel_id),
             });
             writer
                 .write_all(&encode(&auth)?)
@@ -329,7 +347,7 @@ impl Connection {
                     let code = welcome
                         .get("code")
                         .and_then(Value::as_str)
-                        .unwrap_or("auth_failed");
+                        .unwrap_or("internal");
                     let msg = welcome
                         .get("message")
                         .and_then(Value::as_str)
@@ -495,8 +513,8 @@ async fn next_event(mut st: SubState) -> Option<(KernelEvent, SubState)> {
     }
 }
 
-async fn write_loop(
-    mut writer: OwnedWriteHalf,
+async fn write_loop<W: AsyncWrite + Unpin>(
+    mut writer: W,
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     shared: Arc<Shared>,
 ) {
@@ -512,7 +530,7 @@ async fn write_loop(
     let _ = writer.shutdown().await;
 }
 
-async fn read_loop(mut reader: OwnedReadHalf, shared: Arc<Shared>) {
+async fn read_loop<R: AsyncRead + Unpin>(mut reader: R, shared: Arc<Shared>) {
     loop {
         if shared.closed.load(Ordering::SeqCst) {
             return;
@@ -555,13 +573,26 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
-    fn pr_2_auth_mac_matches_python_vector() {
-        // python -c "import hmac,hashlib;print(hmac.new(b'k'*32,b'n'*32+b'k_abc',hashlib.sha256).hexdigest())"
-        let mac = auth_mac(&[b'k'; 32], &[b'n'; 32], "k_abc");
-        assert_eq!(
-            mac,
-            "90e6e83290e15a1069fa5e223f8ae795a1f1d1ac20c9909659ac6c4299c01910"
-        );
+    fn test_fr_a1_manager_refuses_a_kernel_of_another_account() {
+        let err = require_same_account("/x/k.sock", 502, 501).unwrap_err();
+        assert_eq!(err.code, "kernel_unreachable");
+        assert!(require_same_account("/x/k.sock", 501, 501).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_fr_a1_same_account_socket_passes_the_peer_check() {
+        let dir = std::env::temp_dir().join(format!("dpx-peer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let accept = tokio::spawn(async move { listener.accept().await });
+        let stream = open_stream(path.to_str().unwrap()).await;
+        assert!(stream.is_ok(), "{:?}", stream.err());
+        let _ = accept.await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

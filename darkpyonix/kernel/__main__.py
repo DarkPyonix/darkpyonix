@@ -45,8 +45,7 @@ class Kernel(object):
     def __init__(self, path: str) -> None:
         self.path = canonical_path(path)
         self.kernel_id = kernel_id_for(self.path)
-        self.key = _home.user_key()
-        self.user_tag = _home.user_tag(self.key)
+        self.user_tag = _home.user_tag()
         self.lock = lock.FileLock(lock.lock_path(self.kernel_id))
         self.events = EventLog()
         self.collab = None  # type: Optional[DocumentState]
@@ -73,7 +72,7 @@ class Kernel(object):
             "kernel_id": self.kernel_id,
             "path": self.path,
             "pid": os.getpid(),
-            "port": self.server.port if self.server is not None else 0,
+            "control": self.server.address if self.server is not None else "",
             "status": st.get("status", "starting"),
             "run_id": st.get("run_id"),
             "python": self.python,
@@ -81,6 +80,7 @@ class Kernel(object):
             "runs_dir": runs_dir_for(self.path),
             "started_at": self.started_at,
             "host": self.host,
+            "home": _home.home(),
         }
 
     def emit(self, type: str, data: Dict[str, Any]) -> None:
@@ -205,7 +205,7 @@ class Kernel(object):
             self.diag = getattr(self.executor, "original_stderr", sys.stderr)
 
             from darkpyonix._server import ControlServer
-            self.server = ControlServer(self.kernel_id, self.key, self.events, self.handlers())
+            self.server = ControlServer(self.kernel_id, self.events, self.handlers())
             self.collab.start()
             self.server.start()
             self.discovery = DiscoveryResponder(self.info, self.user_tag)
@@ -214,7 +214,7 @@ class Kernel(object):
             signal.signal(signal.SIGTERM, lambda signum, frame: self.request_shutdown())
             if hasattr(signal, "SIGHUP"):
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
-            _log(self.diag, "kernel %s for %s on port %d" % (self.kernel_id, self.path, self.server.port))
+            _log(self.diag, "kernel %s for %s on %s" % (self.kernel_id, self.path, self.server.address))
 
             self.executor.run_forever()      # main thread until shutdown / hard restart
         finally:

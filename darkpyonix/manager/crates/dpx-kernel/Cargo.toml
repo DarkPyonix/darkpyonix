@@ -16,10 +16,8 @@ tokio.workspace = true
 tracing.workspace = true
 socket2 = { version = "0.6", features = ["all"] }
 sha2 = "0.10"
-hmac = "0.12"
 hex = "0.4"
 rand = "0.8"
-base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

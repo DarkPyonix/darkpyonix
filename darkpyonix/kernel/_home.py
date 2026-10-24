@@ -8,10 +8,9 @@ import hashlib
 import os
 import secrets
 import shutil
+import stat
 import sys
-from typing import Optional
-
-USER_KEY_BYTES = 32
+import tempfile
 
 
 def home() -> str:
@@ -123,36 +122,38 @@ def write_public(path: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def user_key() -> bytes:
-    """Return the per-user key, creating it atomically on first use (PROTOCOL §1, FR-A1)."""
-    path = os.path.join(home(), "user.key")
-    try:
-        with open(path, "rb") as f:
-            key = f.read()
-        if len(key) == USER_KEY_BYTES:
-            return key
-    except FileNotFoundError:
-        pass
-    os.makedirs(home(), mode=0o700, exist_ok=True)
-    candidate = secrets.token_bytes(USER_KEY_BYTES)
-    tmp = "%s.%s.tmp" % (path, secrets.token_hex(4))
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        os.write(fd, candidate)
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    try:
-        # link() fails if another process won the race; then use theirs.
-        os.link(tmp, path)
-    except FileExistsError:
-        pass
-    finally:
-        os.unlink(tmp)
-    with open(path, "rb") as f:
-        return f.read()
+def sockets_dir() -> str:
+    return subdir("sockets")
 
 
-def user_tag(key: Optional[bytes] = None) -> str:
-    """``hex(SHA-256(user.key))[:16]`` (PROTOCOL §2.2)."""
-    return hashlib.sha256(key if key is not None else user_key()).hexdigest()[:16]
+# sockaddr_un.sun_path holds 104 bytes on macOS and the BSDs and 108 on Linux (terminator included).
+_MAX_SOCKET_PATH = 100
+
+
+def control_path(kernel_id: str) -> str:
+    """Where the kernel's control socket lives (PROTOCOL §3.1): ``<home>/sockets/<kernel_id>.sock``.
+
+    A runtime home with a long path would overflow ``sun_path``. Then the socket goes to a private
+    directory ``<tmp>/darkpyonix-<uid>/`` instead; the announce's ``control`` names the real path, so no
+    reader needs to know which one was used. POSIX only.
+    """
+    path = os.path.join(sockets_dir(), kernel_id + ".sock")
+    if len(os.fsencode(path)) <= _MAX_SOCKET_PATH:
+        return path
+    base = os.path.join(tempfile.gettempdir(), "darkpyonix-%d" % os.geteuid())
+    os.makedirs(base, mode=0o700, exist_ok=True)
+    st = os.lstat(base)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
+        raise OSError("%s is not a private directory of this account" % base)
+    return os.path.join(base, kernel_id + ".sock")
+
+
+def account() -> str:
+    """The OS account that PROTOCOL §2.2 hashes: ``uid:<n>`` (POSIX) or ``sid:<S-1-5-...>``."""
+    from . import _peer
+    return _peer.account()
+
+
+def user_tag() -> str:
+    """``hex(SHA-256(account))[:16]`` (PROTOCOL §2.2). Derived from the OS account, no key file."""
+    return hashlib.sha256(account().encode("utf-8")).hexdigest()[:16]
