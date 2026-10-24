@@ -78,7 +78,6 @@ struct Manager {
 impl Manager {
     async fn start(home: &Path) -> Manager {
         let mut cfg = Config::with_home(home);
-        cfg.multicast = true;
         cfg.python = Some(venv_python().to_string_lossy().into_owned());
         let backend = RealBackend::new(cfg).unwrap();
         let handle = serve(ServerConfig::ephemeral(home), std::sync::Arc::new(backend))

@@ -1,5 +1,5 @@
 //! DKP/1 client against the Python fake kernel (`tests/helpers/fake_kernel.py`), which speaks
-//! the real frames and handshake and writes its FR-D2 registry entry.
+//! the real frames and handshake and answers loopback multicast discovery (FR-D1).
 
 mod common;
 
@@ -29,10 +29,10 @@ async fn quiet(stream: &mut dpx_core::EventStream) -> bool {
 async fn pr_2_handshake_and_requests_against_fake_kernel() {
     let dir = scratch("pr2");
     let home = dir.join("home");
-    let be = backend(&home, false);
+    let be = backend(&home);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
 
-    // Registry discovery (FR-D2) finds the fake.
+    // Multicast discovery (FR-D1) finds the fake.
     let list = be.list(true).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].kernel_id, fake.kernel_id);
@@ -112,7 +112,7 @@ async fn pr_2_handshake_and_requests_against_fake_kernel() {
 async fn pr_2_socket_of_another_kernel_id_is_refused() {
     let dir = scratch("pr2-kid");
     let home = dir.join("home");
-    let _be = backend(&home, false);
+    let _be = backend(&home);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
     // The same account connects without any key.
     let ok = Connection::connect(&fake.control, &fake.kernel_id, FanoutConfig::default())
@@ -143,8 +143,8 @@ fn connections_to(fake: &FakeKernel) -> usize {
 async fn fr_m5_two_managers_share_one_kernel() {
     let dir = scratch("m5");
     let home = dir.join("home");
-    let a = backend(&home, false);
-    let b = backend(&home, false);
+    let a = backend(&home);
+    let b = backend(&home);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
     let kid = fake.kernel_id.clone();
 
@@ -201,7 +201,7 @@ async fn fr_m5_two_managers_share_one_kernel() {
 async fn pr_3_subscribe_since_replays_then_streams_live() {
     let dir = scratch("pr3");
     let home = dir.join("home");
-    let be = backend(&home, false);
+    let be = backend(&home);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
     let kid = fake.kernel_id.clone();
 
@@ -232,7 +232,6 @@ async fn pr_3_replay_truncated_maps_to_seq_none() {
     let dir = scratch("pr3-trunc");
     let home = dir.join("home");
     let mut cfg = Config::with_home(&home);
-    cfg.multicast = false;
     cfg.fanout.ring_max_events = 5;
     let be = backend_with(cfg);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
@@ -259,7 +258,6 @@ async fn pr_3_lagging_subscriber_does_not_block_others() {
     let dir = scratch("pr3-lag");
     let home = dir.join("home");
     let mut cfg = Config::with_home(&home);
-    cfg.multicast = false;
     cfg.fanout.channel_capacity = 4;
     let be = backend_with(cfg);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
@@ -288,7 +286,7 @@ async fn pr_3_lagging_subscriber_does_not_block_others() {
 async fn fr_m5_reconnects_on_demand_after_kernel_restart() {
     let dir = scratch("m5-reconnect");
     let home = dir.join("home");
-    let be = backend(&home, false);
+    let be = backend(&home);
     let nb = write_notebook(&dir, "nb.py");
     let mut fake = FakeKernel::start(&home, &nb);
     let kid = fake.kernel_id.clone();
@@ -317,7 +315,7 @@ async fn fr_m5_reconnects_on_demand_after_kernel_restart() {
 async fn fr_m2_force_kill_removes_kernel() {
     let dir = scratch("kill");
     let home = dir.join("home");
-    let be = backend(&home, false);
+    let be = backend(&home);
     let mut fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
     let kid = fake.kernel_id.clone();
     be.kill(&kid).await.unwrap();
