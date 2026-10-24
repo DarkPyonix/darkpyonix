@@ -324,3 +324,19 @@ def test_pr_6_streams_close_by_share_id(server):
     assert h.is_closed(mine)
     assert not h.is_closed(other, timeout=1.0)
     other.close()
+
+
+def test_fr_k10_revoking_a_token_closes_that_shares_adopted_streams(kernel):
+    info, client = kernel
+    issued = client.request("tokens.issue", {"kind": "share", "capabilities": ["read"]})
+    share_id = issued["share_id"]
+    mine = handed(info, "events", events_path(info), label(["read"], share_id=share_id))
+    other = handed(info, "events", events_path(info), label(["read"], share_id="s_bbbbbbbbbbbbbbbb"))
+    h.read_head(mine)
+    _, rest = h.read_head(other)
+    res = client.request("tokens.revoke", {"share_id": share_id})
+    assert res["revoked"] == 1 and res["closed"] == 1
+    assert h.is_closed(mine)
+    client.request("run", {"mode": "all"})
+    assert b"event: run.finished" in h.read_until(other, b"event: run.finished", rest)
+    other.close()

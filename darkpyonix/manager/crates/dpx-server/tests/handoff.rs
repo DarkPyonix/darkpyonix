@@ -401,3 +401,24 @@ async fn test_fr_m3_idle_counts_http_requests_only_not_handed_off_streams() {
     rig.backend.write_all_streams(b"data: after idle exit\n\n");
     read_until(&mut c, "after idle exit").await;
 }
+
+#[tokio::test]
+async fn test_fr_m6_resetting_a_shared_token_closes_streams_of_the_old_one() {
+    let rig = start(true, |_| {}).await;
+    let http = reqwest::Client::new();
+    let admin = rig.h().token.clone();
+    let url = format!("{}/api/auth/tokens/shared/read+history", rig.h().url);
+    let first: Value = http.put(&url).bearer_auth(&admin).send().await.unwrap().json().await.unwrap();
+    let (old_id, old_token) = (first["share_id"].as_str().unwrap().to_string(), first["token"].as_str().unwrap().to_string());
+    let mut shared = rig.raw(&rig.events_request(&old_token, "")).await;
+    let mut master = rig.raw(&rig.events_request(&admin, "")).await;
+    read_until(&mut shared, ": hello").await;
+    read_until(&mut master, ": hello").await;
+
+    let r = http.put(&url).bearer_auth(&admin).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(rig.backend.closes.lock().unwrap().as_slice(), [json!({"share_id": old_id})]);
+    assert!(is_eof(&mut shared, Duration::from_secs(1)).await, "old shared-token stream stayed open");
+    rig.backend.write_all_streams(b"data: master stays\n\n");
+    read_until(&mut master, "master stays").await;
+}

@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use tokio::sync::watch;
 
-use crate::auth::{Auth, Permission, Principal};
+use crate::auth::{self, Auth, PasswordCheck, Permission, Principal};
 use crate::error::{ApiError, ApiResult};
 use crate::{sse, util, Mode, VERSION};
 
@@ -884,6 +884,246 @@ async fn presence_heartbeat(st: Arc<AppState>, p: Principal, kid: String, client
         }
         tokio::time::sleep(st.presence_heartbeat).await;
     }
+}
+
+// ------------------------------------------------------------------ Manager password and tokens (FR-A4, FR-A6)
+
+const OP_LOGIN: &[u16] = &[200, 400, 401, 403, 500];
+const OP_SET_PASSWORD: &[u16] = &[200, 400, 401, 403, 500];
+const OP_RESET_MASTER: &[u16] = &[200, 400, 401, 403, 500];
+const OP_RESET_SHARED: &[u16] = &[200, 400, 401, 403, 500];
+const OP_INITIAL_TOKEN: &[u16] = &[201, 400, 404, 500, 502, 504];
+const OP_KERNEL_LOGIN: &[u16] = &[200, 400, 401, 403, 404, 500, 502, 504];
+const OP_VERIFY_TOKEN: &[u16] = &[200, 401, 403, 404, 500, 502, 504];
+
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut acc: u32 = 0;
+    let mut bits: u32 = 0;
+    for c in s.trim_end_matches('=').bytes() {
+        let v: u32 = match c {
+            b'A'..=b'Z' => u32::from(c - b'A'),
+            b'a'..=b'z' => u32::from(c - b'a') + 26,
+            b'0'..=b'9' => u32::from(c - b'0') + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        acc = ((acc << 6) | v) & 0xffff;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((acc >> bits) & 0xff) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// The password of `Authorization: Basic base64(user:password)`; the user name is ignored.
+fn basic_password(headers: &HeaderMap) -> Option<String> {
+    let v = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, rest) = v.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("basic") {
+        return None;
+    }
+    let raw = String::from_utf8(base64_decode(rest.trim())?).ok()?;
+    raw.split_once(':').map(|(_, password)| password.to_string())
+}
+
+fn ephemeral_forbidden() -> ApiError {
+    ApiError::forbidden("an ephemeral manager has no password; use a dedicated manager (FR-A4)")
+}
+
+fn password_not_set() -> ApiError {
+    ApiError::new(StatusCode::BAD_REQUEST, "password_not_set", "this manager has no password yet")
+}
+
+/// Checks `password` against the manager's. PBKDF2 is slow, so it runs off the async threads.
+async fn check_pw(st: &Arc<AppState>, password: String) -> ApiResult<()> {
+    let st2 = st.clone();
+    let check = tokio::task::spawn_blocking(move || st2.auth.check_password(&password))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    match check {
+        PasswordCheck::Ok => Ok(()),
+        PasswordCheck::NotSet => Err(password_not_set()),
+        PasswordCheck::Wrong => Err(ApiError::unauthorized()),
+    }
+}
+
+/// `Authorization: Basic` with the manager's password (login and master token reset).
+async fn check_basic(st: &Arc<AppState>, headers: &HeaderMap) -> ApiResult<()> {
+    let Some(password) = basic_password(headers) else { return Err(ApiError::unauthorized()) };
+    if st.mode == Mode::Ephemeral {
+        return Err(ephemeral_forbidden());
+    }
+    check_pw(st, password).await
+}
+
+pub async fn login(State(st): St, headers: HeaderMap) -> Response {
+    let r = async {
+        check_basic(&st, &headers).await?;
+        let token = st.auth.login_master().map_err(|e| ApiError::internal(e.to_string()))?;
+        ok_json(StatusCode::OK, json!({ "token": token }))
+    };
+    finish(r.await, OP_LOGIN)
+}
+
+#[derive(Deserialize)]
+struct PasswordBody {
+    password: String,
+}
+
+pub async fn set_password(State(st): St, Extension(p): Extension<Principal>, RawBody(body): RawBody) -> Response {
+    let r = async {
+        if st.mode == Mode::Ephemeral {
+            return Err(ephemeral_forbidden());
+        }
+        // The master token always; an initial token only for the first password (FR-A4).
+        if !(p.master || (p.initial && !st.auth.password_set())) {
+            return Err(ApiError::forbidden("the master token sets the password; an initial token only the first one"));
+        }
+        let b: PasswordBody = parse_json(&body)?;
+        if b.password.is_empty() {
+            return Err(ApiError::invalid("password: must not be empty"));
+        }
+        let st2 = st.clone();
+        tokio::task::spawn_blocking(move || st2.auth.set_password(&b.password))
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        ok_json(StatusCode::OK, json!({ "message": "Password set successfully" }))
+    };
+    finish(r.await, OP_SET_PASSWORD)
+}
+
+pub async fn reset_master_token(State(st): St, headers: HeaderMap) -> Response {
+    let r = async {
+        check_basic(&st, &headers).await?;
+        let token = st.auth.rotate_master().map_err(|e| ApiError::internal(e.to_string()))?;
+        ok_json(StatusCode::OK, json!({ "token": token }))
+    };
+    finish(r.await, OP_RESET_MASTER)
+}
+
+pub async fn reset_shared_token(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(token_type): Path<String>,
+) -> Response {
+    let r = async {
+        if st.mode == Mode::Ephemeral {
+            return Err(ephemeral_forbidden());
+        }
+        if !p.master {
+            return Err(ApiError::forbidden("the master token resets shared tokens"));
+        }
+        let caps = auth::parse_token_type(&token_type).ok_or_else(|| {
+            ApiError::invalid("token_type: capability names joined by +, in the order read, history, execute, edit, manage")
+        })?;
+        let store = st.auth.shares.as_ref().ok_or_else(ephemeral_forbidden)?;
+        let old_ids = store.active_shared_ids(&token_type).map_err(|e| ApiError::internal(e.to_string()))?;
+        let (share_id, token, created_at) =
+            store.reset_shared(&token_type).map_err(|e| ApiError::internal(e.to_string()))?;
+        // FR-M6: streams opened with the replaced token close, on every kernel (PROTOCOL §3.7.4).
+        if st.backend.supports_handoff() && !old_ids.is_empty() {
+            for k in st.backend.list(false).await.unwrap_or_default() {
+                for old in &old_ids {
+                    close_share_streams(&st, &k.kernel_id, old).await;
+                }
+            }
+        }
+        ok_json(
+            StatusCode::OK,
+            json!({
+                "share_id": share_id,
+                "token_type": token_type,
+                "capabilities": caps,
+                "token": token,
+                "created_at": created_at,
+            }),
+        )
+    };
+    finish(r.await, OP_RESET_SHARED)
+}
+
+#[derive(Deserialize)]
+struct InitialBody {
+    #[serde(default)]
+    kernel_id: Option<String>,
+}
+
+fn issued_token(v: &Value) -> ApiResult<String> {
+    v["token"].as_str().map(String::from).ok_or_else(|| ApiError::internal("kernel answer has no token"))
+}
+
+pub async fn create_initial_token(State(st): St, Path(kid): Path<String>, RawBody(body): RawBody) -> Response {
+    let r = async {
+        if !util::is_kernel_id(&kid) {
+            return Err(ApiError::bad_request(format!("invalid kernel id: {kid}")));
+        }
+        if !body.iter().all(u8::is_ascii_whitespace) {
+            let b: InitialBody = parse_json(&body)?;
+            if b.kernel_id.is_some_and(|k| k != kid) {
+                return Err(ApiError::invalid("kernel_id: must equal the path parameter"));
+            }
+        }
+        st.backend.get(&kid).await?;
+        let v = call(&st, &kid, "tokens.issue", json!({ "kind": "initial", "capabilities": auth::CAPABILITIES })).await?;
+        ok_json(
+            StatusCode::CREATED,
+            json!({ "token": issued_token(&v)?, "capabilities": auth::CAPABILITIES, "password_required": true }),
+        )
+    };
+    finish(r.await, OP_INITIAL_TOKEN)
+}
+
+pub async fn kernel_login(State(st): St, Path(kid): Path<String>, RawBody(body): RawBody) -> Response {
+    let r = async {
+        if !util::is_kernel_id(&kid) {
+            return Err(ApiError::not_found(format!("no such kernel: {kid}")));
+        }
+        let b: PasswordBody = parse_json(&body)?;
+        if st.mode == Mode::Ephemeral {
+            return Err(ephemeral_forbidden());
+        }
+        check_pw(&st, b.password).await?;
+        st.backend.get(&kid).await?;
+        let v = call(&st, &kid, "tokens.issue", json!({ "kind": "login", "capabilities": auth::CAPABILITIES })).await?;
+        ok_json(
+            StatusCode::OK,
+            json!({ "token": issued_token(&v)?, "kernel_id": kid, "capabilities": auth::CAPABILITIES }),
+        )
+    };
+    finish(r.await, OP_KERNEL_LOGIN)
+}
+
+pub async fn verify_token(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path((kid, token)): Path<(String, String)>,
+) -> Response {
+    let r = async {
+        visible(&st, &p, &kid).await?;
+        let v = call(&st, &kid, "tokens.verify", json!({ "token": token })).await?;
+        if v["revoked"].as_bool() == Some(true) {
+            return Err(ApiError::new(StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked"));
+        }
+        if v["valid"].as_bool() != Some(true) {
+            return Err(ApiError::unauthorized());
+        }
+        ok_json(
+            StatusCode::OK,
+            json!({
+                "valid": true,
+                "kernel_id": kid,
+                "capabilities": v["capabilities"],
+                "blacklisted": false,
+                "password_set": st.auth.password_set(),
+            }),
+        )
+    };
+    finish(r.await, OP_VERIFY_TOKEN)
 }
 
 // ------------------------------------------------------------------ Sharing

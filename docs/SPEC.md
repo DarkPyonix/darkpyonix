@@ -75,8 +75,8 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 테스트: `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`, `test_fr_k9_wait_is_answered_by_the_kernel`, `test_fr_k9_ws_upgrade_is_answered_with_101`(`tests/test_fr_k9_handoff.py`, 사용 가능한 모든 인터프리터). 계획 `test_fr_k9_adopted_socket_on_windows`(Windows 실행기가 필요해서 건너뜀)
 - 상태 메모: `ws`는 101과 제어 프레임까지입니다. 동기화 메시지와 `history`·`read` 걸러내기는 #49에서 붙입니다.
 
-### FR-K10 커널 접근 토큰 보관 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #48)
-INTENT D17, PROTOCOL §6. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널은 자기 접근 토큰(초기, 로그인, 공유, SPEC FR-A6)의 주인입니다. 매니저의 `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list` 요청에 답하고, 토큰은 SHA-256 해시와 능력 집합으로만 영속화합니다. 커널은 다시 뜨면 저장소를 읽어 옵니다. 자기 파일이 지워진 것을 알아채면 저장소를 지웁니다. 저장소는 커널만 읽고 쓰며, 위치는 [provisional]로 #48에서 정합니다. 표준 라이브러리(`secrets`, `hashlib`, `hmac`, `json`, `os.replace`)만 씁니다.
+### FR-K10 커널 접근 토큰 보관 — `Agreed` (사용자 결정 2026-10-04, 커널 쪽 구현됨 #48)
+INTENT D17, PROTOCOL §6. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널은 자기 접근 토큰(초기, 로그인, 공유, SPEC FR-A6)의 주인입니다. 매니저의 `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list` 요청에 답하고, 토큰은 SHA-256 해시와 능력 집합으로만 영속화합니다. 커널은 다시 뜨면 저장소를 읽어 옵니다. 자기 파일이 지워진 것을 알아채면 저장소를 지웁니다. 저장소는 커널만 읽고 쓰며, 위치는 노트북 옆 `__runs__/<파일>/tokens.json`입니다 [provisional, PROTOCOL §6]. 표준 라이브러리(`secrets`, `hashlib`, `hmac`, `json`, `os.replace`)만 씁니다.
 - 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
   - `tokens.issue`로 받은 토큰을 `tokens.verify`가 그 능력 집합과 함께 확인합니다. 저장소에는 토큰 값이 없습니다.
   - 커널을 `shutdown`하고 다시 띄워도 같은 토큰이 확인됩니다.
@@ -447,14 +447,15 @@ INTENT D17. 사용자 결정(2026-10-03): "원 설계대로 복구". 범위는 �
 - 사용자 결정(2026-10-04, "이대로", PROJECT Q15): "세션에 넣어서"를 `Authorization: Basic`으로 읽은 것, 2025 `token_type`(`viewer1`…)을 능력 집합 표기로 읽은 것, 그리고 비밀번호가 이미 있는 매니저에서는 초기 토큰으로 비밀번호를 바꿀 수 없게 한 것(`403`). 뒤의 것이 없으면 인증 없이 받는 초기 토큰(FR-A6)으로 누구나 매니저 비밀번호를 바꿀 수 있습니다.
 - 오류 코드: 2025 `PASSWORD_NOT_SET` → `400 password_not_set`, `INVALID_TOKEN` → `401 unauthorized`, `TOKEN_BLACKLISTED` → `401 token_revoked`, `INSUFFICIENT_PERMISSION` → `403 forbidden`, `KERNEL_NOT_FOUND` → `404 not_found`.
 - 수용 기준: 비밀번호가 없는 전용 매니저에서 초기 토큰으로 비밀번호를 정하고, `GET /api/auth`로 마스터 토큰을 받습니다. `PUT /api/auth/tokens/master` 뒤 이전 마스터 토큰은 `401`입니다. 비밀번호가 있는 매니저에서 초기 토큰으로 `PUT /api/auth/password`는 `403`입니다. 비밀번호 전 로그인은 `400 password_not_set`입니다. 비밀번호는 매니저마다 하나라서, 같은 비밀번호로 그 매니저의 어느 커널에도 로그인합니다(FR-A6). 공유 토큰 재설정 뒤 그 타입의 이전 토큰은 `401 token_revoked`이고, 그 토큰으로 연 스트림은 닫힙니다(FR-M6). 임시 매니저는 넷 모두 `403`입니다.
-- 테스트(계획): `test_fr_a4_first_password_login_and_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_cannot_replace_an_existing_password`, `test_fr_a4_one_password_per_manager`, `test_fr_a4_shared_token_reset_revokes_and_closes_streams`, `test_fr_a4_ephemeral_manager_refuses_auth_family`
+- 테스트: `test_fr_a4_first_password_login_and_master_reset`, `test_fr_a4_login_before_password_is_400`, `test_fr_a4_initial_token_cannot_replace_an_existing_password`, `test_fr_a4_one_password_per_manager`, `test_fr_a4_shared_token_reset_revokes_the_previous_token`, `test_fr_a4_ephemeral_manager_refuses_auth_family`, `test_fr_a4_password_is_stored_as_a_salted_slow_hash`, `test_fr_a5_password_and_master_reset_survive_a_manager_restart`(`darkpyonix/manager/crates/dpx-server/tests/auth.rs`)
+- 구현 메모(#48, CI 확인 대기라 `Agreed`로 둠): 비밀번호는 PBKDF2-HMAC-SHA256(12만 회, 16바이트 소금)이고 `manager.db`의 `manager_auth`에 `pbkdf2-sha256$회수$소금$해시`로 둡니다(새 의존성 없이 `sha2`로 직접 구현). 마스터 토큰은 해시로만 두므로(`manager_auth.master_sha256`) `GET /api/auth`는 이 프로세스가 값을 아는 동안 그 값을, 재설정 뒤 매니저를 다시 띄운 경우처럼 모르면 새 마스터 토큰을 발급해 돌려줍니다 [provisional, 사용자 확인 대기]. 재설정한 마스터 토큰은 다시 띄운 뒤에도 설정의 마스터 토큰보다 앞섭니다. 매니저 공유 토큰은 `manager_shared`에 해시로 두고, 재설정하면 이전 것에 거둔 표시를 남겨 `401 token_revoked`를 줍니다. 비밀번호 경로에는 커널 ID가 없어서, 초기 토큰은 떠 있는 커널들에 물어 찾습니다. 공유 토큰으로 연 스트림을 닫는 일은 스트림 넘김(#47)이 오면 잇습니다.
 
 ### FR-A5 토큰 수명 (2025 복구) — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #48)
 2025 설계: "커널이 파일과 논리 커널로 분리되어 커널이 지워지면 토큰은 보관되나, 파일이 지워지면 토큰도 지워져야 함", "공유 버튼을 눌렀다가 다시 해제하고 다시 누르는 경우 토큰 초기화 필요".
 - 커널을 종료하거나 재시작해도, 매니저를 다시 시작해도 그 커널의 접근 토큰(초기 토큰, 로그인 토큰, 공유 토큰, FR-A6)은 남습니다.
 - 토큰은 커널이 들고 있습니다. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널이 토큰을 해시로 영속화하고(FR-K10), 다시 뜨면 읽어 옵니다. 매니저는 토큰 파일을 읽거나 쓰지 않고, 제어 채널로 커널에 확인을 요청합니다(PROTOCOL §6). 같은 계정의 어느 매니저든 같은 커널에 묻기 때문에, 한 매니저에서 받은 토큰이 다른 매니저로도 통합니다. 사용자(2026-10-04): "매니저가 여러개잖아."
 - 커널이 떠 있지 않을 때 토큰을 확인해야 하면 매니저가 그 커널을 먼저 띄웁니다(FR-M2의 ensure). 커널이 10초 안에 뜨지 않으면 `504`입니다.
-- 파일이 지워지면 그 파일의 토큰을 모두 지웁니다. 커널은 자기 파일이 지워진 것을 알아채면(FR-S5, 1초 안) 저장소를 지웁니다. 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 저장소는 파일과 수명을 같이 하는 곳에 두고, 정확한 위치는 [provisional]로 #48에서 정합니다. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙을 따릅니다.
+- 파일이 지워지면 그 파일의 토큰을 모두 지웁니다. 커널은 자기 파일이 지워진 것을 알아채면(FR-S5, 1초 안) 저장소를 지웁니다. 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 저장소는 파일과 수명을 같이 하는 곳에 두고, 위치는 노트북 옆 `__runs__/<파일>/tokens.json`입니다 [provisional]. 파일을 옮기거나 이름을 바꾸면 커널 ID가 바뀌므로(INTENT D1) 옛 경로의 토큰도 같은 규칙을 따릅니다.
 - 공유를 거둔 뒤 다시 공유하면 새 토큰이 나옵니다. 거둔 토큰은 커널 저장소에 거둔 표시(`revoked_at`, 2025 `blacklisted`)로 남고 되살리지 않습니다.
 - 매니저 비밀번호, 마스터 토큰, 매니저 공유 토큰(FR-A4)은 이 규칙 밖입니다. 그 매니저의 `manager.db`에 있고 매니저와 함께 갑니다.
 - 수용 기준: 커널 종료와 매니저 재시작 뒤에도 같은 공유 토큰이 통합니다. 매니저 A에서 받은 초기 토큰, 로그인 토큰, 공유 토큰이 같은 계정의 매니저 B(임시 매니저 포함)에서도 통합니다. 커널이 꺼져 있을 때 토큰을 확인하면 매니저가 커널을 띄우고 확인합니다. 파일을 지우면 그 토큰이 통하지 않고 커널의 토큰 저장소가 남지 않습니다. 공유를 거두고 다시 만들면 토큰이 다릅니다. 매니저는 토큰 저장소를 열지 않습니다.
@@ -477,7 +478,8 @@ INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 �
 - 어느 매니저로 들어와도 통합니다. 토큰은 커널이 들고 있고, 매니저는 발급·확인·철회를 제어 채널로 커널에 요청합니다(FR-A5, FR-K10, PROTOCOL §6). 커널이 떠 있지 않으면 매니저가 먼저 띄웁니다(FR-M2). 초기 토큰과 확인은 임시 매니저에서도 됩니다. 공유 링크는 전용 매니저 설정(`share_base`)이 필요해서 공유 토큰 발급만 전용 매니저가 합니다(FR-A3).
 - 저장소 위치는 [provisional]이고 #48에서 정합니다. 원칙은 커널만 접근하고, 노트북 파일과 수명을 같이 한다는 것입니다(PROJECT Q16).
 - 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 전용 매니저에서 받은 토큰이 같은 커널의 임시 매니저에서도 통합니다. `POST /api/kernels/{kernel_id}/tokens/share`의 응답이 2025 필드(`share_token`, `share_url`)와 `capabilities`를 담습니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
-- 테스트(계획): `test_fr_a6_initial_token_is_issued_without_credentials_every_time`, `test_fr_a6_login_with_the_manager_password_returns_a_kernel_token`, `test_fr_a6_kernel_token_is_404_on_other_kernels`, `test_fr_a6_kernel_token_works_through_any_manager`, `test_fr_a6_tokens_share_returns_2025_fields`, `test_fr_a6_verify_reports_permission_and_revocation`
+- 테스트: `test_fr_a6_initial_token_has_no_limit_and_works_through_any_manager`, `test_fr_a6_verify_reports_validity_and_revocation`, `test_fr_a4_one_password_per_manager`(`darkpyonix/manager/crates/dpx-server/tests/auth.rs`), 커널 쪽 `test_pr_7_*`, `test_fr_a5_*`(`tests/test_pr_7_tokens.py`). 공유 토큰 발급(`POST .../tokens/share`)과 능력 집합 검사는 #49입니다.
+- 구현 메모(#48): 다른 커널에 낸 커널 접근 토큰은 그 커널이 모르는 토큰이라 `404`가 아니라 `401`입니다(어느 커널의 토큰인지 매니저가 모르기 때문, 사용자 확인 대기). 떠 있지 않은 커널은 id만으로 띄울 수 없어서 초기 토큰 발급과 확인이 `404`입니다. 능력 집합은 #49 전까지 기존 등급으로 옮겨 검사합니다(`tier_for`: 다섯 모두 admin, edit와 execute editor, execute viewer3, history viewer2, 나머지 viewer1).
 
 ## 10a. 협업 문서 (S)
 
@@ -754,6 +756,6 @@ PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓
 PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.
 - 테스트: `test_pr_6_streams_close_by_share_id`
 
-### PR-7 커널 토큰 메서드 `tokens.*` — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #48)
+### PR-7 커널 토큰 메서드 `tokens.*` — `Done` (사용자 결정 2026-10-04, #48)
 PROTOCOL §3.3, §6. `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list`. 토큰 값은 `tokens.issue`의 응답에만 나오고, `tokens.list`는 토큰 값과 해시를 주지 않습니다. 모르는 `kind`나 능력 이름은 `bad_request`입니다.
-- 테스트(계획): `test_pr_7_issue_returns_the_token_once`, `test_pr_7_list_never_returns_tokens`, `test_pr_7_unknown_capability_is_bad_request`
+- 테스트: `test_pr_7_issue_returns_the_token_once`, `test_pr_7_list_never_returns_tokens`, `test_pr_7_unknown_capability_is_bad_request`, `test_pr_7_methods_travel_over_dkp`, `test_fr_a5_tokens_survive_a_new_kernel_process`, `test_fr_k10_store_holds_hashes_only_and_is_private`, `test_fr_a5_file_deleted_removes_the_store`, `test_fr_a5_revoke_closes_streams_and_reissue_gives_a_new_token`, `test_fr_a6_expired_share_is_not_valid`
