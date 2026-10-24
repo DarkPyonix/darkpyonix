@@ -481,6 +481,20 @@ paths:
         queue are kept (SPEC FR-X4). This is what "stop" means in DarkPyonix.
 
         '
+      parameters:
+      - name: user_permission
+        in: query
+        required: false
+        description: 'The capability this operation needs, `execute`. Another value is `400`. The token''s capability
+          set decides access (SPEC FR-A3). Served since issue #49.'
+        schema:
+          type: string
+          enum:
+          - read
+          - history
+          - execute
+          - edit
+          - manage
       responses:
         '200':
           description: Whether anything was running.
@@ -495,6 +509,8 @@ paths:
                     type: boolean
                   run_id:
                     $ref: '#/components/schemas/RunId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1177,15 +1193,20 @@ paths:
       summary: Lock a cell for editing (or renew the lock)
       description: One lock per cell; released by unlock, after 3 minutes without activity, or when the client disconnects
         (SPEC FR-S3). Needs `edit` (SPEC FR-A3).
-      requestBody:
+      parameters:
+      - name: user_permission
+        in: query
         required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                user_permission:
-                  $ref: '#/components/schemas/UserPermission'
+        description: 'The capability this operation needs, `edit`. Another value is `400`. The token''s capability
+          set decides access (SPEC FR-A3). Served since issue #49.'
+        schema:
+          type: string
+          enum:
+          - read
+          - history
+          - execute
+          - edit
+          - manage
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
