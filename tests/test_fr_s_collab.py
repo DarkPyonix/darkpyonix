@@ -42,9 +42,12 @@ NOTEBOOK = (
 )
 
 
-def client(cid, permission="editor", user=None, nickname=None):
+FULL = ["read", "history", "execute", "edit", "manage"]
+
+
+def client(cid, capabilities=FULL, user=None, nickname=None):
     return {"client_id": cid, "user": user or ("user-" + cid), "nickname": nickname or ("dev-" + cid),
-            "permission": permission}
+            "capabilities": list(capabilities)}
 
 
 A = client("A")
@@ -604,7 +607,7 @@ def test_fr_s4_presence_focus_cursor_and_leave(nb):
     clock = FakeClock()
     ds, rec = make(nb, clock=clock)
     _, c1, c2, _ = ids(ds)
-    viewer = client("V", permission="viewer1", nickname="phone")
+    viewer = client("V", capabilities=["read"], nickname="phone")
     viewer["avatar"] = "https://example.invalid/a.png"
 
     ds.presence_update({"client": viewer})  # join
@@ -616,7 +619,7 @@ def test_fr_s4_presence_focus_cursor_and_leave(nb):
     focus = rec.of("presence.update")[-1]
     assert focus["focused_cell_id"] == c1 and focus["focused_at"]
     snap = ds.snapshot({})["presence"]
-    assert len(snap) == 1 and snap[0]["permission"] == "viewer1" and snap[0]["last_seen"]
+    assert len(snap) == 1 and snap[0]["capabilities"] == ["read"] and snap[0]["last_seen"]
     expect_error("not_found", ds.presence_update, {"client": viewer, "focused_cell_id": "nope"})
     expect_error("bad_request", ds.presence_update,
                  {"client": viewer, "cursor": {"cell_id": c1, "line": -1, "column": 0}})
@@ -806,36 +809,33 @@ def test_fr_s5_external_edit_reloads_and_locked_cell_conflicts(nb):
 # ------------------------------------------------------------------ FR-S8
 
 
-@pytest.mark.parametrize("permission", ["viewer1", "viewer2", "viewer3"])
-def test_fr_s8_edit_and_lock_need_editor(nb, permission):
+@pytest.mark.parametrize("capabilities", [[], ["read"], ["read", "history", "execute"],
+                                          ["read", "edit"], ["manage"]])
+def test_fr_s8_kernel_does_not_check_capabilities(nb, capabilities):
+    # The manager decided before handing the request over; the kernel never says forbidden.
     ds, rec = make(nb)
     _, c1, _, _ = ids(ds)
-    viewer = client("V", permission=permission)
-    for method, params in [
-        (ds.cell_create, {"source": "a\n"}),
-        (ds.cell_update, {"cell_id": c1, "base_version": 1, "source": "a\n"}),
-        (ds.cell_delete, {"cell_id": c1, "base_version": 1}),
-        (ds.cell_move, {"cell_id": c1, "to_index": 2}),
-        (ds.lock, {"cell_id": c1}),
-        (ds.unlock, {"cell_id": c1, "source": "a\n"}),
-    ]:
-        expect_error("forbidden", method, dict(params, client=viewer))
-    assert rec.events == []
-    # but presence is open from viewer1
-    assert ds.presence_update({"client": viewer, "focused_cell_id": c1}) == {}
-    assert ds.presence_leave({"client": viewer}) == {}
-
-
-@pytest.mark.parametrize("permission", ["editor", "admin"])
-def test_fr_s8_editor_and_admin_edit_and_lock(nb, permission):
-    ds, _ = make(nb)
-    _, c1, _, _ = ids(ds)
-    who = client("E", permission=permission)
+    who = client("E", capabilities=capabilities)
     ds.lock({"client": who, "cell_id": c1})
     assert ds.cell_update({"client": who, "cell_id": c1, "base_version": 1,
                            "source": "x = 9\n"})["cell"]["version"] == 2
     ds.unlock({"client": who, "cell_id": c1})
     assert ds.cell_create({"client": who, "source": "a\n"})["cell"]["version"] == 1
+    assert ds.cell_move({"client": who, "cell_id": c1, "to_index": 2})
+    assert ds.cell_delete({"client": who, "cell_id": c1, "base_version": 2}) is not None
+    assert ds.presence_update({"client": who, "focused_cell_id": ids(ds)[0]}) == {}
+    assert ds.presence_leave({"client": who}) == {}
+
+
+def test_fr_s8_tier_names_and_unknown_capabilities_are_not_interpreted(nb):
+    ds, _ = make(nb)
+    _, c1, _, _ = ids(ds)
+    legacy = {"client_id": "L", "permission": "viewer1", "capabilities": ["read", "bogus"]}
+    ds.lock({"client": legacy, "cell_id": c1})
+    snap = ds.snapshot({})
+    assert snap["cells"][1]["lock"]["locked_by"] == "L"
+    ds.presence_update({"client": legacy})
+    assert ds.snapshot({})["presence"][0]["capabilities"] == ["read"]
 
 
 def test_fr_s8_client_is_required_and_checked(nb):
@@ -843,7 +843,6 @@ def test_fr_s8_client_is_required_and_checked(nb):
     _, c1, _, _ = ids(ds)
     expect_error("bad_request", ds.lock, {"cell_id": c1})
     expect_error("bad_request", ds.presence_update, {"client": {"permission": "admin"}})
-    expect_error("forbidden", ds.lock, {"client": client("X", permission="root"), "cell_id": c1})
     assert {"conflict", "locked", "forbidden"} <= set(p.ERROR_CODES)
 
 
@@ -907,11 +906,6 @@ def test_fr_s1_methods_and_events_travel_over_dkp(served, nb):
     except p.DKPError as e:
         err = e
     assert err is not None and err.code == "locked" and err.data["locked_by"] == "B"
-    try:
-        a.request("doc.cell.create", {"client": client("V", "viewer3"), "source": ""}, timeout=5)
-        raise AssertionError("expected forbidden")
-    except p.DKPError as e:
-        assert e.code == "forbidden"
     b.request("doc.unlock", {"client": B, "cell_id": c1, "source": "x = 7\n\n",
                              "base_version": 1}, timeout=5)
     made = b.request("doc.cell.create", {"client": B, "after": c1, "type": "code",

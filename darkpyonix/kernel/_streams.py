@@ -1,4 +1,4 @@
-"""Streams the manager handed to the kernel (PROTOCOL §3.7; SPEC FR-K9, PR-5, PR-6).
+"""Streams the manager handed to the kernel (PROTOCOL §3.7; SPEC FR-K9, FR-S9, PR-5, PR-6).
 
 The manager authenticates and authorizes, then passes a client connection (SSE, WebSocket,
 run-wait long poll) with the request bytes it already read and a label. The kernel answers the
@@ -16,12 +16,12 @@ import queue
 import secrets
 import select
 import socket
-import struct
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 
+from . import _wsync
 from ._protocol import DKPError
 
 Handler = Callable[[Dict[str, Any]], Any]
@@ -33,10 +33,13 @@ SEND_TIMEOUT = 10.0
 KEEPALIVE = 15.0
 PRESENCE_HEARTBEAT = 10.0
 POLL = 0.25
+MAX_POLLS = 100                 # SPEC FR-S7: 2025 ``max_polls``
+RECOMMENDED_DELAY = 5           # seconds between polls of an alarm client
 WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 OUTPUT_EVENTS = ("output", "output.clear")
 FINISHED = ("ok", "error", "interrupted", "cancelled", "crashed")
 _STOP = object()
+_CAPABILITY_ORDER = ("read", "history", "execute", "edit", "manage")
 
 
 def parse_request(raw: bytes):
@@ -106,7 +109,8 @@ def _error_response(status: int, reason: str, code: str, message: str) -> bytes:
 
 
 _STATUS = {"bad_request": (400, "Bad Request"), "not_found": (404, "Not Found"),
-           "busy": (409, "Conflict"), "forbidden": (403, "Forbidden")}
+           "busy": (409, "Conflict"), "forbidden": (403, "Forbidden"),
+           "poll_limit_exceeded": (429, "Too Many Requests")}
 
 
 def sse_frame(event: Dict[str, Any]) -> bytes:
@@ -175,7 +179,8 @@ class StreamHub:
     def _on_event(self, event: Dict[str, Any]) -> None:
         # Called under the event log's lock, in seq order: stay quick, never block.
         with self._lock:
-            targets = [s for s in self._streams.values() if s.kind == "events" and not s.closed]
+            targets = [s for s in self._streams.values()
+                       if s.kind in ("events", "ws") and not s.closed]
         if not targets:
             return
         size = len(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
@@ -211,8 +216,8 @@ class StreamHub:
         except (OSError, ValueError):
             return False
 
-    def _peer_open(self, st: _Stream, ws: bool = False) -> bool:
-        """Drain what the client sent; False once it hung up (or sent a WebSocket close)."""
+    def _peer_open(self, st: _Stream) -> bool:
+        """Drain what the client sent; False once it hung up."""
         try:
             while True:
                 ready, _, _ = select.select([st.sock], [], [], 0)
@@ -221,22 +226,21 @@ class StreamHub:
                 data = st.sock.recv(65536)
                 if not data:
                     return False
-                if ws and not self._ws_feed(st, data):
-                    return False
         except (OSError, ValueError):
             return False
+
+    def _client_of(self, st: _Stream) -> Dict[str, Any]:
+        """The ``client`` object of PROTOCOL §4 for the label of ``st``."""
+        caps = [c for c in _CAPABILITY_ORDER if c in st.caps]
+        return {"client_id": st.client_id or st.id, "capabilities": caps,
+                "user": st.label.get("user") or "", "nickname": st.label.get("nickname") or ""}
 
     def _heartbeat_presence(self, st: _Stream) -> None:
         handler = self._handlers.get("presence.update")
         if handler is None or st.client_id is None:
             return
-        caps = st.caps
-        perm = ("editor" if "edit" in caps else "viewer3" if "execute" in caps
-                else "viewer2" if "history" in caps else "viewer1")
-        client = {"client_id": st.client_id, "permission": perm,
-                  "user": st.label.get("user") or "", "nickname": st.label.get("nickname") or ""}
         try:
-            handler({"client": client})
+            handler({"client": self._client_of(st)})
         except Exception:
             pass
 
@@ -324,9 +328,16 @@ class StreamHub:
         ref = parts[-2]
         try:
             timeout = max(1, min(int(st.query.get("timeout", 60)), 300))
+            poll = int(st.query.get("poll_sequence", 1))
+            if poll < 1:
+                raise ValueError
         except ValueError:
             self._send(st, _error_response(400, "Bad Request", "bad_request",
-                                           "timeout: expected an integer number of seconds"))
+                                           "timeout and poll_sequence: expected integers (>= 1 for poll_sequence)"))
+            return
+        if poll > MAX_POLLS:
+            self._send(st, _error_response(429, "Too Many Requests", "poll_limit_exceeded",
+                                           "poll_sequence %d is above max_polls %d" % (poll, MAX_POLLS)))
             return
         handler = self._handlers.get("runs.wait")
         if handler is None:
@@ -349,21 +360,37 @@ class StreamHub:
         out.setdefault("run", None)
         if "history" not in st.caps:
             out["run"] = None  # FR-A3: run history needs the history capability
-        out["next"] = None if status in FINISHED else (
-            "/api/kernels/%s/runs/%s/wait?timeout=%d" % (self.kernel_id, run_id, timeout))
+        out["poll_sequence"] = poll
+        if status in FINISHED:
+            out["next"], out["next_poll_sequence"], out["auto_repoll"] = None, None, None
+        else:
+            nxt = "/api/kernels/%s/runs/%s/wait?timeout=%d&poll_sequence=%d" % (
+                self.kernel_id, run_id, timeout, poll + 1)
+            if st.query.get("client_id"):
+                nxt += "&client_id=" + quote(st.query["client_id"], safe="")
+            out["next"], out["next_poll_sequence"] = nxt, poll + 1
+            out["auto_repoll"] = {"enabled": poll < MAX_POLLS, "next_poll_url": nxt,
+                                  "recommended_delay": RECOMMENDED_DELAY, "max_polls": MAX_POLLS}
         self._send(st, _json_response(200, "OK", out))
 
-    # ------------------------------------------------------------ WebSocket (handshake only)
+    # ------------------------------------------------------------ WebSocket (PROTOCOL §5)
 
     def _run_ws(self, st: _Stream) -> None:
-        """``101`` and control frames. The 2025 sync messages (PROTOCOL §5) are #49."""
         key = st.headers.get("sec-websocket-key", "").encode("latin-1")
         accept = base64.b64encode(hashlib.sha1(key + WS_GUID).digest()).decode("ascii")
         if not self._send(st, _http(101, "Switching Protocols", [
                 "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Accept: " + accept])):
             return
-        st.ws_buf = bytearray()  # type: ignore[attr-defined]
-        next_presence = 0.0
+        sync = _wsync.WsSync(self._handlers, st.caps, self._client_of(st))
+        reader = _wsync.FrameReader()
+        self._heartbeat_presence(st)   # joins the document before the first snapshot
+        try:
+            if not self._ws_send(st, sync.start()):
+                return
+        except DKPError:
+            return
+        now = time.monotonic()
+        last_rx, next_ping, next_presence = now, now + _wsync.PING_INTERVAL, now + PRESENCE_HEARTBEAT
         while not st.closed:
             try:
                 item = st.q.get(timeout=POLL)
@@ -371,48 +398,72 @@ class StreamHub:
                 item = None
             if item is _STOP:
                 return
-            if not self._peer_open(st, ws=True):
+            if item is not None:
+                event, size = item
+                st.queued -= size
+                if not self._ws_send(st, sync.on_event(event)):
+                    return
+            got = self._ws_read(st, reader, sync)
+            if got is None:
                 return
             now = time.monotonic()
+            if got:
+                last_rx = now
+            if now - last_rx > _wsync.IDLE_TIMEOUT:
+                self._send(st, _wsync.close_frame(1001, "idle"))
+                return
+            if now >= next_ping:
+                if not self._send(st, _wsync.frame(_wsync.OP_PING)):
+                    return
+                next_ping = now + _wsync.PING_INTERVAL
             if now >= next_presence:
                 self._heartbeat_presence(st)
                 next_presence = now + PRESENCE_HEARTBEAT
 
-    def _ws_feed(self, st: _Stream, data: bytes) -> bool:
-        buf = st.ws_buf  # type: ignore[attr-defined]
-        buf += data
-        while len(buf) >= 2:
-            opcode = buf[0] & 0x0F
-            masked = bool(buf[1] & 0x80)
-            length = buf[1] & 0x7F
-            pos = 2
-            if length == 126:
-                if len(buf) < 4:
-                    return True
-                length = struct.unpack(">H", bytes(buf[2:4]))[0]
-                pos = 4
-            elif length == 127:
-                if len(buf) < 10:
-                    return True
-                length = struct.unpack(">Q", bytes(buf[2:10]))[0]
-                pos = 10
-            if length > MAX_REQUEST:
+    def _ws_send(self, st: _Stream, messages: List[Dict[str, Any]]) -> bool:
+        for m in messages:
+            if not self._send(st, _wsync.text_frame(m)):
                 return False
-            mask = b""
-            if masked:
-                if len(buf) < pos + 4:
-                    return True
-                mask = bytes(buf[pos:pos + 4])
-                pos += 4
-            if len(buf) < pos + length:
-                return True
-            payload = bytes(buf[pos:pos + length])
-            del buf[:pos + length]
-            if masked:
-                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
-            if opcode == 0x8:      # close: echo and finish
-                self._send(st, b"\x88\x00")
-                return False
-            if opcode == 0x9:      # ping
-                self._send(st, b"\x8a" + bytes([len(payload) & 0x7F]) + payload[:125])
         return True
+
+    def _ws_read(self, st: _Stream, reader: Any, sync: Any) -> Optional[bool]:
+        """Handle what the client sent. ``None``: finished (closed, or it broke the protocol);
+        else whether anything arrived."""
+        arrived = False
+        try:
+            while True:
+                ready, _, _ = select.select([st.sock], [], [], 0)
+                if not ready:
+                    return arrived
+                data = st.sock.recv(65536)
+                if not data:
+                    return None
+                arrived = True
+                for opcode, payload in reader.feed(data):
+                    if opcode == _wsync.OP_CLOSE:
+                        self._send(st, _wsync.frame(_wsync.OP_CLOSE, payload[:2]))
+                        return None
+                    if opcode == _wsync.OP_PING:
+                        self._send(st, _wsync.frame(_wsync.OP_PONG, payload))
+                    elif opcode == _wsync.OP_TEXT:
+                        try:
+                            msg = json.loads(payload.decode("utf-8"))
+                        except ValueError:
+                            msg = None
+                        if not self._ws_send(st, self._ws_answer(sync, msg)):
+                            return None
+                    elif opcode == _wsync.OP_BINARY:
+                        self._send(st, _wsync.close_frame(1003, "text only"))
+                        return None
+        except _wsync.ProtocolError as e:
+            self._send(st, _wsync.close_frame(e.code, str(e)))
+            return None
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def _ws_answer(sync: Any, msg: Any) -> List[Dict[str, Any]]:
+        try:
+            return sync.on_message(msg)
+        except Exception as e:  # a broken handler must not drop the connection
+            return [{"type": "error", "error": "INTERNAL", "message": repr(e)}]
