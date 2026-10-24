@@ -30,7 +30,7 @@ async fn test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain() {
     let r = s.admin().req("GET", &format!("/api/kernels/{kid}/events")).send().await.unwrap();
     assert_eq!(r.status(), 200);
     tokio::time::sleep(Duration::from_millis(2000)).await;
-    assert!(file.exists(), "exited with an open stream");
+    assert_eq!(s.admin().get("/health").await.status, 200, "exited with an open stream");
     // Requests keep it alive too.
     for _ in 0..6 {
         tokio::time::sleep(Duration::from_millis(300)).await;
