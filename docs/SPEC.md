@@ -192,6 +192,8 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 | `__runs__.list(limit=20)` | 최신순 요약 목록 |
 | `__runs__.dir` | 기록 폴더 경로(str) |
 
+최신순은 `started_at`(밀리초), 같으면 `run_id` 순입니다. `run_id` 끝의 4 hex는 무작위라 순서를 정하지 못하므로, 커널은 한 프로세스 안에서 실행 시작 시각을 항상 이전보다 크게(같은 밀리초면 1ms 올려) 기록합니다. 그래서 같은 초에 시작한 실행도 시작한 순서대로 정렬됩니다.
+
 목적은 실행 기록 `.ipynb`를 `json` import 없이 편하게 다루는 것입니다. 그래서 반환값은 dict이면서 속성 접근도 됩니다. 실행 하나(`RunLog`)와 셀 하나(`CellLog`)는 `dict`의 하위 클래스이고, 그 안의 dict와 list도 같은 방식으로 속성 접근이 됩니다.
 - 속성 이름은 먼저 dict의 키에서, 없으면 `metadata.darkpyonix`의 필드에서 찾습니다. 둘 다 없으면 `AttributeError`입니다. 그래서 `run.run_id`, `run.status`, `run.params`, `run.mode`, `run.started_at`, `run.cells`, `cell.index`, `cell.title`, `cell.status`, `cell.source`, `cell.outputs`가 됩니다.
 - `run.cells`: 기록에 남은 셀의 목록입니다(실행된 셀만, 실행 순서). `run.cells[i]`는 이 목록의 위치이고, 파일 안의 셀 번호는 `cell.index`입니다.
@@ -209,7 +211,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
   - `run.path`의 파일을 `json.load`한 값이 `run.notebook`과 같고, `type(run.notebook) is dict`입니다.
   - `__runs__.current.run_id`는 지금 실행의 ID이고, `__runs__.current.path`는 그 실행의 기록 경로입니다.
   - `json.dumps(__runs__.latest)`가 성공하고, `json.loads`한 값이 `run.notebook`과 같습니다.
-- 테스트: `test_fr_r3_runs_magic_exposes_logs_as_json`, `test_fr_r3_runs_magic_attribute_access_in_kernel_cell`
+- 테스트: `test_fr_r3_runs_started_in_the_same_second_keep_start_order`, `test_fr_r3_runs_magic_exposes_logs_as_json`, `test_fr_r3_runs_magic_attribute_access_in_kernel_cell`
 - 상태 메모 (2026-10-03): 속성 접근(`RunLog`, `CellLog`)을 구현했고, 위 수용 기준을 실제 커널 셀 안에서 이 기기의 모든 인터프리터(3.9, 3.11, 3.13, 3.14, 3.15)로 검증했습니다. 이 기기에는 3.8 인터프리터가 없어 3.8에서는 돌리지 않았고, 코드는 `ast.parse(feature_version=(3, 8))`를 통과합니다.
 
 ### FR-R4 기록과 셀 맵핑 — `Done`
