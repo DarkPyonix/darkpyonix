@@ -1207,15 +1207,6 @@ paths:
           - execute
           - edit
           - manage
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                user_permission:
-                  $ref: '#/components/schemas/UserPermission'
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
