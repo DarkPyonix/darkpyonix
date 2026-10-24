@@ -46,7 +46,7 @@ pub use proxy::ProxyRoute;
 pub use tls::TlsConfig;
 
 use crate::api::AppState;
-use crate::auth::{Auth, ShareStore};
+use crate::auth::{Auth, Principal, ShareStore};
 use crate::error::ApiError;
 use crate::proxy::{ConnInfo, Proxy};
 
@@ -214,10 +214,64 @@ fn query_token(uri: &Uri) -> Option<String> {
     pairs.into_iter().find(|(k, _)| k == "token").map(|(_, v)| v)
 }
 
+/// Paths that authenticate by themselves, without `Authorization: Bearer` (SPEC FR-A2): the
+/// manager login and master token reset (password in `Authorization: Basic`), and a kernel's
+/// initial token and login (FR-A6).
+fn is_open_auth_path(method: &axum::http::Method, path: &str) -> bool {
+    use axum::http::Method;
+    let method = method.clone();
+    if (method == Method::GET && path == "/api/auth") || (method == Method::PUT && path == "/api/auth/tokens/master") {
+        return true;
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    method == Method::POST
+        && parts.len() == 6
+        && parts[1] == "api"
+        && parts[2] == "kernels"
+        && parts[4] == "tokens"
+        && (parts[5] == "initial" || parts[5] == "auth")
+}
+
+/// The kernel id in `/api/kernels/{id}/...` or `/api/ws/kernels/{id}`.
+fn path_kernel_id(path: &str) -> Option<&str> {
+    let parts: Vec<&str> = path.split('/').collect();
+    let id = match parts.as_slice() {
+        ["", "api", "kernels", id, ..] => *id,
+        ["", "api", "ws", "kernels", id] => *id,
+        _ => return None,
+    };
+    util::is_kernel_id(id).then_some(id)
+}
+
+/// Asks the kernel about a token it may hold (`tokens.verify`, PROTOCOL §6).
+async fn kernel_principal(st: &AppState, kernel_id: &str, token: &str) -> Result<Option<Principal>, ApiError> {
+    let Ok(v) = st.backend.request(kernel_id, "tokens.verify", serde_json::json!({ "token": token })).await else {
+        return Ok(None);
+    };
+    if v["revoked"].as_bool() == Some(true) {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked"));
+    }
+    if v["valid"].as_bool() != Some(true) {
+        return Ok(None);
+    }
+    let caps: Vec<String> = v["capabilities"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    Ok(Some(Principal {
+        permission: auth::tier_for(&caps),
+        kernel_id: Some(kernel_id.to_string()),
+        share_id: v["share_id"].as_str().map(String::from),
+        label: v["label"].as_str().map(String::from),
+        master: false,
+        initial: v["kind"].as_str() == Some("initial"),
+    }))
+}
+
 /// Authenticates before routing, so an anonymous caller always gets 401 (never 400/404).
 async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next) -> Response {
-    let path = req.uri().path();
-    if path == "/health" || path == "/docs" || path.starts_with("/docs/") {
+    let path = req.uri().path().to_string();
+    if path == "/health" || path == "/docs" || path.starts_with("/docs/") || is_open_auth_path(req.method(), &path) {
         return next.run(req).await;
     }
     let bearer = req
@@ -229,8 +283,34 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
             scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim().to_string())
         });
     // `?token=` only on the events stream (EventSource cannot set headers).
-    let token = bearer.or_else(|| if is_events_path(path) { query_token(req.uri()) } else { None });
-    match st.auth.authenticate(token.as_deref()) {
+    let token = bearer.or_else(|| if is_events_path(&path) { query_token(req.uri()) } else { None });
+    let found = match st.auth.lookup(token.as_deref()) {
+        auth::Lookup::Found(p) => Some(p),
+        auth::Lookup::Revoked => {
+            return ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked")
+                .into_response()
+        }
+        auth::Lookup::Unknown => match (token.as_deref().filter(|t| !t.is_empty()), path_kernel_id(&path)) {
+            (Some(t), Some(kid)) => match kernel_principal(&st, kid, t).await {
+                Ok(p) => p,
+                Err(e) => return e.into_response(),
+            },
+            // The password path names no kernel: an initial token (FR-A4) is looked for among
+            // the running kernels.
+            (Some(t), None) if path == "/api/auth/password" => {
+                let mut found = None;
+                for k in st.backend.list(false).await.unwrap_or_default() {
+                    if let Ok(Some(p)) = kernel_principal(&st, &k.kernel_id, t).await {
+                        found = Some(p);
+                        break;
+                    }
+                }
+                found
+            }
+            _ => None,
+        },
+    };
+    match found {
         Some(p) => {
             req.extensions_mut().insert(p);
             next.run(req).await
@@ -251,6 +331,13 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
     let api = Router::new()
         .route("/health", get(api::get_health))
         .route("/api/manager", get(api::get_manager))
+        .route("/api/auth", get(api::login))
+        .route("/api/auth/password", put(api::set_password))
+        .route("/api/auth/tokens/master", put(api::reset_master_token))
+        .route("/api/auth/tokens/shared/{token_type}", put(api::reset_shared_token))
+        .route("/api/kernels/{kernel_id}/tokens/initial", post(api::create_initial_token))
+        .route("/api/kernels/{kernel_id}/tokens/auth", post(api::kernel_login))
+        .route("/api/kernels/{kernel_id}/tokens/{token}/verify", get(api::verify_token))
         .route("/api/kernels", get(api::list_kernels).post(api::start_kernel))
         .route("/api/kernels/{kernel_id}", get(api::get_kernel).delete(api::shutdown_kernel))
         .route("/api/kernels/{kernel_id}/interrupt", post(api::interrupt_kernel))
