@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
@@ -28,9 +28,15 @@ struct Cached {
     seen: Instant,
 }
 
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
 pub struct Discovery {
     user_tag: String,
     kernels_dir: PathBuf,
+    /// Canonical runtime home; announces that name another `home` are ignored. `None`: no filter.
+    home: Option<PathBuf>,
     multicast: bool,
     cache: Mutex<HashMap<String, Cached>>,
     listening: Mutex<bool>,
@@ -87,9 +93,30 @@ fn str_field<'a>(e: &'a Entry, k: &str) -> Option<&'a str> {
 
 impl Discovery {
     pub fn new(user_tag: String, kernels_dir: PathBuf, multicast: bool) -> Arc<Self> {
+        Self::build(user_tag, kernels_dir, None, multicast)
+    }
+
+    /// Like [`Discovery::new`], and ignores announces from a runtime home other than `home`
+    /// (the `user_tag` is the same for every home of one OS account).
+    pub fn new_for_home(
+        user_tag: String,
+        kernels_dir: PathBuf,
+        home: &Path,
+        multicast: bool,
+    ) -> Arc<Self> {
+        Self::build(user_tag, kernels_dir, Some(canonical(home)), multicast)
+    }
+
+    fn build(
+        user_tag: String,
+        kernels_dir: PathBuf,
+        home: Option<PathBuf>,
+        multicast: bool,
+    ) -> Arc<Self> {
         Arc::new(Self {
             user_tag,
             kernels_dir,
+            home,
             multicast,
             cache: Mutex::new(HashMap::new()),
             listening: Mutex::new(false),
@@ -123,10 +150,20 @@ impl Discovery {
         tokio::spawn(listen(weak, sock));
     }
 
-    fn remember(&self, mut entry: Entry) {
+    /// Cache `entry`; false when it is not ours (no kernel_id, or another runtime home).
+    fn remember(&self, mut entry: Entry) -> bool {
         entry.remove("nonce");
+        // A kernel of another runtime home is not ours to list or connect to; the user_tag is the
+        // same for every home of one OS account. A filtering discovery also rejects an announce
+        // that names no `home`: every kernel of this version sends it.
+        if let Some(mine) = self.home.as_ref() {
+            match str_field(&entry, "home") {
+                Some(theirs) if &canonical(Path::new(theirs)) == mine => {}
+                _ => return false,
+            }
+        }
         let Some(kid) = str_field(&entry, "kernel_id").map(str::to_string) else {
-            return;
+            return false;
         };
         self.cache.lock().unwrap().insert(
             kid,
@@ -135,6 +172,7 @@ impl Discovery {
                 seen: Instant::now(),
             },
         );
+        true
     }
 
     fn handle_datagram(&self, data: &[u8]) {
@@ -143,7 +181,9 @@ impl Discovery {
             return;
         }
         match str_field(&msg, "op") {
-            Some("announce") => self.remember(msg),
+            Some("announce") => {
+                self.remember(msg);
+            }
             Some("bye") => {
                 if let Some(kid) = str_field(&msg, "kernel_id") {
                     self.cache.lock().unwrap().remove(kid);
@@ -259,8 +299,9 @@ impl Discovery {
             if kernel_id.is_some_and(|k| k != kid) || !pid_alive(entry_pid(&reply)) {
                 continue;
             }
-            self.remember(reply);
-            answered.insert(kid);
+            if self.remember(reply) {
+                answered.insert(kid);
+            }
         }
         answered.len()
     }

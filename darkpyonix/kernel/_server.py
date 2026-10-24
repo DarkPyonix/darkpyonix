@@ -9,8 +9,8 @@ Standard library only; Python 3.8+.
 """
 from __future__ import annotations
 
-import base64
 import json
+import os
 import secrets
 import selectors
 import socket
@@ -20,6 +20,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
+from . import _peer
 from . import _protocol as _p
 from ._events import EventLog
 from ._protocol import DKPError, FrameTooLarge, encode
@@ -33,14 +34,13 @@ HANDLER_WORKERS = 4
 
 
 class _Conn:
-    __slots__ = ("sock", "inbuf", "outbuf", "nonce", "deadline", "authed", "session",
+    __slots__ = ("sock", "inbuf", "outbuf", "deadline", "authed", "session",
                  "subscribed", "pending", "closing", "dead", "closed", "mask")
 
     def __init__(self, sock: socket.socket, deadline: float) -> None:
         self.sock = sock
         self.inbuf = bytearray()
         self.outbuf = bytearray()
-        self.nonce = _p.new_nonce()
         self.deadline = deadline
         self.authed = False
         self.session = ""
@@ -68,14 +68,12 @@ def _response(rid: Any, result: Any = None, error: Optional[DKPError] = None) ->
 
 
 class ControlServer:
-    def __init__(self, kernel_id: str, key: bytes, events: EventLog,
-                 handlers: Dict[str, Handler], host: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(self, kernel_id: str, events: EventLog, handlers: Dict[str, Handler],
+                 path: Optional[str] = None) -> None:
         self.kernel_id = kernel_id
-        self._key = key
         self._events = events
         self._handlers = handlers
-        self._host = host
-        self._port = port
+        self._path = path
         self._lock = threading.Lock()
         self._conns = []  # type: List[_Conn]
         self._sel = None  # type: Optional[selectors.BaseSelector]
@@ -89,16 +87,30 @@ class ControlServer:
     # ------------------------------------------------------------ lifecycle
 
     @property
-    def port(self) -> int:
-        return self._port
+    def address(self) -> str:
+        """The Unix socket path; announced as ``control`` (PROTOCOL §3.1)."""
+        return self._path or ""
 
     def start(self) -> None:
-        listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listen.bind((self._host, self._port))
+        if not hasattr(socket, "AF_UNIX") or os.name == "nt":
+            raise OSError("the control channel needs a named pipe on Windows (not implemented yet)")
+        if self._path is None:
+            from . import _home
+            self._path = _home.control_path(self.kernel_id)
+        try:
+            os.unlink(self._path)  # a leftover of a dead kernel; the kernel lock makes us the owner
+        except FileNotFoundError:
+            pass
+        listen = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old_umask = os.umask(0o177)
+        try:
+            listen.bind(self._path)
+        finally:
+            os.umask(old_umask)
+        os.chmod(self._path, 0o600)
         listen.listen(64)
         listen.setblocking(False)
         self._listen = listen
-        self._port = listen.getsockname()[1]
         self._wake_r, self._wake_w = socket.socketpair()
         self._wake_r.setblocking(False)
         self._wake_w.setblocking(False)
@@ -133,6 +145,10 @@ class ControlServer:
             self._sel.close()
         if self._pool is not None:
             self._pool.shutdown(wait=False)
+        try:
+            os.unlink(self._path)
+        except (OSError, TypeError):
+            pass
 
     def client_count(self) -> int:
         with self._lock:
@@ -230,18 +246,16 @@ class ControlServer:
                 return
             except OSError:
                 return
+            if not _peer.same_account(sock):
+                sock.close()  # FR-A1: another account gets no frame at all
+                continue
             sock.setblocking(False)
-            try:
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            except OSError:
-                pass
             c = _Conn(sock, time.monotonic() + _p.HANDSHAKE_TIMEOUT)
             with self._lock:
                 self._conns.append(c)
                 self._sel.register(sock, selectors.EVENT_READ, c)
                 self._send_locked(c, encode({
                     "op": "hello", "kernel_id": self.kernel_id,
-                    "nonce": base64.b64encode(c.nonce).decode("ascii"),
                     "kernel_version": _p.KERNEL_VERSION,
                 }))
 
@@ -340,14 +354,13 @@ class ControlServer:
             c.closing = True
 
     def _on_auth(self, c: _Conn, msg: Dict[str, Any]) -> None:
-        if msg.get("op") == "auth" and _p.verify_mac(self._key, c.nonce, self.kernel_id,
-                                                     msg.get("mac", "")):
+        if msg.get("op") == "auth":
             c.authed = True
             c.session = "s_" + secrets.token_hex(8)
             self._send(c, encode({"op": "welcome", "session": c.session,
                                   "seq": self._events.seq}))
         else:
-            self._send(c, _error_frame("auth_failed", "authentication failed"))
+            self._send(c, _error_frame("bad_request", "expected auth"))
             c.closing = True
 
     def _on_message(self, c: _Conn, msg: Dict[str, Any]) -> None:

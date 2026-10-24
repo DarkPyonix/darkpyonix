@@ -376,7 +376,7 @@ async fn fr_d1_query_finds_all_kernels() {
     // Multicast only: a Discovery over an empty registry dir counts only datagram answers.
     let empty = dir.join("empty-registry");
     std::fs::create_dir_all(&empty).unwrap();
-    let mcast = Discovery::new(be.user_tag().to_string(), empty.clone(), true);
+    let mcast = Discovery::new_for_home(be.user_tag().to_string(), empty.clone(), &home, true);
     let n = mcast
         .query(None, Duration::from_millis(200), &HashSet::new())
         .await;
@@ -392,7 +392,7 @@ async fn fr_d1_query_finds_all_kernels() {
     let expect: HashSet<String> = ids.iter().cloned().collect();
     let mut lat = Vec::new();
     for _ in 0..20 {
-        let d = Discovery::new(be.user_tag().to_string(), empty.clone(), true);
+        let d = Discovery::new_for_home(be.user_tag().to_string(), empty.clone(), &home, true);
         let t = Instant::now();
         assert_eq!(d.query(None, Duration::from_millis(200), &expect).await, 3);
         lat.push(t.elapsed());
