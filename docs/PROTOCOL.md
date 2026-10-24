@@ -53,6 +53,8 @@ Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-
 
 `control`은 제어 채널의 주소입니다(§3). POSIX는 유닉스 도메인 소켓 경로, Windows는 파이프 이름입니다. 2026-10-04까지 있던 TCP `port`와 넘김용 `handoff`는 이 하나로 합쳤습니다(INTENT D5). POSIX는 구현됨(#55), Windows 파이프는 구현 대기.
 
+`home`은 커널의 런타임 홈 경로입니다. `user_tag`는 같은 OS 계정이면 홈이 달라도 같으므로, 매니저는 `home`이 자기 홈과 다른 announce를 무시합니다(홈마다 따로 보는 격리를 유지합니다).
+
 커널은 다음 때 announce를 보냅니다.
 - query에 응답할 때(`nonce`를 그대로 돌려줌)
 - 시작을 마쳤을 때, 상태(`status`, `run_id`)가 바뀔 때

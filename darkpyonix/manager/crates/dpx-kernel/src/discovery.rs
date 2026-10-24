@@ -125,6 +125,13 @@ impl Discovery {
 
     fn remember(&self, mut entry: Entry) {
         entry.remove("nonce");
+        // The user_tag is the same for every runtime home of one OS account, so a kernel of
+        // another home (its announce names it in `home`) is not ours to list or connect to.
+        if let (Some(theirs), Some(mine)) = (str_field(&entry, "home"), self.kernels_dir.parent()) {
+            if std::path::Path::new(theirs) != mine {
+                return;
+            }
+        }
         let Some(kid) = str_field(&entry, "kernel_id").map(str::to_string) else {
             return;
         };

@@ -80,6 +80,7 @@ class Kernel(object):
             "runs_dir": runs_dir_for(self.path),
             "started_at": self.started_at,
             "host": self.host,
+            "home": _home.home(),
         }
 
     def emit(self, type: str, data: Dict[str, Any]) -> None:

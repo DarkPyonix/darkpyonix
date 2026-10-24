@@ -150,7 +150,7 @@ class FakeKernel:
                 "kernel_id": self.kernel_id, "path": self.path,
                 "pid": self.pid, "control": self.control, "status": self.status, "run_id": self.run_id,
                 "python": {"version": "3.11.9", "implementation": "CPython", "executable": sys.executable},
-                "dkp_kernel_version": protocol.KERNEL_VERSION, "started_at": self.started_at, "host": "fake"}
+                "dkp_kernel_version": protocol.KERNEL_VERSION, "started_at": self.started_at, "host": "fake", "home": _home.home()}
 
     # ------------------------------------------------------------ test controls
 

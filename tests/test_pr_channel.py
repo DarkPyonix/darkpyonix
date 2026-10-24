@@ -376,3 +376,11 @@ def test_client_close_ends_event_stream(server):
     c.subscribe()
     c.close()
     assert list(c.events()) == []
+
+
+def test_fr_d_announce_names_the_runtime_home(dp_home):
+    """The user_tag is shared by every home of an account, so the announce says which home it is."""
+    import importlib
+    main = importlib.import_module("darkpyonix.__main__")
+    k = main.Kernel(os.path.join(dp_home, "nb.py"))
+    assert k.info()["home"] == dp_home
