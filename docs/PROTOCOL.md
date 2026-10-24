@@ -140,8 +140,8 @@ INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 �
 | `runs.get` | `run_id: str \| "latest" \| "current"` | nbformat 4 노트북 | |
 | `subscribe` | `since: int?` | `{seq: int, replayed: int}` | `since` 이후의 이벤트를 다시 보내고 이어서 실시간 전송 |
 | `unsubscribe` | `{}` | `{}` | |
-| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. 구현 대기(#47) |
-| `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현 대기(#47) |
+| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. POSIX 구현됨(#47), Windows `share`는 구현 대기 |
+| `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현됨(#47) |
 | `tokens.issue` | `kind: "initial"\|"login"\|"share"`, `capabilities: [str]`, `label?`, `expires_at?` | `{token, share_id?}` | 커널이 토큰을 만들고 해시만 영속화(§6). 커널 구현됨(#48) |
 | `tokens.verify` | `token` | `{valid, revoked, kind?, capabilities?, share_id?}` | 커널 접근 토큰 확인(§6). 커널 구현됨(#48) |
 | `tokens.revoke` | `share_id` | `{revoked: int, closed: int}` | 그 공유의 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫음(§6). 커널 구현됨(#48) |
@@ -202,7 +202,7 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
 | `ws` | `GET /api/ws/kernels/{kernel_id}` (Upgrade) | `101 Switching Protocols`, §5의 2025 WebSocket 동기화 |
 | `wait` | `GET /api/kernels/{kernel_id}/runs/{run_ref}/wait` | 실행이 끝나거나 `timeout`이 지나면 JSON 한 번(SPEC FR-S7) |
 
-짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. 구현 대기(#47).
+짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. POSIX 커널은 구현됨(#47), Windows `share`와 `ws`의 동기화 메시지(§5)는 구현 대기(#47, #49).
 
 #### 3.7.1 `adopt` 요청
 
@@ -240,6 +240,17 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 - 커널은 소켓 쌍 위에서도 HTTP/1.1로 응답합니다(상태 줄, 헤더, 본문. `ws`는 `101` 뒤 WebSocket 프레임).
 - 매니저는 본문 바이트를 바꾸지 않습니다. 매니저가 맡는 것은 바깥 운반뿐입니다. TLS 레코드의 암복호화, HTTP/2에서는 커널 응답 머리(상태 줄과 헤더)를 HEADERS 프레임으로 옮기고 본문을 DATA 프레임에 그대로 싣는 일, 터널에서는 터널 스트림에 싣는 일입니다.
 - 이런 스트림은 매니저와 함께 끝납니다. 매니저가 끝나면 소켓 쌍이 닫히고, 커널은 그 스트림을 닫힌 연결로 처리합니다.
+
+#### 3.7.3a 커널이 쓰는 응답
+
+커널은 넘겨받은 요청 줄과 헤더를 읽고 HTTP/1.1로 답합니다. 본문은 항등 인코딩이고(청크 없음), 모든 응답에 `Connection: close`가 있어서 HTTP/2나 터널로 옮기는 매니저가 본문 바이트를 그대로 DATA에 실을 수 있습니다.
+
+- `events`: `200`, `Content-Type: text/event-stream`, `Cache-Control: no-cache`. 본문은 `: darkpyonix events <kernel_id>`로 시작하고, 이벤트마다 `id: <seq>`, `event: <type>`, `data: <JSON>`입니다(`replay_truncated`는 `id` 없음). 이어 받기는 `Last-Event-ID` 헤더가 `since` 쿼리보다 앞섭니다. 15초 동안 아무 일이 없으면 `: keepalive` 주석을 씁니다. `since`가 정수가 아니면 `400` JSON입니다. 라벨에 `history`가 없으면 `output`과 `output.clear` 이벤트를 보내지 않습니다.
+- `wait`: `timeout`(1~300초, 기본 60) 안에 끝나거나 시간이 지나면 `200 application/json` 한 번(`Content-Length`)입니다. 본문은 `runs.wait` 결과에 `next`(끝나지 않았으면 다시 부를 경로, 끝났으면 `null`)를 더한 것입니다. `history`가 없으면 `run`은 `null`입니다. 오류는 `{code, message}` JSON이고 `not_found`는 `404`, `bad_request`는 `400`입니다.
+- `ws`: `101 Switching Protocols`와 `Sec-WebSocket-Accept` 뒤에 ping·close 제어 프레임에 답합니다. 동기화 메시지(§5)는 #49에서 붙입니다.
+- `client_id`가 있는 `events`와 `ws` 스트림이 열려 있는 동안 커널이 10초마다 자기 `presence.update`를 부릅니다. 매니저의 하트비트는 필요 없습니다.
+- 커널은 스트림마다 스레드 하나를 쓰고, 보내기 제한 시간은 10초입니다. 느린 클라이언트는 자기 스트림만 막습니다.
+- 제어 채널은 인증 전 연결이 보낸 FD를 모두 닫고, 아직 `adopt`가 가져가지 않은 FD는 최대 4개까지만 쥡니다.
 
 #### 3.7.4 공유 철회 (`streams.close`)
 

@@ -9,6 +9,8 @@ Standard library only; Python 3.8+.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import secrets
@@ -24,6 +26,7 @@ from . import _peer
 from . import _protocol as _p
 from ._events import EventLog
 from ._protocol import DKPError, FrameTooLarge, encode
+from ._streams import StreamHub
 
 Handler = Callable[[Dict[str, Any]], Any]
 
@@ -31,11 +34,13 @@ MAX_OUTBUF = 64 * 1024 * 1024    # a client further behind than this is dropped
 MAX_PREAUTH_FRAME = 64 * 1024    # an unauthenticated peer cannot make us buffer more
 RECV_CHUNK = 256 * 1024
 HANDLER_WORKERS = 4
+MAX_PENDING_FDS = 4              # descriptors received but not yet claimed by an adopt
 
 
 class _Conn:
     __slots__ = ("sock", "inbuf", "outbuf", "deadline", "authed", "session",
-                 "subscribed", "pending", "closing", "dead", "closed", "mask")
+                 "subscribed", "pending", "closing", "dead", "closed", "mask", "fds",
+                 "await_fd")
 
     def __init__(self, sock: socket.socket, deadline: float) -> None:
         self.sock = sock
@@ -50,6 +55,32 @@ class _Conn:
         self.dead = False     # close now
         self.closed = False
         self.mask = selectors.EVENT_READ
+        self.fds = []  # type: List[int]  # SCM_RIGHTS descriptors waiting for their adopt
+        self.await_fd = None  # type: Optional[Any]  # (request id, params) of an adopt
+
+
+def _close_fd(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _recv(c: "_Conn") -> bytes:
+    """Read from ``c``; descriptors sent with ``SCM_RIGHTS`` are queued in ``c.fds``.
+
+    ``socket.recvmsg`` exists on 3.8 (``recv_fds`` does not, PROTOCOL §3.7.2).
+    """
+    data, ancdata, flags, _ = c.sock.recvmsg(RECV_CHUNK, socket.CMSG_SPACE(4 * MAX_PENDING_FDS))
+    for level, kind, payload in ancdata:
+        if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+            usable = len(payload) - len(payload) % 4
+            for (fd,) in struct.iter_unpack("i", payload[:usable]):
+                if c.authed and len(c.fds) < MAX_PENDING_FDS:
+                    c.fds.append(fd)
+                else:
+                    _close_fd(fd)  # an unauthenticated peer cannot park descriptors here
+    return data
 
 
 def _error_frame(code: str, message: str) -> bytes:
@@ -72,7 +103,9 @@ class ControlServer:
                  path: Optional[str] = None) -> None:
         self.kernel_id = kernel_id
         self._events = events
-        self._handlers = handlers
+        self._handlers = dict(handlers)
+        self.streams = StreamHub(kernel_id, events, self._handlers)
+        self._handlers.setdefault("streams.close", self._streams_close)
         self._path = path
         self._lock = threading.Lock()
         self._conns = []  # type: List[_Conn]
@@ -129,6 +162,7 @@ class ControlServer:
             return
         self._running = False
         self._events.remove_listener(self._on_event)
+        self.streams.stop()
         self._wake()
         if self._thread is not None:
             self._thread.join(5)
@@ -149,6 +183,12 @@ class ControlServer:
             os.unlink(self._path)
         except (OSError, TypeError):
             pass
+
+    def _streams_close(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        share_id = params.get("share_id")
+        if not isinstance(share_id, str) or not share_id:
+            raise DKPError("bad_request", "share_id must be a non-empty string")
+        return {"closed": self.streams.close_share(share_id)}
 
     def client_count(self) -> int:
         with self._lock:
@@ -297,6 +337,9 @@ class ControlServer:
         c.closed = True
         c.subscribed = False
         c.pending = None
+        for fd in c.fds:
+            _close_fd(fd)
+        c.fds = []
         try:
             self._sel.unregister(c.sock)
         except Exception:
@@ -310,7 +353,7 @@ class ControlServer:
         if c.closed or c.closing or c.dead:
             return
         try:
-            data = c.sock.recv(RECV_CHUNK)
+            data = _recv(c)
         except (BlockingIOError, InterruptedError):
             return
         except OSError:
@@ -319,7 +362,14 @@ class ControlServer:
             c.dead = True
             return
         c.inbuf += data
-        while len(c.inbuf) >= 4 and not (c.closing or c.dead):
+        while not (c.closing or c.dead):
+            if c.await_fd is not None:
+                if not c.inbuf:
+                    return
+                self._finish_adopt(c)
+                continue
+            if len(c.inbuf) < 4:
+                return
             (length,) = struct.unpack(">I", bytes(c.inbuf[:4]))
             limit = _p.MAX_FRAME if c.authed else MAX_PREAUTH_FRAME
             if length > limit:
@@ -376,7 +426,9 @@ class ControlServer:
             self._send(c, _response(rid, error=DKPError(
                 "bad_request", "request needs a string method and object params")))
             return
-        if method == "subscribe":
+        if method == "adopt":
+            self._begin_adopt(c, rid, params)
+        elif method == "subscribe":
             self._subscribe(c, rid, params)
         elif method == "unsubscribe":
             with self._lock:
@@ -390,6 +442,43 @@ class ControlServer:
                     "unknown_method", "unknown method %r" % (method,))))
                 return
             self._pool.submit(self._call, c, rid, handler, params)
+
+    def _begin_adopt(self, c: _Conn, rid: Any, params: Dict[str, Any]) -> None:
+        """PROTOCOL §3.7.1: the frame is read; the descriptor follows in one byte ``F``."""
+        transport = params.get("transport")
+        if transport not in ("fd", "pump"):
+            self._send(c, _response(rid, error=DKPError(
+                "bad_request", "transport %r is not available on a Unix socket" % (transport,))))
+            return
+        c.await_fd = (rid, params)
+
+    def _finish_adopt(self, c: _Conn) -> None:
+        rid, params = c.await_fd
+        c.await_fd = None
+        marker = bytes(c.inbuf[:1])
+        del c.inbuf[:1]
+        sock = None
+        try:
+            if marker != b"F":
+                c.closing = True  # the byte stream is out of step; nothing more can be trusted
+                raise DKPError("bad_request", "adopt must be followed by the byte F with a descriptor")
+            if not c.fds:
+                raise DKPError("bad_request", "adopt arrived without a descriptor (SCM_RIGHTS)")
+            sock = socket.socket(fileno=c.fds.pop(0))
+            try:
+                raw = base64.b64decode(params.get("request") or "", validate=True)
+            except (binascii.Error, ValueError, TypeError):
+                raise DKPError("bad_request", "request must be base64")
+            stream_id = self.streams.adopt(sock, params.get("kind"), raw, params.get("label"))
+            sock = None  # now owned by the stream
+            self._send(c, _response(rid, {"stream_id": stream_id}))
+        except DKPError as e:
+            self._send(c, _response(rid, error=e))
+        except Exception as e:
+            self._send(c, _response(rid, error=DKPError("internal", repr(e))))
+        finally:
+            if sock is not None:
+                sock.close()
 
     def _call(self, c: _Conn, rid: Any, handler: Handler, params: Dict[str, Any]) -> None:
         try:

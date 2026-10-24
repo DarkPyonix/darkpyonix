@@ -559,6 +559,124 @@ async fn read_loop<R: AsyncRead + Unpin>(mut reader: R, shared: Arc<Shared>) {
     }
 }
 
+/// Standard base64 with padding (PROTOCOL §3.7.1 carries the request bytes this way).
+pub fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// One byte `F` carrying `fd` in `SCM_RIGHTS` (PROTOCOL §3.7.2).
+#[cfg(unix)]
+fn sendmsg_fd(sock: std::os::fd::RawFd, fd: std::os::fd::RawFd) -> std::io::Result<()> {
+    use std::mem::size_of;
+    let mut byte = b'F';
+    let mut iov = libc::iovec {
+        iov_base: (&mut byte as *mut u8).cast::<libc::c_void>(),
+        iov_len: 1,
+    };
+    // SAFETY: `buf` is large and aligned enough for one cmsghdr plus a c_int, `msg` points
+    // only at locals that outlive the call, and CMSG_* are the libc macros for that layout.
+    unsafe {
+        let space = libc::CMSG_SPACE(size_of::<libc::c_int>() as u32) as usize;
+        let mut buf = vec![0u64; space.div_ceil(8)];
+        let mut msg: libc::msghdr = std::mem::zeroed();
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = buf.as_mut_ptr().cast::<libc::c_void>();
+        msg.msg_controllen = space as _;
+        let cmsg = libc::CMSG_FIRSTHDR(&msg);
+        (*cmsg).cmsg_level = libc::SOL_SOCKET;
+        (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(size_of::<libc::c_int>() as u32) as _;
+        std::ptr::copy_nonoverlapping(
+            (&fd as *const libc::c_int).cast::<u8>(),
+            libc::CMSG_DATA(cmsg),
+            size_of::<libc::c_int>(),
+        );
+        let n = libc::sendmsg(sock, &msg, 0);
+        if n == 1 {
+            Ok(())
+        } else if n < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "sendmsg sent no byte"))
+        }
+    }
+}
+
+/// Hand a client connection to the kernel on a fresh control connection of its own, so that no
+/// other frame can come between the `adopt` frame and its descriptor (PROTOCOL §3.7.2). The
+/// descriptor in `req` is closed when this returns; the kernel holds its own copy by then.
+#[cfg(unix)]
+pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest) -> Result<String> {
+    use std::os::fd::AsRawFd;
+    let mut stream = open_stream(control).await?;
+    let work = async {
+        let err = |what: &str, e: std::io::Error| unreachable(format!("{what}: {e}"));
+        let (hello, _) = read_frame(&mut stream).await.map_err(|e| err("handshake", e))?;
+        if hello.get("op").and_then(Value::as_str) != Some("hello")
+            || hello.get("kernel_id").and_then(Value::as_str) != Some(kernel_id)
+        {
+            return Err(unreachable(format!("{control} is not kernel {kernel_id}")));
+        }
+        let auth = json!({
+            "dkp": 1, "op": "auth",
+            "client": {"name": "darkpyonix-manager", "kind": "manager", "pid": std::process::id()},
+        });
+        stream.write_all(&encode(&auth)?).await.map_err(|e| err("handshake", e))?;
+        let (welcome, _) = read_frame(&mut stream).await.map_err(|e| err("handshake", e))?;
+        if welcome.get("op").and_then(Value::as_str) != Some("welcome") {
+            return Err(unreachable(format!("expected welcome, got {:?}", welcome.get("op"))));
+        }
+        let params = json!({
+            "kind": req.kind, "transport": req.transport, "share": null,
+            "request": base64_encode(&req.request), "label": req.label,
+        });
+        let frame = json!({"dkp": 1, "op": "request", "id": 1, "method": "adopt", "params": params});
+        stream.write_all(&encode(&frame)?).await.map_err(|e| err("adopt", e))?;
+        loop {
+            stream.writable().await.map_err(|e| err("adopt", e))?;
+            let sock = stream.as_raw_fd();
+            match stream.try_io(tokio::io::Interest::WRITABLE, || sendmsg_fd(sock, req.fd.as_raw_fd())) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(err("adopt descriptor", e)),
+            }
+        }
+        loop {
+            let (frame, _) = read_frame(&mut stream).await.map_err(|e| err("adopt", e))?;
+            if frame.get("op").and_then(Value::as_str) != Some("response") {
+                continue;
+            }
+            if frame.get("ok").and_then(Value::as_bool) == Some(true) {
+                let id = frame
+                    .get("result")
+                    .and_then(|r| r.get("stream_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                return Ok(id.to_string());
+            }
+            let e = frame.get("error").cloned().unwrap_or(Value::Null);
+            let code = e.get("code").and_then(Value::as_str).unwrap_or("internal");
+            let message = e.get("message").and_then(Value::as_str).unwrap_or(code);
+            return Err(DpxError::new(code, message));
+        }
+    };
+    tokio::time::timeout(HANDSHAKE_TIMEOUT, work)
+        .await
+        .map_err(|_| unreachable("adopt timed out"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,6 +689,90 @@ mod tests {
             t.ends_with('Z') && &t[4..5] == "-" && &t[10..11] == "T",
             "{t}"
         );
+    }
+
+    #[test]
+    fn base64_matches_rfc4648_vectors() {
+        for (raw, enc) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
+            assert_eq!(base64_encode(raw.as_bytes()), enc);
+        }
+    }
+
+    /// PR-5: the descriptor really arrives (SCM_RIGHTS) after the adopt frame, and the kernel's
+    /// answer comes back; a fake kernel on a Unix socket plays the Python side.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_pr_5_adopt_sends_the_frame_then_the_descriptor() {
+        use std::io::Write;
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::net::UnixStream;
+        let dir = std::env::temp_dir().join(format!("dpx-adopt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("k.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let kernel = std::thread::spawn(move || {
+            use std::io::Read;
+            let (mut c, _) = listener.accept().unwrap();
+            let send = |c: &mut UnixStream, v: Value| c.write_all(&encode(&v).unwrap()).unwrap();
+            let recv = |c: &mut UnixStream| -> Value {
+                let mut len = [0u8; 4];
+                c.read_exact(&mut len).unwrap();
+                let mut buf = vec![0u8; u32::from_be_bytes(len) as usize];
+                c.read_exact(&mut buf).unwrap();
+                serde_json::from_slice(&buf).unwrap()
+            };
+            send(&mut c, json!({"dkp": 1, "op": "hello", "kernel_id": "k_x"}));
+            assert_eq!(recv(&mut c)["op"], "auth");
+            send(&mut c, json!({"dkp": 1, "op": "welcome", "session": "s", "seq": 0}));
+            let req = recv(&mut c);
+            assert_eq!(req["method"], "adopt");
+            assert_eq!(req["params"]["request"], base64_encode(b"GET / HTTP/1.1
+
+"));
+            // The byte F and one descriptor follow the frame.
+            let mut byte = [0u8; 1];
+            let mut iov = libc::iovec { iov_base: byte.as_mut_ptr().cast(), iov_len: 1 };
+            let mut buf = vec![0u64; 8];
+            let fd;
+            // SAFETY: plain recvmsg into local buffers; the received descriptor is owned below.
+            unsafe {
+                use std::os::fd::AsRawFd;
+                let mut msg: libc::msghdr = std::mem::zeroed();
+                msg.msg_iov = &mut iov;
+                msg.msg_iovlen = 1;
+                msg.msg_control = buf.as_mut_ptr().cast();
+                msg.msg_controllen = 64 as _;
+                assert_eq!(libc::recvmsg(c.as_raw_fd(), &mut msg, 0), 1);
+                let cmsg = libc::CMSG_FIRSTHDR(&msg);
+                assert!(!cmsg.is_null());
+                assert_eq!((*cmsg).cmsg_type, libc::SCM_RIGHTS);
+                fd = std::ptr::read_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>());
+            }
+            assert_eq!(&byte, b"F");
+            // SAFETY: the descriptor was just received and nothing else owns it.
+            let mut handed = UnixStream::from(unsafe { OwnedFd::from_raw_fd(fd) });
+            handed.write_all(b"from the kernel").unwrap();
+            send(&mut c, json!({"dkp": 1, "op": "response", "id": 1, "ok": true, "result": {"stream_id": "st_1"}}));
+        });
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let req = dpx_core::AdoptRequest {
+            kind: "events".into(),
+            transport: "pump".into(),
+            request: b"GET / HTTP/1.1
+
+".to_vec(),
+            label: json!({"capabilities": ["read"]}),
+            fd: theirs.into(),
+        };
+        let id = adopt(path.to_str().unwrap(), "k_x", req).await.unwrap();
+        assert_eq!(id, "st_1");
+        kernel.join().unwrap();
+        let mut got = String::new();
+        let mut ours = ours;
+        std::io::Read::read_to_string(&mut ours, &mut got).unwrap();
+        assert_eq!(got, "from the kernel");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

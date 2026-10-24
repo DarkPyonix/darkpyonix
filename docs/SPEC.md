@@ -64,7 +64,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 상태 메모 (2026-10-05): 등록 파일이 없으므로(FR-D2) "종료 뒤 등록 파일 없음"은 "`kernels/` 아래에 `.json`이 없음"으로 바뀌었고, 테스트는 그것만 확인합니다.
 - 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, `kernels/` 아래에 `.json` 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
 
-### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, POSIX 커널 구현됨 #47, Windows 구현 대기)
 커널은 매니저가 `adopt`로 넘긴 연결(PROTOCOL §3.7)에 직접 응답합니다. `events`는 SSE, `ws`는 2025 WebSocket 동기화(PROTOCOL §5), `wait`는 실행 대기 응답입니다. 커널은 넘겨받은 요청 바이트를 소켓에서 읽은 것처럼 다루고, 인증하거나 토큰을 검사하지 않습니다. 능력 집합(`label.capabilities`, FR-A3)은 보낼 내용을 거르는 데만 씁니다. `history`가 없으면 출력과 실행 기록을 보내지 않습니다. `read`가 없으면 셀 소스를 비워 보냅니다. `edit`이 없으면 WebSocket 편집 메시지(`start_typing`)를 받지 않습니다. `streams.close {share_id}`가 오면 그 공유로 넘겨받은 스트림을 모두 닫습니다.
 - 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
   - POSIX에서 `SCM_RIGHTS`로 넘긴 SSE 연결에 커널이 `200 text/event-stream`과 이벤트를 쓰고, 넘긴 매니저를 `SIGKILL`로 죽인 뒤에도 같은 연결로 이벤트가 계속 옵니다.
@@ -72,7 +72,8 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
   - 넘겨받은 요청에 틀린 토큰이 들어 있어도 커널은 라벨대로 응답합니다(토큰을 보지 않음).
   - `history`가 없는 라벨(`["read"]`)의 SSE에는 `output` 이벤트가 없습니다.
   - `streams.close`가 그 `share_id`의 스트림만 닫고, 다른 스트림은 그대로입니다.
-- 테스트(계획): `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_adopted_socket_on_windows`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`
+- 테스트: `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`, `test_fr_k9_wait_is_answered_by_the_kernel`, `test_fr_k9_ws_upgrade_is_answered_with_101`(`tests/test_fr_k9_handoff.py`, 사용 가능한 모든 인터프리터). 계획 `test_fr_k9_adopted_socket_on_windows`(Windows 실행기가 필요해서 건너뜀)
+- 상태 메모: `ws`는 101과 제어 프레임까지입니다. 동기화 메시지와 `history`·`read` 걸러내기는 #49에서 붙입니다.
 
 ### FR-K10 커널 접근 토큰 보관 — `Agreed` (사용자 결정 2026-10-04, 커널 쪽 구현됨 #48)
 INTENT D17, PROTOCOL §6. 사용자 결정(2026-10-04): "커널이 들고 있게". 커널은 자기 접근 토큰(초기, 로그인, 공유, SPEC FR-A6)의 주인입니다. 매니저의 `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list` 요청에 답하고, 토큰은 SHA-256 해시와 능력 집합으로만 영속화합니다. 커널은 다시 뜨면 저장소를 읽어 옵니다. 자기 파일이 지워진 것을 알아채면 저장소를 지웁니다. 저장소는 커널만 읽고 쓰며, 위치는 노트북 옆 `__runs__/<파일>/tokens.json`입니다 [provisional, PROTOCOL §6]. 표준 라이브러리(`secrets`, `hashlib`, `hmac`, `json`, `os.replace`)만 씁니다.
@@ -336,9 +337,9 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
 - 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현 대기 #47)
-임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, FR-D2). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6, 구현 대기 #47). 끝날 때 커널은 건드리지 않습니다.
-- 테스트: `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), Rust `test_fr_m3_writes_no_registry_file`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m3_url_and_token_are_printed_on_stdout`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`와 `src/manager.rs`)
+### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현됨 #47, CI 확인 대기)
+임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, FR-D2). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6). TLS·HTTP/2·터널로 퍼 나르는 스트림도 세지 않습니다(커널이 소유하고 `Handoff` 표시를 단 응답). 끝날 때 커널은 건드리지 않습니다.
+- 테스트: `test_fr_m3_idle_counts_http_requests_only_not_handed_off_streams`(Rust `darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), Rust `test_fr_m3_writes_no_registry_file`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m3_url_and_token_are_printed_on_stdout`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`와 `src/manager.rs`)
 
 ### FR-M4 전용 모드 — `Done`
 `darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다. 2025 비밀번호 로그인과 마스터·공유 토큰 재설정은 매니저 단위이고 전용 매니저가 맡습니다(FR-A4, 구현 대기 #48). 커널 접근 토큰(FR-A6)은 매니저가 아니라 커널에 묶입니다.
@@ -348,7 +349,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 같은 사용자의 매니저 여러 개가 같은 커널에 동시에 붙을 수 있고, 각자 같은 이벤트를 받습니다.
 - 테스트: `test_fr_m5_two_managers_share_one_kernel`, Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
 
-### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, POSIX 구현됨 #47, CI 확인 대기, Windows 구현 대기)
 INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는 이벤트 스트림(`GET /api/kernels/{kernel_id}/events`), WebSocket 동기화(`GET /api/ws/kernels/{kernel_id}`), 실행 대기(`GET /api/kernels/{kernel_id}/runs/{run_ref}/wait`)를 인증하고 권한을 검사한 뒤 연결을 커널에 넘깁니다. 이미 읽은 요청 바이트와 `{capabilities, client_id, user, nickname, share_id}`를 함께 보냅니다(FR-A3). 나머지 REST 호출은 매니저가 DKP/1 요청으로 처리합니다.
 - POSIX 날 소켓: 커널의 제어 채널인 유닉스 도메인 소켓(announce의 `control`, FR-A1)으로 `SCM_RIGHTS`. 넘긴 뒤 매니저는 자기 FD를 닫습니다.
 - Windows 날 소켓: `WSADuplicateSocketW`로 만든 `WSAPROTOCOL_INFOW`를 제어 파이프 위 `adopt`의 `share`로 보냅니다.
@@ -360,7 +361,8 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
   - TLS(전용 모드)로 연 이벤트 스트림은 넘겨진 뒤에도 이벤트가 오고, 매니저가 끝나면 함께 끝납니다.
   - 틀린 토큰의 스트림 요청은 커널에 닿지 않고 `401`입니다.
   - 공유를 지우면 그 공유 토큰으로 연 스트림이 1초 안에 닫히고, 마스터 토큰으로 연 스트림은 남습니다.
-- 테스트(계획): `test_fr_m6_plain_stream_survives_manager_kill`, `test_fr_m6_tls_stream_is_pumped_and_ends_with_manager`, `test_fr_m6_unauthenticated_stream_never_reaches_kernel`, `test_fr_m6_revoking_a_share_closes_its_streams`
+- 테스트(Rust): `test_fr_m6_plain_stream_survives_manager_kill`(`darkpyonix/manager/crates/darkpyonix/tests/handoff.rs`, 진짜 매니저 프로세스와 파이썬 커널), `test_fr_m6_plain_stream_is_handed_off_and_survives_the_manager`, `test_fr_m6_tls_http2_stream_is_pumped_and_ends_with_manager`(h2c로 같은 경로를 탐), `test_fr_m6_unauthenticated_stream_never_reaches_kernel`, `test_fr_m6_revoking_a_share_closes_its_streams`, `test_fr_m6_wait_is_handed_off_with_its_run_ref`(`darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `dkp.rs`의 `test_pr_5_adopt_sends_the_frame_then_the_descriptor`
+- 상태 메모: 평문 TCP는 hyper가 읽기 전에 요청 머리를 `peek`해서 검사하고(`handoff::intercept`), 통과하면 머리를 읽어 치우고 소켓을 `SCM_RIGHTS`로 넘긴 뒤 자기 복사본을 닫습니다. 검사에 실패하면 hyper에 그대로 넘겨 평소의 `401`/`403`/`404`/`400`이 나갑니다. 커널에는 토큰을 뺀 요청을 다시 만들어 보냅니다. 아직 없음: Windows `WSADuplicateSocketW`, TLS·HTTP/2 위의 WebSocket 퍼 나르기(`/api/ws/…` 경로 자체가 #49), 공유 토큰 재발급 시 `streams.close`(재발급이 #48). 이 PR은 Rust를 컴파일하지 않고 썼으므로 CI 결과가 첫 확인입니다.
 
 ## 8. CLI (C)
 
@@ -699,7 +701,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 테스트: Rust `test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널 20개, 캐시·`refresh=true`·새 매니저의 첫 조회)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 커널 20개에서 캐시 조회 p50 2.2 ms·p99 4.9 ms, `refresh=true` p50 3.9 ms·p99 5.1 ms, 새 매니저의 첫 조회 p50 4.6 ms·최대 4.7 ms입니다.
 
-### NFR-M2 이벤트 지연 — `Agreed` (재측정 대기 #47)
+### NFR-M2 이벤트 지연 — `Agreed` (재측정 대기 #47, 넘김 구현 뒤 CI에서 측정)
 커널의 출력이 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함). 스트림 넘김(FR-M6) 뒤에는 커널이 구독자 소켓에 직접 쓰므로 그 경로로 다시 잽니다. 아래 기록은 매니저가 중계하던 구현의 값입니다.
 - 테스트: Rust `test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널의 `print` 시각부터 SSE 수신까지)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 10 ms 간격 200줄에서 p50 31 ms, p99 61 ms, 최대 63 ms입니다(50 ms 병합 창 포함).
@@ -745,14 +747,14 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
 - 테스트: `test_pr_4_unknown_fields_are_ignored`
 
-### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, POSIX 구현됨 #47, Windows 구현 대기)
 PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
 - 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
-- 테스트(계획): `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_fd_over_a_windows_pipe_is_bad_request`, `test_pr_5_adopt_without_fd_is_bad_request`
+- 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. 계획 `test_pr_5_adopt_over_a_windows_pipe_is_bad_request`(파이프가 아직 없어 건너뜀)
 
-### PR-6 공유 철회 `streams.close` — `Agreed` (사용자 결정 2026-10-03, 구현 대기 #47)
+### PR-6 공유 철회 `streams.close` — `Done`
 PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.
-- 테스트(계획): `test_pr_6_streams_close_by_share_id`
+- 테스트: `test_pr_6_streams_close_by_share_id`
 
 ### PR-7 커널 토큰 메서드 `tokens.*` — `Done` (사용자 결정 2026-10-04, #48)
 PROTOCOL §3.3, §6. `tokens.issue`, `tokens.verify`, `tokens.revoke`, `tokens.list`. 토큰 값은 `tokens.issue`의 응답에만 나오고, `tokens.list`는 토큰 값과 해시를 주지 않습니다. 모르는 `kind`나 능력 이름은 `bad_request`입니다.
