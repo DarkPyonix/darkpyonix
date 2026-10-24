@@ -124,13 +124,10 @@
 
 
     <h2 id="manager">어느 매니저를 쓰는가</h2>
-    <p>지금 CLI는 <code>~/.darkpyonix/managers/*.json</code>에서 살아 있는 매니저를 고르고, 없으면 임시 매니저를
-      띄웁니다. 에이전트가 다른 매니저의 토큰을 몰라도 같은 OS 사용자면 됩니다. 임시 매니저는 기본 120초 동안
+    <p>CLI는 <code>DARKPYONIX_MANAGER_URL</code>과 <code>DARKPYONIX_TOKEN</code>이 둘 다 있으면 그 매니저를 씁니다.
+      없으면 자기 임시 매니저를 띄우고, 그 매니저가 표준 출력에 쓰는 JSON 한 줄(<code>{url, token, pid}</code>)에서
+      주소와 토큰을 받습니다. 파일은 쓰지도 읽지도 않습니다. 토큰을 모르는 에이전트는 자기 매니저를 씁니다. 임시 매니저는 기본 120초 동안
       유휴 상태면 끝나고, 커널은 남습니다.</p>
-        <div class="warn">
-      <span class="label">변경 중</span>
-      <p>등록 파일을 없애는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>. 바뀐 뒤 CLI는 <code>DARKPYONIX_MANAGER_URL</code>과 <code>DARKPYONIX_TOKEN</code>이 있으면 그것을 쓰고, 없으면 자기 임시 매니저를 띄워 그 프로세스에서 주소와 토큰을 받습니다. 위의 명령과 동작은 바뀌지 않습니다.</p>
-    </div>
 
     <nav class="pagenav" aria-label="페이지 이동">
       <a class="prev" href="notebook-format.html"><span>이전</span>&larr; 노트북 파일</a>

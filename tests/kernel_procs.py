@@ -6,7 +6,7 @@ import signal
 import subprocess
 import time
 
-from darkpyonix import _launcher as launcher, _registry as registry
+from darkpyonix import _launcher as launcher
 
 
 def notebook(scratch: str, name: str = "nb.py") -> str:
@@ -49,7 +49,7 @@ def reap(proc: subprocess.Popen, timeout: float = 5.0) -> None:
 def wait_pid_gone(pid: int, timeout: float = 5.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not registry.pid_alive(pid):
+        if not launcher.pid_alive(pid):
             return True
         time.sleep(0.02)
     return False

@@ -35,7 +35,7 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | # | 이름 | 목표일 | 완료 조건 (SPEC) | 의존 |
 |---|---|---|---|---|
 | M0 | 문서 확정 | 2026-10-03 | INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT, OpenAPI, 클래스 다이어그램이 `develop`에 있음 | — |
-| M1 | 커널 코어 | 2026-10-06 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1(FR-D2는 2026-10-03 Withdrawn), FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
+| M1 | 커널 코어 | 2026-10-06 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1, FR-D2(2026-10-03 사용자 지시로 등록 파일 없음), FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
 | M2 | 매니저·CLI·런타임 API | 2026-10-10 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
 | M3 | 전용 매니저와 공유 | 2026-10-13 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
 | M3b | 노트북 렌더러 확장 | 2026-10-16 | `vscode-darkpyonix`(Ember 기본 설치)와 `intellij-darkpyonix`가 `.py`/`.pynb` 셀을 그리고, 매니저 API로 `__runs__`의 최근 실행 기록을 셀에 맞춰 보여 줌(FR-R4). 실행·중지와 SSE 실시간 출력. VS Code 먼저, IntelliJ 다음. 코드는 확장 저장소에 있고 여기서는 추적만 함 | M2 |

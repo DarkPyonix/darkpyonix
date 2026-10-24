@@ -1,5 +1,6 @@
-//! A fake manager serving the shapes of `docs/api/manager.openapi.yaml`, registered in a
-//! scratch `DARKPYONIX_HOME` the way a real manager registers itself.
+//! A fake manager serving the shapes of `docs/api/manager.openapi.yaml`. `cli(home)` hands its
+//! address and token to the CLI through `DARKPYONIX_MANAGER_URL` and `DARKPYONIX_TOKEN`
+//! (SPEC FR-C1); no file is written.
 
 #![allow(dead_code)]
 
@@ -97,7 +98,7 @@ pub fn kernel_id(canonical: &str) -> String {
 pub fn scratch_home(name: &str) -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../.scratch/rcli-tests").join(name);
     let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("managers")).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
     std::fs::canonicalize(root).unwrap()
 }
 
@@ -109,7 +110,7 @@ pub fn notebook(home: &Path) -> PathBuf {
 }
 
 impl Fake {
-    /// Start the fake manager and register it as `managers/<this test process pid>.json`.
+    /// Start the fake manager and make `cli(home)` use it through the environment.
     pub fn start(name: &str, scenario: Scenario) -> Fake {
         let home = scratch_home(name);
         let fake = Self::start_unregistered(home, scenario);
@@ -147,10 +148,7 @@ impl Fake {
     }
 
     pub fn register(&self) {
-        let pid = std::process::id();
-        let rec = json!({"url": self.url(), "token": TOKEN, "mode": "ephemeral", "pid": pid,
-                         "started_at": "2026-10-03T00:00:00Z"});
-        std::fs::write(self.home.join(format!("managers/{pid}.json")), rec.to_string()).unwrap();
+        known().lock().unwrap().insert(self.home.clone(), self.url());
     }
 
     pub fn file(&self) -> PathBuf {
@@ -158,12 +156,24 @@ impl Fake {
     }
 }
 
-/// The CLI with `DARKPYONIX_HOME` set and spawning disabled unless a test enables it.
+/// Fake managers by scratch home, in memory only.
+fn known() -> &'static Mutex<HashMap<PathBuf, String>> {
+    static KNOWN: std::sync::OnceLock<Mutex<HashMap<PathBuf, String>>> = std::sync::OnceLock::new();
+    KNOWN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The CLI with `DARKPYONIX_HOME` set and spawning disabled unless a test enables it. When a
+/// fake manager was registered for `home`, its url and token are passed in the environment.
 pub fn cli(home: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_darkpyonix"));
     c.env("DARKPYONIX_HOME", home)
         .env("DARKPYONIX_SELF_EXE", home.join("no-such-manager-exe"))
+        .env_remove("DARKPYONIX_MANAGER_URL")
+        .env_remove("DARKPYONIX_TOKEN")
         .current_dir(home);
+    if let Some(url) = known().lock().unwrap().get(home) {
+        c.env("DARKPYONIX_MANAGER_URL", url).env("DARKPYONIX_TOKEN", TOKEN);
+    }
     c
 }
 

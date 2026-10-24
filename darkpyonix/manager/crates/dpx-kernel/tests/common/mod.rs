@@ -56,9 +56,8 @@ pub fn interpreters() -> Vec<PathBuf> {
     out
 }
 
-pub fn backend(home: &Path, multicast: bool) -> RealBackend {
+pub fn backend(home: &Path) -> RealBackend {
     let mut cfg = Config::with_home(home);
-    cfg.multicast = multicast;
     cfg.python = Some(venv_python().to_string_lossy().into_owned());
     RealBackend::new(cfg).unwrap()
 }

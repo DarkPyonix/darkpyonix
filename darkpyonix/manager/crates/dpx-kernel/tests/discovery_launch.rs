@@ -5,7 +5,7 @@
 mod common;
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::*;
@@ -103,7 +103,7 @@ async fn fr_m2_start_kernel_is_idempotent_on_every_interpreter() {
     for python in interpreters() {
         let dir = scratch("m2");
         let home = dir.join("home");
-        let be = backend(&home, true);
+        let be = backend(&home);
         let reaper = Reaper::default();
         let nb = write_notebook(&dir, "train.py");
 
@@ -136,7 +136,7 @@ async fn fr_m2_start_kernel_is_idempotent_on_every_interpreter() {
         assert!(!second.launched);
         assert_eq!(second.kernel.pid, first.kernel.pid);
         // A second manager (fresh discovery state) sees the same kernel.
-        let other = backend(&home, true);
+        let other = backend(&home);
         let third = other.ensure(start(&nb, None)).await.unwrap();
         assert!(!third.launched);
         assert_eq!(third.kernel.pid, first.kernel.pid);
@@ -184,7 +184,7 @@ async fn fr_m2_start_kernel_is_idempotent_on_every_interpreter() {
 async fn fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait() {
     let dir = scratch("m2-fast");
     let home = dir.join("home");
-    let be = backend(&home, true);
+    let be = backend(&home);
     let reaper = Reaper::default();
     let nb = write_notebook(&dir, "nb.py");
     let mark = dir.join("exec.mark");
@@ -245,28 +245,24 @@ async fn fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait() {
     );
 }
 
-/// FR-M2 with no discovery query up front: a live kernel whose registry entry has gone
-/// missing is still attached to, not duplicated. Our launch loses the file lock (FR-K3) and
-/// exits; `ensure()` then asks the group and returns the live kernel.
+/// FR-M2 with no discovery query up front: a live kernel this manager has not heard yet is
+/// still attached to, not duplicated. Our launch loses the file lock (FR-K3) and exits;
+/// `ensure()` then asks the group and returns the live kernel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry() {
-    let dir = scratch("m2-noreg");
+async fn fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache() {
+    let dir = scratch("m2-nocache");
     let home = dir.join("home");
-    let be = backend(&home, true);
+    let be = backend(&home);
     let reaper = Reaper::default();
     let nb = write_notebook(&dir, "nb.py");
     let first = be.ensure(start(&nb, None)).await.unwrap();
     reaper.add(first.kernel.pid);
     assert!(first.launched);
-    let entry = home
-        .join("kernels")
-        .join(format!("{}.json", first.kernel.kernel_id));
-    std::fs::remove_file(&entry).unwrap();
 
-    let other = backend(&home, true); // fresh discovery cache
+    let other = backend(&home); // fresh discovery cache
     let t = Instant::now();
     let again = other.ensure(start(&nb, None)).await.unwrap();
-    eprintln!("MEASURE ensure() of a live kernel without registry entry: {:?}", t.elapsed());
+    eprintln!("MEASURE ensure() of a live kernel unknown to the cache: {:?}", t.elapsed());
     assert!(!again.launched);
     assert_eq!(again.kernel.pid, first.kernel.pid);
     for p in kernel_pids_for(&nb) {
@@ -279,8 +275,8 @@ async fn fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry() {
 async fn fr_m2_two_managers_starting_one_file_get_one_kernel() {
     let dir = scratch("m2-race");
     let home = dir.join("home");
-    let a = backend(&home, true);
-    let b = backend(&home, true);
+    let a = backend(&home);
+    let b = backend(&home);
     let reaper = Reaper::default();
     let nb = write_notebook(&dir, "nb.py");
     let (ra, rb) = tokio::join!(a.ensure(start(&nb, None)), b.ensure(start(&nb, None)));
@@ -369,14 +365,12 @@ async fn fr_m2_start_timeout_when_no_announce() {
 async fn fr_d1_query_finds_all_kernels() {
     let dir = scratch("d1");
     let home = dir.join("home");
-    let be = backend(&home, true);
+    let be = backend(&home);
     let reaper = Reaper::default();
     let ids = launch_three(&be, &dir, &reaper).await;
 
-    // Multicast only: a Discovery over an empty registry dir counts only datagram answers.
-    let empty = dir.join("empty-registry");
-    std::fs::create_dir_all(&empty).unwrap();
-    let mcast = Discovery::new(be.user_tag().to_string(), empty.clone(), true);
+    // Datagram answers only: a fresh Discovery has no cache and reads no file.
+    let mcast = Discovery::new(be.user_tag().to_string());
     let n = mcast
         .query(None, Duration::from_millis(200), &HashSet::new())
         .await;
@@ -392,7 +386,7 @@ async fn fr_d1_query_finds_all_kernels() {
     let expect: HashSet<String> = ids.iter().cloned().collect();
     let mut lat = Vec::new();
     for _ in 0..20 {
-        let d = Discovery::new(be.user_tag().to_string(), empty.clone(), true);
+        let d = Discovery::new(be.user_tag().to_string());
         let t = Instant::now();
         assert_eq!(d.query(None, Duration::from_millis(200), &expect).await, 3);
         lat.push(t.elapsed());
@@ -408,10 +402,10 @@ async fn fr_d1_query_finds_all_kernels() {
         "FR-D1: answers within 200 ms"
     );
 
-    // A fresh manager's list(refresh) (registry + multicast, early exit when all known answered).
+    // A fresh manager's list(refresh) (multicast, early exit when all known answered).
     let mut lat = Vec::new();
     for _ in 0..10 {
-        let fresh = backend(&home, true);
+        let fresh = backend(&home);
         let t = Instant::now();
         assert_eq!(fresh.list(true).await.unwrap().len(), 3);
         lat.push(t.elapsed());
@@ -424,7 +418,7 @@ async fn fr_d1_query_finds_all_kernels() {
     );
 
     // A query with another user's tag gets no answer.
-    let other = Discovery::new("ffffffffffffffff".into(), empty, true);
+    let other = Discovery::new("ffffffffffffffff".into());
     assert_eq!(
         other
             .query(None, Duration::from_millis(200), &HashSet::new())
@@ -450,40 +444,55 @@ async fn fr_d1_query_finds_all_kernels() {
     assert_eq!(left, ids[1..].to_vec());
 }
 
+fn json_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(json_files(&p));
+            } else if p.extension().is_some_and(|x| x == "json") {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fr_d2_registry_fallback_finds_kernels() {
+async fn fr_d2_manager_reads_no_registry_file() {
     let dir = scratch("d2");
     let home = dir.join("home");
-    let launcher = backend(&home, true);
+    let launcher = backend(&home);
     let reaper = Reaper::default();
     let ids = launch_three(&launcher, &dir, &reaper).await;
-    let reg_only = backend(&home, false); // DARKPYONIX_DISCOVERY=registry
-    let mut found: Vec<_> = reg_only
-        .list(true)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|k| k.kernel_id)
-        .collect();
-    found.sort();
-    assert_eq!(found, ids);
-    // Registry-only is also how other users' kernels are kept out.
-    let stranger = backend(&dir.join("other-home"), false);
+    // Nothing under kernels/ or managers/ is a registry entry.
+    let kernels: Vec<_> = json_files(&home.join("kernels"));
+    assert!(kernels.is_empty(), "{kernels:?}");
+    assert!(!home.join("managers").exists());
+    // A planted entry for a live kernel is not read: another home's manager sees nothing.
+    let stranger_home = dir.join("other-home");
+    let stranger = backend(&stranger_home);
+    std::fs::create_dir_all(stranger_home.join("kernels")).unwrap();
+    let planted = launcher.get(&ids[0]).await.unwrap();
+    std::fs::write(
+        stranger_home.join("kernels").join(format!("{}.json", ids[0])),
+        serde_json::to_vec(&serde_json::json!({"kernel_id": ids[0], "pid": planted.pid, "user_tag": stranger.user_tag()})).unwrap(),
+    )
+    .unwrap();
     assert!(stranger.list(true).await.unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fr_d2_stale_registry_is_pruned() {
-    let dir = scratch("d2-prune");
+async fn fr_d2_killed_kernel_vanishes_from_the_list() {
+    let dir = scratch("d2-kill");
     let home = dir.join("home");
-    let be = backend(&home, true);
+    let be = backend(&home);
     let reaper = Reaper::default();
     let ids = launch_three(&be, &dir, &reaper).await;
     let victim = be.get(&ids[1]).await.unwrap();
-    process::kill_pid(victim.pid).unwrap(); // kill -9: no bye, registry entry left behind
+    process::kill_pid(victim.pid).unwrap(); // kill -9: no bye
     wait_dead(victim.pid).await;
-    let entry = home.join("kernels").join(format!("{}.json", ids[1]));
-    assert!(entry.exists());
     let left: Vec<_> = be
         .list(true)
         .await
@@ -492,14 +501,14 @@ async fn fr_d2_stale_registry_is_pruned() {
         .map(|k| k.kernel_id)
         .collect();
     assert_eq!(left, vec![ids[0].clone(), ids[2].clone()]);
-    assert!(!entry.exists(), "dead kernel's registry entry is deleted");
+    assert!(json_files(&home.join("kernels")).is_empty());
 }
 
 #[tokio::test]
 async fn fr_r4_document_is_built_by_the_embedded_python() {
     let dir = scratch("r4");
     let home = dir.join("home");
-    let be = backend(&home, false);
+    let be = backend(&home);
     let nb = dir.join("doc.py");
     std::fs::write(&nb, "# %% [markdown]\n# Title\n\n# %%\nx = 1\n").unwrap();
     let doc = be.document(&nb.to_string_lossy(), true).await.unwrap();
