@@ -50,20 +50,20 @@ type St = State<Arc<AppState>>;
 
 // Documented status codes per operation (NFR-M3). Anything else becomes 500 internal.
 const OP_GET_MANAGER: &[u16] = &[200, 401, 500];
-const OP_LIST_KERNELS: &[u16] = &[200, 400, 401, 500];
+const OP_LIST_KERNELS: &[u16] = &[200, 400, 401, 403, 500];
 const OP_START_KERNEL: &[u16] = &[200, 201, 400, 401, 403, 500, 504];
-const OP_GET_KERNEL: &[u16] = &[200, 401, 404, 500, 502];
+const OP_GET_KERNEL: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_SHUTDOWN: &[u16] = &[202, 400, 401, 403, 404, 500, 502];
 const OP_INTERRUPT: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_RESTART: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_NAMESPACE: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
-const OP_KERNEL_DOCUMENT: &[u16] = &[200, 401, 404, 500, 502];
+const OP_KERNEL_DOCUMENT: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_DOCUMENT: &[u16] = &[200, 400, 401, 403, 404, 500];
 const OP_LIST_RUNS: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_START_RUN: &[u16] = &[202, 400, 401, 403, 404, 409, 500, 502];
 const OP_GET_RUN: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_CANCEL_RUN: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
-const OP_EVENTS: &[u16] = &[200, 400, 401, 404, 500, 502];
+const OP_EVENTS: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_LIST_SHARES: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_CREATE_SHARE: &[u16] = &[201, 400, 401, 403, 404, 500, 502];
 const OP_CREATE_SHARE_TOKEN: &[u16] = &[201, 400, 401, 403, 404, 500, 502, 504];
