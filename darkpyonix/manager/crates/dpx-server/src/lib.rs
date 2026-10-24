@@ -14,6 +14,7 @@ pub mod api;
 pub mod auth;
 pub mod docs;
 pub mod error;
+pub mod handoff;
 pub mod proxy;
 pub mod sse;
 pub mod tls;
@@ -194,6 +195,10 @@ async fn track(State(activity): State<Arc<Activity>>, mut req: Request, next: Ne
     let guard = activity.enter();
     req.extensions_mut().insert(activity.clone());
     let resp = next.run(req).await;
+    if resp.extensions().get::<handoff::Handoff>().is_some() {
+        // The kernel owns this stream (FR-M6); only HTTP requests keep an ephemeral manager alive.
+        return resp;
+    }
     resp.map(|inner| Body::new(GuardedBody { inner, _guard: guard }))
 }
 
@@ -403,7 +408,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         avatars: Mutex::new(std::collections::HashMap::new()),
         shutdown: rx.clone(),
     });
-    let app = router(state, proxy, activity.clone());
+    let app = router(state.clone(), proxy, activity.clone());
 
     let registry_file = match mode {
         Mode::Ephemeral => {
@@ -460,6 +465,8 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
             let svc = TowerToHyperService::new(svc);
             let watcher = graceful.watcher();
             let acceptor = acceptor.clone();
+            #[cfg(unix)]
+            let (hand_state, hand_activity) = (state.clone(), activity.clone());
             tokio::spawn(async move {
                 let builder = auto::Builder::new(TokioExecutor::new());
                 match acceptor {
@@ -471,6 +478,11 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
                         let _ = watcher.watch(conn.into_owned()).await;
                     }
                     None => {
+                        // FR-M6: stream requests on plain TCP go to the kernel by descriptor.
+                        #[cfg(unix)]
+                        let Some(stream) = handoff::intercept(stream, &hand_state, &hand_activity).await else {
+                            return;
+                        };
                         let conn = builder.serve_connection_with_upgrades(TokioIo::new(stream), svc);
                         let _ = watcher.watch(conn.into_owned()).await;
                     }

@@ -21,7 +21,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use dpx_core::{DpxError, Ensured, EventStream, KernelBackend, KernelInfo, Result, StartKernel};
+use dpx_core::{AdoptRequest, DpxError, Ensured, EventStream, KernelBackend, KernelInfo, Result, StartKernel};
 use serde_json::{json, Value};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -446,6 +446,25 @@ impl KernelBackend for RealBackend {
         let python = launch::resolve_python(None, self.cfg.python.as_deref())?;
         let root = self.runtime_root()?;
         launch::build_document(&python, &self.cfg.home, &root, &canonical, viewer_outputs).await
+    }
+
+    fn supports_handoff(&self) -> bool {
+        cfg!(unix)
+    }
+
+    #[allow(unused_variables)]
+    async fn adopt(&self, kernel_id: &str, req: AdoptRequest) -> Result<String> {
+        #[cfg(unix)]
+        {
+            let entry = self
+                .discovery
+                .find(kernel_id)
+                .await
+                .ok_or_else(|| not_found(kernel_id))?;
+            return dkp::adopt(&kernel_info(&entry).control, kernel_id, req).await;
+        }
+        #[cfg(not(unix))]
+        Err(DpxError::new("internal", "stream handoff needs a Unix socket (Windows is a follow-up of #47)"))
     }
 
     async fn kill(&self, kernel_id: &str) -> Result<()> {

@@ -762,12 +762,17 @@ pub async fn get_run(
     State(st): St,
     Extension(p): Extension<Principal>,
     Path((kid, run_ref)): Path<(String, String)>,
+    headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Permission::Viewer2)?;
         check_run_ref(&run_ref)?;
+        if st.backend.supports_handoff() {
+            let plan = plan_handoff(&st, &p, HandoffKind::Wait, &kid, Some(run_ref.as_str()), &uri, &headers).await?;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
+        }
         let summary = match query(&uri)?.get("format").map(String::as_str) {
             None | Some("ipynb") => false,
             Some("summary") => true,
@@ -852,6 +857,11 @@ pub async fn stream_events(
             check_client_id(id)?;
         }
         check_nickname(nickname.as_deref())?;
+        if st.backend.supports_handoff() {
+            // FR-M6: the kernel answers; this connection (TLS, HTTP/2, tunnel) is pumped.
+            let plan = plan_handoff(&st, &p, HandoffKind::Events, &kid, None, &uri, &headers).await?;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
+        }
         let events = st.backend.subscribe(&kid, since).await?;
         let hide_outputs = !p.at_least(Permission::Viewer2);
         let guard = client_id.map(|id| {
@@ -952,6 +962,7 @@ pub async fn revoke_share(
         if !store.revoke(&kid, &share_id).map_err(|e| ApiError::internal(e.to_string()))? {
             return Err(gone);
         }
+        close_share_streams(&st, &kid, &share_id).await;
         Ok(StatusCode::NO_CONTENT.into_response())
     };
     finish(r.await, OP_REVOKE_SHARE)
@@ -1346,6 +1357,121 @@ pub async fn wait_run(
         ok_json(StatusCode::OK, Value::Object(out))
     };
     finish(r.await, OP_WAIT_RUN)
+}
+
+// ------------------------------------------------------------------ Stream handoff (FR-M6)
+
+/// The three streams a manager hands to the kernel (PROTOCOL §3.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffKind {
+    Events,
+    Ws,
+    Wait,
+}
+
+impl HandoffKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HandoffKind::Events => "events",
+            HandoffKind::Ws => "ws",
+            HandoffKind::Wait => "wait",
+        }
+    }
+}
+
+/// What the kernel gets besides the request bytes.
+pub struct HandoffPlan {
+    pub kind: HandoffKind,
+    pub kernel_id: String,
+    /// `{capabilities, client_id, user, nickname, share_id}` (PROTOCOL §3.7.1).
+    pub label: Value,
+}
+
+/// FR-A3 capability names of a principal. The manager still stores the viewer ladder (#48,
+/// #49 move it to capability sets); the kernel only filters by these names (FR-K9).
+pub fn capabilities(p: &Principal) -> Vec<&'static str> {
+    let mut caps = vec!["read"];
+    if p.at_least(Permission::Viewer2) {
+        caps.push("history");
+    }
+    if p.at_least(Permission::Viewer3) {
+        caps.push("execute");
+    }
+    if p.at_least(Permission::Editor) {
+        caps.push("edit");
+    }
+    if p.at_least(Permission::Admin) {
+        caps.push("manage");
+    }
+    caps
+}
+
+/// The checks the three stream operations make, without touching the kernel's stream: who may
+/// see which kernel, the minimum permission, valid parameters. An `Err` is the HTTP answer.
+pub async fn plan_handoff(
+    st: &AppState,
+    p: &Principal,
+    kind: HandoffKind,
+    kid: &str,
+    run_ref: Option<&str>,
+    uri: &Uri,
+    headers: &HeaderMap,
+) -> ApiResult<HandoffPlan> {
+    check_id(p, kid)?;
+    let q = query(uri)?;
+    match kind {
+        HandoffKind::Events => {
+            if let Some(v) = q.get("since") {
+                v.trim().parse::<u64>().map_err(|_| ApiError::invalid("since: expected an integer >= 0"))?;
+            }
+        }
+        HandoffKind::Wait => {
+            require(p, Permission::Viewer2)?;
+            check_run_ref(run_ref.unwrap_or(""))?;
+            if let Some(v) = q.get("timeout") {
+                v.trim()
+                    .parse::<i64>()
+                    .map_err(|_| ApiError::invalid("timeout: expected an integer number of seconds"))?;
+            }
+        }
+        HandoffKind::Ws => {}
+    }
+    let client_id = q
+        .get("client_id")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .or_else(|| header_str(headers, CLIENT_HEADER))
+        .map(String::from);
+    let nickname = q
+        .get("nickname")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .or_else(|| header_str(headers, NICKNAME_HEADER))
+        .map(String::from);
+    if let Some(id) = &client_id {
+        check_client_id(id)?;
+    }
+    check_nickname(nickname.as_deref())?;
+    visible(st, p, kid).await?;
+    let who = client_value(st, p, kid, client_id.as_deref(), nickname.as_deref());
+    let label = json!({
+        "capabilities": capabilities(p),
+        "client_id": client_id,
+        "user": who["user"],
+        "nickname": nickname.unwrap_or_default(),
+        "share_id": p.share_id,
+    });
+    Ok(HandoffPlan { kind, kernel_id: kid.to_string(), label })
+}
+
+/// A share was revoked: the kernel closes the streams it adopted for that share (PROTOCOL §3.7.4).
+async fn close_share_streams(st: &AppState, kid: &str, share_id: &str) {
+    if !st.backend.supports_handoff() {
+        return;
+    }
+    if let Err(e) = st.backend.request(kid, "streams.close", json!({ "share_id": share_id })).await {
+        tracing::debug!("streams.close for {share_id} on {kid} failed: {e}");
+    }
 }
 
 // ------------------------------------------------------------------ fallbacks
