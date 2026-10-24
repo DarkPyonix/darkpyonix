@@ -63,7 +63,7 @@
       <table>
         <thead><tr><th scope="col">Mode</th><th scope="col">Listens on</th><th scope="col">Lifetime</th><th scope="col">Tokens</th></tr></thead>
         <tbody>
-          <tr><td>ephemeral (default)</td><td><code>127.0.0.1</code>, random port</td><td>exits after <code>--idle-timeout</code> seconds without requests or streams (120 by default)</td><td>one token, written to <code>managers/&lt;pid&gt;.json</code> (0600)</td></tr>
+          <tr><td>ephemeral (default)</td><td><code>127.0.0.1</code>, random port</td><td>exits after <code>--idle-timeout</code> seconds without requests or streams (120 by default)</td><td>one token, printed on stdout as <code>{url, token, pid}</code>; no file</td></tr>
           <tr><td>dedicated (<code>--dedicated</code>)</td><td>the host and port you set</td><td>runs until stopped</td><td>a master token and share tokens, stored hashed in <code>manager.db</code></td></tr>
         </tbody>
       </table>

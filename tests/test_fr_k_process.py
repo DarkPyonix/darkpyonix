@@ -14,7 +14,7 @@ import pytest
 
 from conftest import SRC_ROOT
 from darkpyonix import _home
-from darkpyonix import _discovery as discovery, _launcher as launcher, _lock as lock, _registry as registry
+from darkpyonix import _discovery as discovery, _launcher as launcher, _lock as lock
 from darkpyonix._protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
 from darkpyonix._runs import RunStore
 
@@ -233,7 +233,7 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
     try:
         info = launcher.wait_for_announce(kid, pid=pid, timeout=15)
         assert info is not None and info["pid"] == pid
-        assert registry.pid_alive(pid)
+        assert launcher.pid_alive(pid)
         # Detached: its own session, no controlling terminal shared with us.
         assert os.getsid(pid) == pid and os.getsid(pid) != os.getsid(0)
         log = os.path.join(_home.kernels_dir(), kid + ".log")
@@ -244,7 +244,7 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
         if not wait_pid_gone(pid):
             kill(pid, signal.SIGKILL)
             wait_pid_gone(pid)
-    # A clean shutdown removes the registry entry (PROTOCOL §2.5).
+    # No registry file is written or left behind (FR-D2).
     assert not os.path.exists(os.path.join(_home.kernels_dir(), kid + ".json"))
 
 
@@ -298,7 +298,6 @@ def test_fr_k7_hard_restart_keeps_kernel_id(python, dp_home, scratch):
 
 
 def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
-    monkeypatch.delenv("DARKPYONIX_DISCOVERY", raising=False)   # bye travels by multicast
     path = write_notebook(scratch, "shutdown.py", """
         import time
         # %% [code]
@@ -314,7 +313,6 @@ def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
     try:
         info = launcher.wait_for_announce(kid, pid=proc.pid, timeout=15)
         assert info is not None
-        assert os.path.exists(registry.entry_path(kid))
         c = connect(info)
         try:
             acc = c.request("run", {"mode": "all"})
@@ -337,7 +335,7 @@ def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
         reap(proc)
     assert any(m.get("op") == "bye" and m.get("kernel_id") == kid and m.get("pid") == proc.pid
                for m in seen)
-    assert not os.path.exists(registry.entry_path(kid))
+    assert not os.path.exists(os.path.join(_home.kernels_dir(), kid + ".json"))
     # The OS lock is gone: a new holder gets it at once (the lock file itself may remain).
     probe = lock.FileLock(lock.lock_path(kid))
     assert probe.acquire()
