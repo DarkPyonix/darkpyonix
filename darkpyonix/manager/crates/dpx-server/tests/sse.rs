@@ -76,7 +76,7 @@ async fn test_pr3_resume_older_than_the_ring_reports_replay_truncated() {
 async fn test_fr_a3_viewer1_events_omit_outputs() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, _) = s.kernel("train.py");
-    let share = s.admin().post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await;
+    let share = s.admin().post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"]})).await;
     let token = share.body["token"].as_str().unwrap();
     // ?token= works for share tokens too (EventSource).
     let r = reqwest::get(format!("{}/api/kernels/{kid}/events?token={token}", s.url)).await.unwrap();

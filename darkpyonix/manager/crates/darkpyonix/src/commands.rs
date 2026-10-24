@@ -209,7 +209,7 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
             Ok(EXIT_OK)
         }
         Command::Share(a) => {
-            let mut body = json!({"permission": a.permission});
+            let mut body = json!({"capabilities": a.capabilities});
             if let Some(l) = a.label {
                 body["label"] = json!(l);
             }
@@ -225,7 +225,10 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
             })?;
             let human = format!(
                 "{} share for {label}\nurl    {}\ntoken  {}\n(the token is shown only once)\n",
-                render::str_field(&v, "permission"),
+                v.get("capabilities")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("+"))
+                    .unwrap_or_default(),
                 render::str_field(&v, "url"),
                 render::str_field(&v, "token"),
             );
