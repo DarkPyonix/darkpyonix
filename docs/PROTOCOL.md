@@ -202,7 +202,7 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
 | `ws` | `GET /api/ws/kernels/{kernel_id}` (Upgrade) | `101 Switching Protocols`, §5의 2025 WebSocket 동기화 |
 | `wait` | `GET /api/kernels/{kernel_id}/runs/{run_ref}/wait` | 실행이 끝나거나 `timeout`이 지나면 JSON 한 번(SPEC FR-S7) |
 
-짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. POSIX 커널은 구현됨(#47), Windows `share`와 `ws`의 동기화 메시지(§5)는 구현 대기(#47, #49).
+짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. POSIX 커널은 구현됨(#47), Windows `share`는 구현 대기(#47). `ws`의 동기화 메시지(§5)는 POSIX 커널에 구현됨(#49).
 
 #### 3.7.1 `adopt` 요청
 
@@ -247,7 +247,7 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 
 - `events`: `200`, `Content-Type: text/event-stream`, `Cache-Control: no-cache`. 본문은 `: darkpyonix events <kernel_id>`로 시작하고, 이벤트마다 `id: <seq>`, `event: <type>`, `data: <JSON>`입니다(`replay_truncated`는 `id` 없음). 이어 받기는 `Last-Event-ID` 헤더가 `since` 쿼리보다 앞섭니다. 15초 동안 아무 일이 없으면 `: keepalive` 주석을 씁니다. `since`가 정수가 아니면 `400` JSON입니다. 라벨에 `history`가 없으면 `output`과 `output.clear` 이벤트를 보내지 않습니다.
 - `wait`: `timeout`(1~300초, 기본 60) 안에 끝나거나 시간이 지나면 `200 application/json` 한 번(`Content-Length`)입니다. 본문은 `runs.wait` 결과에 `next`(끝나지 않았으면 다시 부를 경로, 끝났으면 `null`)를 더한 것입니다. `history`가 없으면 `run`은 `null`입니다. 오류는 `{code, message}` JSON이고 `not_found`는 `404`, `bad_request`는 `400`입니다.
-- `ws`: `101 Switching Protocols`와 `Sec-WebSocket-Accept` 뒤에 ping·close 제어 프레임에 답합니다. 동기화 메시지(§5)는 #49에서 붙입니다.
+- `ws`: `101 Switching Protocols`와 `Sec-WebSocket-Accept` 뒤에 §5의 2025 동기화 메시지를 주고받습니다(구현됨 #49).
 - `client_id`가 있는 `events`와 `ws` 스트림이 열려 있는 동안 커널이 10초마다 자기 `presence.update`를 부릅니다. 매니저의 하트비트는 필요 없습니다.
 - 커널은 스트림마다 스레드 하나를 쓰고, 보내기 제한 시간은 10초입니다. 느린 클라이언트는 자기 스트림만 막습니다.
 - 제어 채널은 인증 전 연결이 보낸 FD를 모두 닫고, 아직 `adopt`가 가져가지 않은 FD는 최대 4개까지만 쥡니다.
@@ -283,7 +283,7 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 | `presence.leave` | `client, request_id?` | `{}` |
 | `runs.wait` | `run_id \| "latest" \| "current", timeout` | 끝나면 실행 요약, 아니면 `{status: "running", progress?}` |
 
-오류 코드 추가: `conflict`, `locked`. 2026-10-03까지 있던 `forbidden`(커널 쪽 권한 검사)은 지웁니다(구현 대기 #49).
+오류 코드 추가: `conflict`, `locked`. 2026-10-03까지 있던 `forbidden`(커널 쪽 권한 검사)은 지웠습니다(#49). 커널은 `forbidden`을 내지 않습니다.
 
 | event type | data |
 |---|---|
@@ -311,7 +311,7 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 
 ## 5. 2025 WebSocket 동기화
 
-SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`을 `/api/ws/kernels/{kernel_id}`로 되살립니다. 매니저가 토큰과 권한을 확인하고 연결을 넘기면(§3.7, `kind: "ws"`), 커널이 업그레이드에 `101 Switching Protocols`로 답하고 이 절의 메시지를 주고받습니다. 구현 대기(#49).
+SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`을 `/api/ws/kernels/{kernel_id}`로 되살립니다. 매니저가 토큰과 권한을 확인하고 연결을 넘기면(§3.7, `kind: "ws"`), 커널이 업그레이드에 `101 Switching Protocols`로 답하고 이 절의 메시지를 주고받습니다. 구현됨(#49, 커널 `darkpyonix/kernel/_wsync.py`).
 
 ### 5.1 프레임
 

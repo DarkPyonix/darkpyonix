@@ -503,6 +503,23 @@ impl KernelBackend for FakeBackend {
                 }
                 Ok(json!({"revoked": n, "closed": 0}))
             }
+            "tokens.list" => {
+                let all = self.tokens.lock().unwrap();
+                let shares: Vec<Value> = all
+                    .get(kernel_id)
+                    .map(|l| {
+                        l.iter()
+                            .filter(|x| x.share_id.is_some())
+                            .map(|x| {
+                                let revoked = if x.revoked { json!("2026-10-04T00:00:01Z") } else { Value::Null };
+                                json!({"share_id": x.share_id, "capabilities": x.capabilities, "label": null,
+                                       "created_at": "2026-10-04T00:00:00Z", "expires_at": null, "revoked_at": revoked})
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(json!({"shares": shares}))
+            }
             "status" => Ok(serde_json::to_value(&k.info).unwrap()),
             "doc.snapshot" => {
                 let cells: Vec<Value> = (0..k.doc.cells.len()).map(|i| cell_json(&k.doc, i)).collect();
@@ -631,7 +648,7 @@ impl KernelBackend for FakeBackend {
                 entry["client_id"] = json!(cid);
                 entry["nickname"] = c["nickname"].clone();
                 entry["user"] = c["user"].clone();
-                entry["permission"] = c["permission"].clone();
+                entry["capabilities"] = c["capabilities"].clone();
                 entry["last_seen"] = json!(now());
                 match c.get("avatar") {
                     Some(a) => entry["avatar"] = a.clone(),

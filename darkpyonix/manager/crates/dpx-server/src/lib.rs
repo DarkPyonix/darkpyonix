@@ -204,6 +204,12 @@ async fn track(State(activity): State<Arc<Activity>>, mut req: Request, next: Ne
 
 // ------------------------------------------------------------------ auth gate (FR-A2)
 
+/// `/api/ws/kernels/{id}`: the browser WebSocket API cannot set headers either.
+fn is_ws_path(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    matches!(parts.as_slice(), ["", "api", "ws", "kernels", id] if !id.is_empty())
+}
+
 fn is_events_path(path: &str) -> bool {
     let mut parts = path.split('/');
     parts.next() == Some("")
@@ -259,12 +265,13 @@ async fn kernel_principal(st: &AppState, kernel_id: &str, token: &str) -> Result
     if v["valid"].as_bool() != Some(true) {
         return Ok(None);
     }
-    let caps: Vec<String> = v["capabilities"]
+    let names: Vec<String> = v["capabilities"]
         .as_array()
         .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
         .unwrap_or_default();
+    let Some(caps) = auth::Caps::from_names(&names) else { return Ok(None) };
     Ok(Some(Principal {
-        permission: auth::tier_for(&caps),
+        caps,
         kernel_id: Some(kernel_id.to_string()),
         share_id: v["share_id"].as_str().map(String::from),
         label: v["label"].as_str().map(String::from),
@@ -288,7 +295,7 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
             scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim().to_string())
         });
     // `?token=` only on the events stream (EventSource cannot set headers).
-    let token = bearer.or_else(|| if is_events_path(&path) { query_token(req.uri()) } else { None });
+    let token = bearer.or_else(|| if is_events_path(&path) || is_ws_path(&path) { query_token(req.uri()) } else { None });
     let found = match st.auth.lookup(token.as_deref()) {
         auth::Lookup::Found(p) => Some(p),
         auth::Lookup::Revoked => {
@@ -353,6 +360,8 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .route("/api/kernels/{kernel_id}/runs", get(api::list_runs).post(api::start_run))
         .route("/api/kernels/{kernel_id}/runs/{run_ref}", get(api::get_run).delete(api::cancel_run))
         .route("/api/kernels/{kernel_id}/events", get(api::stream_events))
+        .route("/api/ws/kernels/{kernel_id}", get(api::sync_ws))
+        .route("/api/kernels/{kernel_id}/tokens/share", post(api::create_share_token))
         .route("/api/kernels/{kernel_id}/shares", get(api::list_shares).post(api::create_share))
         .route("/api/kernels/{kernel_id}/shares/{share_id}", delete(api::revoke_share))
         .route("/api/kernels/{kernel_id}/cells", post(api::create_cell))

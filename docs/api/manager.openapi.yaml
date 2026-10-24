@@ -48,7 +48,7 @@ info:
 
     A stream handed off as a raw socket survives the manager (INTENT D6, SPEC FR-M6,
 
-    PROTOCOL §3.7). Status: planned, issue #47.
+    PROTOCOL §3.7). Served since issue #47.
 
 
     **Planned operations.** Operations marked `x-darkpyonix-status: planned` are designed but not
@@ -121,7 +121,7 @@ tags:
 
     `/api/kernels/{kernel_id}/tokens/…` are access tokens bound to one kernel (SPEC FR-A6, FR-A5).
 
-    Status: served except `POST /api/kernels/{kernel_id}/tokens/share` (planned, issue #49).
+    Served.
 
     '
 paths:
@@ -351,6 +351,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -415,6 +417,8 @@ paths:
                 $ref: '#/components/schemas/Kernel'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -615,6 +619,8 @@ paths:
                 $ref: '#/components/schemas/Document'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -882,6 +888,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -940,6 +948,8 @@ paths:
                 label:
                   type: string
                   maxLength: 120
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
                 expires_at:
                   type: string
                   format: date-time
@@ -1341,7 +1351,7 @@ paths:
           type: string
       - name: poll_sequence
         in: query
-        description: The 2025 polling sequence number, starting at 1. Status planned, issue #49.
+        description: The 2025 polling sequence number, starting at 1.
         schema:
           type: integer
           minimum: 1
@@ -1487,8 +1497,6 @@ paths:
       tags:
       - Sharing
       operationId: createShareToken
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Issue a share token for one kernel (2025 shape)
       description: 'The 2025 `POST /kernels/{kernel_id}/tokens/share` (`get_sharing_settings`). The same operation as
 
@@ -1520,6 +1528,12 @@ paths:
                   description: The 2025 body field; must equal the path parameter when present.
                 user_permission:
                   $ref: '#/components/schemas/UserPermission'
+                label:
+                  type: string
+                  maxLength: 120
+                expires_at:
+                  type: string
+                  format: date-time
       responses:
         '201':
           description: The share token (shown once).
@@ -1615,8 +1629,6 @@ paths:
       tags:
       - Events
       operationId: syncWebSocket
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 49
       x-darkpyonix-handoff: kernel
       summary: 2025 WebSocket synchronization (cells, history, locks, focus, execution)
       description: 'The 2025 `/ws/kernels/{kernel_id}?token={token}`, restored by user decision 2026-10-03
@@ -1633,7 +1645,7 @@ paths:
 
         `execution_started`, `execution_output`, `execution_complete`, `execution_error`,
 
-        `execution_interrupted` out. Status: planned, issue #49.
+        `execution_interrupted` out. Served since issue #49.
 
         '
       security:
@@ -1656,6 +1668,8 @@ paths:
           description: Switching Protocols; the kernel speaks the 2025 sync messages (PROTOCOL §5).
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1966,7 +1980,7 @@ components:
 
         field: a token without that capability answers `403 forbidden` (2025 `INSUFFICIENT_PERMISSION`).
 
-        SPEC FR-A3, FR-S8. Status: planned, issue #49.
+        SPEC FR-A3, FR-S8. Served since issue #49.
 
         '
     KernelStatus:
@@ -2634,7 +2648,7 @@ components:
           additionalProperties: true
     WaitResult:
       description: Fields `poll_sequence`, `next_poll_sequence` and `auto_repoll` restore the 2025 alarm response
-        (SPEC FR-S7). Status planned, issue #49.
+        (SPEC FR-S7). Served since issue #49.
       type: object
       required:
       - status
