@@ -130,9 +130,21 @@ fn wait_answer(s: &Value) -> Value {
     json!({"status": s["status"], "run_id": s["run_id"], "run": s})
 }
 
+/// A kernel access token as the fake kernel holds it (PROTOCOL §6): the real kernel keeps hashes.
+#[derive(Clone, Debug)]
+pub struct FakeToken {
+    pub token: String,
+    pub kind: String,
+    pub capabilities: Vec<String>,
+    pub share_id: Option<String>,
+    pub revoked: bool,
+}
+
 #[derive(Default)]
 pub struct FakeBackend {
     kernels: Mutex<HashMap<String, FakeKernel>>,
+    /// Kernel id → tokens, kept apart from the managers so that two managers share them.
+    pub tokens: Mutex<HashMap<String, Vec<FakeToken>>>,
     /// method name (or "get", "list", "ensure", "subscribe", "document", "kill") → error.
     pub fail: Mutex<HashMap<String, DpxError>>,
     pub calls: Mutex<Vec<(String, String, Value)>>,
@@ -211,6 +223,11 @@ impl FakeBackend {
         };
         self.kernels.lock().unwrap().insert(kid.clone(), k);
         kid
+    }
+
+    /// A kernel request made directly on the backend, as a test double for a kernel-side action.
+    pub async fn request_for_test(&self, kid: &str, method: &str, params: Value) -> Value {
+        KernelBackend::request(self, kid, method, params).await.expect("fake kernel request")
     }
 
     pub fn set_linger(&self, kid: &str) {
@@ -444,6 +461,47 @@ impl KernelBackend for FakeBackend {
                     ks.remove(kernel_id);
                 }
                 Ok(json!({}))
+            }
+            "tokens.issue" => {
+                let mut all = self.tokens.lock().unwrap();
+                let list = all.entry(kernel_id.to_string()).or_default();
+                let n = list.len();
+                let kind = params["kind"].as_str().unwrap_or("").to_string();
+                let caps: Vec<String> = params["capabilities"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let share_id = (kind == "share").then(|| format!("s_{n:016x}"));
+                let token = format!("kt_{}_{n}", &kernel_id[2..10]);
+                list.push(FakeToken { token: token.clone(), kind, capabilities: caps, share_id: share_id.clone(), revoked: false });
+                Ok(match share_id {
+                    Some(id) => json!({"token": token, "share_id": id}),
+                    None => json!({"token": token}),
+                })
+            }
+            "tokens.verify" => {
+                let all = self.tokens.lock().unwrap();
+                let t = params["token"].as_str().unwrap_or("");
+                match all.get(kernel_id).and_then(|l| l.iter().find(|x| x.token == t)) {
+                    None => Ok(json!({"valid": false, "revoked": false})),
+                    Some(x) if x.revoked => Ok(json!({"valid": false, "revoked": true, "kind": x.kind})),
+                    Some(x) => Ok(json!({
+                        "valid": true, "revoked": false, "kind": x.kind,
+                        "capabilities": x.capabilities, "share_id": x.share_id
+                    })),
+                }
+            }
+            "tokens.revoke" => {
+                let mut all = self.tokens.lock().unwrap();
+                let id = params["share_id"].as_str().unwrap_or("");
+                let mut n = 0;
+                for x in all.entry(kernel_id.to_string()).or_default().iter_mut() {
+                    if x.share_id.as_deref() == Some(id) && !x.revoked {
+                        x.revoked = true;
+                        n += 1;
+                    }
+                }
+                Ok(json!({"revoked": n, "closed": 0}))
             }
             "status" => Ok(serde_json::to_value(&k.info).unwrap()),
             "doc.snapshot" => {

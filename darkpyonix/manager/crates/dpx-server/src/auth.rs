@@ -1,4 +1,4 @@
-//! Manager tokens and permissions (SPEC FR-A2, FR-A3, FR-M4).
+//! Manager tokens, password and permissions (SPEC FR-A2, FR-A3, FR-A4, FR-M4).
 //!
 //! The master token is random per manager process unless configured. Share tokens exist only
 //! on a dedicated manager; they are stored as SHA-256 hashes in `<home>/manager.db` and shown
@@ -46,6 +46,42 @@ impl Permission {
     }
 }
 
+/// The five capabilities of SPEC FR-A3, in their canonical order.
+pub const CAPABILITIES: [&str; 5] = ["read", "history", "execute", "edit", "manage"];
+
+/// Bridge until the permission model of #49 lands: the tier that a capability set maps onto.
+/// All five are `admin`; `edit` with `execute` is `editor`; `execute` is `viewer3`; `history`
+/// is `viewer2`; anything else is `viewer1`. Replaced by capability checks in #49.
+pub fn tier_for(caps: &[String]) -> Permission {
+    let has = |c: &str| caps.iter().any(|x| x == c);
+    if CAPABILITIES.iter().all(|c| has(c)) {
+        Permission::Admin
+    } else if has("edit") && has("execute") {
+        Permission::Editor
+    } else if has("execute") {
+        Permission::Viewer3
+    } else if has("history") {
+        Permission::Viewer2
+    } else {
+        Permission::Viewer1
+    }
+}
+
+/// `read+history` to `["read", "history"]`; `None` unless the names are known, unique and in
+/// the canonical order of [`CAPABILITIES`] (SPEC FR-A4).
+pub fn parse_token_type(s: &str) -> Option<Vec<String>> {
+    let names: Vec<&str> = s.split('+').collect();
+    let mut last: Option<usize> = None;
+    for n in &names {
+        let i = CAPABILITIES.iter().position(|c| c == n)?;
+        if last.is_some_and(|l| i <= l) {
+            return None;
+        }
+        last = Some(i);
+    }
+    Some(names.into_iter().map(String::from).collect())
+}
+
 /// Who is calling: the master token (`admin`) or a share bound to one kernel.
 #[derive(Debug, Clone)]
 pub struct Principal {
@@ -54,11 +90,15 @@ pub struct Principal {
     pub share_id: Option<String>,
     /// The share's label (shown as the user name of its clients, FR-S4).
     pub label: Option<String>,
+    /// The manager's master token (FR-A4).
+    pub master: bool,
+    /// A kernel's initial token (FR-A6): it may set the first manager password (FR-A4).
+    pub initial: bool,
 }
 
 impl Principal {
     pub fn admin() -> Self {
-        Self { permission: Permission::Admin, kernel_id: None, share_id: None, label: None }
+        Self { permission: Permission::Admin, kernel_id: None, share_id: None, label: None, master: true, initial: false }
     }
     pub fn at_least(&self, p: Permission) -> bool {
         self.permission >= p
@@ -83,6 +123,102 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         return false;
     }
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+// ------------------------------------------------------------------ password (SPEC FR-A4)
+
+const PBKDF2_ITERATIONS: u32 = 120_000;
+const PASSWORD_SCHEME: &str = "pbkdf2-sha256";
+
+struct HmacSha256 {
+    inner: Sha256,
+    outer: Sha256,
+}
+
+impl HmacSha256 {
+    fn new(key: &[u8]) -> Self {
+        let mut k = [0u8; 64];
+        if key.len() > 64 {
+            k[..32].copy_from_slice(&Sha256::digest(key));
+        } else {
+            k[..key.len()].copy_from_slice(key);
+        }
+        let mut ipad = [0x36u8; 64];
+        let mut opad = [0x5cu8; 64];
+        for ((ip, op), kb) in ipad.iter_mut().zip(opad.iter_mut()).zip(k.iter()) {
+            *ip ^= kb;
+            *op ^= kb;
+        }
+        let mut inner = Sha256::new();
+        inner.update(ipad);
+        let mut outer = Sha256::new();
+        outer.update(opad);
+        Self { inner, outer }
+    }
+
+    fn mac(&self, msg: &[u8]) -> [u8; 32] {
+        let mut i = self.inner.clone();
+        i.update(msg);
+        let digest = i.finalize();
+        let mut o = self.outer.clone();
+        o.update(digest);
+        o.finalize().into()
+    }
+}
+
+/// PBKDF2-HMAC-SHA256 with one 32-byte output block (RFC 8018).
+fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32) -> [u8; 32] {
+    let prf = HmacSha256::new(password);
+    let mut first = salt.to_vec();
+    first.extend_from_slice(&1u32.to_be_bytes());
+    let mut u = prf.mac(&first);
+    let mut t = u;
+    for _ in 1..iterations {
+        u = prf.mac(&u);
+        for (a, b) in t.iter_mut().zip(u.iter()) {
+            *a ^= *b;
+        }
+    }
+    t
+}
+
+/// `pbkdf2-sha256$<iterations>$<salt hex>$<hash hex>`: a salted slow hash (SPEC FR-A4).
+pub fn hash_password(password: &str) -> String {
+    let mut salt = [0u8; 16];
+    rand::rng().fill_bytes(&mut salt);
+    let dk = pbkdf2_sha256(password.as_bytes(), &salt, PBKDF2_ITERATIONS);
+    format!("{PASSWORD_SCHEME}${PBKDF2_ITERATIONS}${}${}", hex::encode(salt), hex::encode(dk))
+}
+
+pub fn check_password(password: &str, stored: &str) -> bool {
+    let parts: Vec<&str> = stored.split('$').collect();
+    if parts.len() != 4 || parts[0] != PASSWORD_SCHEME {
+        return false;
+    }
+    let (Ok(iterations), Ok(salt), Ok(want)) = (parts[1].parse::<u32>(), hex::decode(parts[2]), hex::decode(parts[3]))
+    else {
+        return false;
+    };
+    if iterations == 0 {
+        return false;
+    }
+    ct_eq(&pbkdf2_sha256(password.as_bytes(), &salt, iterations), &want)
+}
+
+/// How a token looked up against this manager's own records.
+pub enum Lookup {
+    Found(Principal),
+    /// A manager shared token that was reset (`401 token_revoked`).
+    Revoked,
+    Unknown,
+}
+
+/// Result of checking a password against the manager's.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PasswordCheck {
+    NotSet,
+    Ok,
+    Wrong,
 }
 
 /// A share as listed (`Share` schema). The token itself is never stored.
@@ -117,7 +253,19 @@ impl ShareStore {
                  expires_unix  INTEGER,
                  token_sha256  TEXT NOT NULL UNIQUE
              );
-             CREATE INDEX IF NOT EXISTS shares_kernel ON shares(kernel_id);",
+             CREATE INDEX IF NOT EXISTS shares_kernel ON shares(kernel_id);
+             CREATE TABLE IF NOT EXISTS manager_auth (
+                 key   TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS manager_shared (
+                 share_id      TEXT PRIMARY KEY,
+                 token_type    TEXT NOT NULL,
+                 capabilities  TEXT NOT NULL,
+                 token_sha256  TEXT NOT NULL UNIQUE,
+                 created_at    TEXT NOT NULL,
+                 revoked_at    TEXT
+             );",
         )
         .map_err(std::io::Error::other)?;
         Ok(Self { conn: Mutex::new(conn) })
@@ -151,7 +299,73 @@ impl ShareStore {
             kernel_id: Some(kernel_id),
             share_id: Some(share_id),
             label,
+            master: false,
+            initial: false,
         })
+    }
+
+    fn auth_get(&self, key: &str) -> Option<String> {
+        self.lock()
+            .query_row("SELECT value FROM manager_auth WHERE key = ?1", params![key], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    fn auth_put(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.lock().execute(
+            "INSERT INTO manager_auth (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// A manager shared token (FR-A4): found, reset (revoked) or unknown.
+    pub fn shared_lookup(&self, token: &str) -> Lookup {
+        let digest = sha256_hex(token);
+        let row: Option<(String, String, Option<String>)> = self
+            .lock()
+            .query_row(
+                "SELECT share_id, capabilities, revoked_at FROM manager_shared WHERE token_sha256 = ?1",
+                params![digest],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        let Some((share_id, caps, revoked)) = row else { return Lookup::Unknown };
+        if revoked.is_some() {
+            return Lookup::Revoked;
+        }
+        let caps: Vec<String> = caps.split('+').map(String::from).collect();
+        Lookup::Found(Principal {
+            permission: tier_for(&caps),
+            kernel_id: None,
+            share_id: Some(share_id),
+            label: None,
+            master: false,
+            initial: false,
+        })
+    }
+
+    /// Replaces the manager shared token of one type: the old one is marked revoked, a new one is
+    /// stored hashed. Returns `(share_id, token, created_at)`.
+    pub fn reset_shared(&self, token_type: &str) -> rusqlite::Result<(String, String, String)> {
+        let share_id = format!("s_{}", random_hex(8));
+        let token = random_hex(32);
+        let created = util::now_iso();
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE manager_shared SET revoked_at = ?2 WHERE token_type = ?1 AND revoked_at IS NULL",
+            params![token_type, created],
+        )?;
+        conn.execute(
+            "INSERT INTO manager_shared (share_id, token_type, capabilities, token_sha256, created_at)
+             VALUES (?1, ?2, ?2, ?3, ?4)",
+            params![share_id, token_type, sha256_hex(&token), created],
+        )?;
+        Ok((share_id, token, created))
     }
 
     pub fn list(&self, kernel_id: &str) -> rusqlite::Result<Vec<Share>> {
@@ -217,23 +431,92 @@ impl ShareStore {
     }
 }
 
-/// Token check for every request: master first (constant time), then shares.
+/// The master token: its hash, and its value while this process knows it.
+struct Master {
+    sha256: [u8; 32],
+    plain: Option<String>,
+}
+
+/// Token check for every request: master first (constant time), then manager shared tokens,
+/// then per-kernel shares. Also holds the manager's one password (SPEC FR-A4).
 pub struct Auth {
-    master_sha256: [u8; 32],
+    master: Mutex<Master>,
     pub shares: Option<ShareStore>,
 }
 
 impl Auth {
+    /// A master token reset through the API is kept as a hash in `manager.db` and wins over
+    /// `master_token` after a restart (its value is then unknown until the next reset).
     pub fn new(master_token: &str, shares: Option<ShareStore>) -> Self {
-        Self { master_sha256: Sha256::digest(master_token.as_bytes()).into(), shares }
+        let stored = shares
+            .as_ref()
+            .and_then(|s| s.auth_get("master_sha256"))
+            .and_then(|h| hex::decode(h).ok())
+            .and_then(|b| <[u8; 32]>::try_from(b).ok());
+        let master = match stored {
+            Some(sha256) => Master { sha256, plain: None },
+            None => Master { sha256: Sha256::digest(master_token.as_bytes()).into(), plain: Some(master_token.to_string()) },
+        };
+        Self { master: Mutex::new(master), shares }
     }
 
-    pub fn authenticate(&self, token: Option<&str>) -> Option<Principal> {
-        let token = token.filter(|t| !t.is_empty())?;
+    fn master(&self) -> std::sync::MutexGuard<'_, Master> {
+        self.master.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    pub fn lookup(&self, token: Option<&str>) -> Lookup {
+        let Some(token) = token.filter(|t| !t.is_empty()) else { return Lookup::Unknown };
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        if ct_eq(&digest, &self.master_sha256) {
-            return Some(Principal::admin());
+        if ct_eq(&digest, &self.master().sha256) {
+            return Lookup::Found(Principal::admin());
         }
-        self.shares.as_ref()?.authenticate(token)
+        let Some(shares) = self.shares.as_ref() else { return Lookup::Unknown };
+        match shares.shared_lookup(token) {
+            Lookup::Unknown => match shares.authenticate(token) {
+                Some(p) => Lookup::Found(p),
+                None => Lookup::Unknown,
+            },
+            other => other,
+        }
+    }
+
+    pub fn password_set(&self) -> bool {
+        self.shares.as_ref().is_some_and(|s| s.auth_get("password").is_some())
+    }
+
+    /// Slow (PBKDF2): call from `spawn_blocking`.
+    pub fn check_password(&self, password: &str) -> PasswordCheck {
+        match self.shares.as_ref().and_then(|s| s.auth_get("password")) {
+            None => PasswordCheck::NotSet,
+            Some(stored) if check_password(password, &stored) => PasswordCheck::Ok,
+            Some(_) => PasswordCheck::Wrong,
+        }
+    }
+
+    /// Slow (PBKDF2): call from `spawn_blocking`.
+    pub fn set_password(&self, password: &str) -> std::io::Result<()> {
+        let shares = self.shares.as_ref().ok_or_else(|| std::io::Error::other("no manager.db"))?;
+        shares.auth_put("password", &hash_password(password)).map_err(std::io::Error::other)
+    }
+
+    /// The master token for `GET /api/auth`. When only its hash is known (after a restart that
+    /// followed a reset), a new master token is issued, because a hash cannot be shown.
+    pub fn login_master(&self) -> std::io::Result<String> {
+        if let Some(p) = self.master().plain.clone() {
+            return Ok(p);
+        }
+        self.rotate_master()
+    }
+
+    /// Issues a new master token; the old one stops working.
+    pub fn rotate_master(&self) -> std::io::Result<String> {
+        let shares = self.shares.as_ref().ok_or_else(|| std::io::Error::other("no manager.db"))?;
+        let token = random_hex(32);
+        let sha256: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+        shares.auth_put("master_sha256", &hex::encode(sha256)).map_err(std::io::Error::other)?;
+        let mut m = self.master();
+        m.sha256 = sha256;
+        m.plain = Some(token.clone());
+        Ok(token)
     }
 }

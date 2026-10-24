@@ -29,6 +29,7 @@ from darkpyonix._protocol import (
     EXIT_ALREADY_RUNNING, KERNEL_VERSION, DKPError, canonical_path, kernel_id_for, now_iso,
 )
 from darkpyonix._runs import RunStore, runs_dir_for
+from darkpyonix._tokens import TokenStore
 
 FINISHED = ("ok", "error", "interrupted", "cancelled", "crashed")
 
@@ -50,6 +51,7 @@ class Kernel(object):
         self.events = EventLog()
         self.collab = None  # type: Optional[DocumentState]
         self.store = None  # type: Optional[RunStore]
+        self.tokens = None  # type: Optional[TokenStore]
         self.executor = None  # type: Optional[Executor]
         self.server = None
         self.discovery = None  # type: Optional[DiscoveryResponder]
@@ -197,6 +199,8 @@ class Kernel(object):
             self.collab = DocumentState(self.path, self.events.append,
                                         seq_provider=lambda: self.events.seq)
             self.extra_handlers.update(self.collab.handlers())
+            self.tokens = TokenStore(self.path)  # FR-K10; the handoff code sets close_streams
+            self.extra_handlers.update(self.tokens.handlers())
             self.store = RunStore(self.path, self.kernel_id)
             crashed = self.store.recover_crashed()
             if crashed:
@@ -209,6 +213,7 @@ class Kernel(object):
             from darkpyonix._server import ControlServer
             self.server = ControlServer(self.kernel_id, self.events, self.handlers())
             self.collab.start()
+            self.tokens.start()
             self.server.start()
             self.discovery = DiscoveryResponder(self.info, self.user_tag)
             self.discovery.start()
@@ -234,6 +239,7 @@ class Kernel(object):
             lambda: self.discovery.stop(bye=True) if self.discovery is not None else None,
             lambda: self.server.stop() if self.server is not None else None,
             lambda: self.collab.stop() if self.collab is not None else None,
+            lambda: self.tokens.stop() if self.tokens is not None else None,
             lambda: self.lock.release(),
         ):
             try:
