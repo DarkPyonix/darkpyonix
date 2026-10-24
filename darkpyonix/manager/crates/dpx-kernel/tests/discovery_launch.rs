@@ -370,7 +370,7 @@ async fn fr_d1_query_finds_all_kernels() {
     let ids = launch_three(&be, &dir, &reaper).await;
 
     // Datagram answers only: a fresh Discovery has no cache and reads no file.
-    let mcast = Discovery::new(be.user_tag().to_string());
+    let mcast = Discovery::new_for_home(be.user_tag().to_string(), &home);
     let n = mcast
         .query(None, Duration::from_millis(200), &HashSet::new())
         .await;
@@ -386,7 +386,7 @@ async fn fr_d1_query_finds_all_kernels() {
     let expect: HashSet<String> = ids.iter().cloned().collect();
     let mut lat = Vec::new();
     for _ in 0..20 {
-        let d = Discovery::new(be.user_tag().to_string());
+        let d = Discovery::new_for_home(be.user_tag().to_string(), &home);
         let t = Instant::now();
         assert_eq!(d.query(None, Duration::from_millis(200), &expect).await, 3);
         lat.push(t.elapsed());

@@ -17,7 +17,7 @@ from kernel_procs import connect, kill, wait_pid_gone, write_notebook
 from darkpyonix import format as dpformat
 from darkpyonix import _document as document, _launcher as launcher, _runs as runs
 from darkpyonix._model import CellRecord, Run, RunRequest
-from darkpyonix._protocol import DKPError, kernel_id_for, new_run_id, now_iso
+from darkpyonix._protocol import DKPError, kernel_id_for, new_run_id, now_iso, run_start_iso
 
 
 def sha(text):
@@ -31,7 +31,7 @@ def make_run(path, run_id=None, mode="all", cells=None, params=None):
     req = RunRequest(run_id or new_run_id(), mode=mode, cells=cells, params=params)
     run = Run(req, kernel_id_for(path), os.path.abspath(path), "f" * 64, PY, "testhost")
     run.status = "running"
-    run.started_at = now_iso()
+    run.started_at = run_start_iso()
     return run
 
 
@@ -327,6 +327,20 @@ def test_fr_r2_update_is_throttled(scratch):
 
 # ---------------------------------------------------------------- FR-R3
 
+def test_fr_r3_runs_started_in_the_same_second_keep_start_order(scratch):
+    path = notebook_file(scratch)
+    store = runs.RunStore(path, kernel_id_for(path))
+    made = []
+    for _ in range(30):
+        run = make_run(path)
+        store.begin(run)
+        finish(store, run)
+        made.append(run.run_id)
+    assert len({r[:15] for r in made}) < len(made)  # several runs share a second
+    assert [s["run_id"] for s in store.list(limit=30)] == made[::-1]
+    assert store.magic().latest["metadata"]["darkpyonix"]["run_id"] == made[-1]
+
+
 def test_fr_r3_runs_magic_exposes_logs_as_json(scratch):
     path = notebook_file(scratch)
     store = runs.RunStore(path, kernel_id_for(path))
@@ -340,8 +354,6 @@ def test_fr_r3_runs_magic_exposes_logs_as_json(scratch):
     finish(store, first)
 
     second = make_run(path)
-    while second.run_id == first.run_id:
-        second = make_run(path)
     store.begin(second)
     add_cell(second, 1, "print(2)", [stream("2\n")])
     store.update(second)
@@ -438,7 +450,7 @@ def test_fr_r3_runs_magic_attribute_access_in_kernel_cell(scratch, dp_home, pyth
     try:
         info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=15.0)
         assert info is not None, "kernel did not announce"
-        c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+        c = KernelClient(info["control"], info["kernel_id"], name="test", kind="cli")
         c.connect()
         c.subscribe()
 

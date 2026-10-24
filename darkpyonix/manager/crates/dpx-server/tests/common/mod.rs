@@ -194,7 +194,7 @@ impl FakeBackend {
             host: "test".into(),
             kernel_version: "0.1.0".into(),
             runs_dir: String::new(),
-            port: 5555,
+            control: String::new(),
         };
         let k = FakeKernel {
             info,

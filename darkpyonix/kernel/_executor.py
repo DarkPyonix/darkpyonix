@@ -37,7 +37,7 @@ from darkpyonix._capture import FdCapture, OutputRouter, StreamCapture
 from darkpyonix._collab import by_of
 from darkpyonix._display import format_bundle
 from darkpyonix._model import CellRecord, Run, RunRequest
-from darkpyonix._protocol import DKPError, new_run_id, now_iso
+from darkpyonix._protocol import DKPError, new_run_id, now_iso, run_start_iso
 
 _KERNEL_DIR = os.path.dirname(os.path.abspath(__file__))
 _FUTURE_MASK = 0
@@ -525,7 +525,7 @@ class Executor(object):
         run = Run(req, self.kernel_id, self.path, doc.file_sha256 if doc else "",
                   self.python_info, self.host)
         run.status = "running"
-        run.started_at = now_iso()
+        run.started_at = run_start_iso()
         hostctx._set_params(req.params)
         if doc is not None:
             if req.mode == "all":

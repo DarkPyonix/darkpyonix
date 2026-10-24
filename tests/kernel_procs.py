@@ -69,7 +69,7 @@ def write_notebook(scratch: str, name: str, text: str) -> str:
 def connect(info):
     """A connected, subscribed ``KernelClient`` for an announce body."""
     from darkpyonix._client import KernelClient
-    c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+    c = KernelClient(info["control"], info["kernel_id"], name="test", kind="cli")
     c.connect()
     c.subscribe()
     return c
