@@ -374,3 +374,18 @@ fn test_fr_m3_url_and_token_are_printed_on_stdout() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+#[test]
+fn test_fr_c1_spawned_manager_log_has_no_token_and_is_0600() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch_home("log_no_token");
+    let o = cli(&home).args(["ps"]).env("DARKPYONIX_SELF_EXE", env!("CARGO_BIN_EXE_darkpyonix")).output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let log = home.join("manager.log");
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    // The ephemeral manager's token is only on its stdout pipe, never in its stderr log.
+    let body = std::fs::read_to_string(&log).unwrap();
+    assert!(!body.contains("token"), "manager.log must not mention a token: {body}");
+    assert!(!body.contains("master token"), "{body}");
+}

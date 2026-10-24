@@ -76,9 +76,8 @@ pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
             use std::io::Write;
             let _ = std::io::stdout().flush();
         }
-        eprintln!("darkpyonix manager listening on {}", handle.url);
-        if dedicated_random_token {
-            eprintln!("master token (shown once; set DARKPYONIX_MANAGER_TOKEN to fix it): {}", handle.token);
+        for line in stderr_notices(&handle.url, &handle.token, dedicated_random_token) {
+            eprintln!("{line}");
         }
         dpx_server::run_until_signal(handle).await;
         Ok(())
@@ -90,9 +89,27 @@ pub fn startup_line(url: &str, token: &str, pid: u32) -> String {
     serde_json::json!({"url": url, "token": token, "pid": pid}).to_string()
 }
 
+/// Lines a manager writes to stderr. An ephemeral manager's stderr is `manager.log`, so the
+/// token appears only for a dedicated manager (a terminal), never for an ephemeral one
+/// (SPEC FR-C1).
+pub fn stderr_notices(url: &str, token: &str, show_master_token: bool) -> Vec<String> {
+    let mut v = vec![format!("darkpyonix manager listening on {url}")];
+    if show_master_token {
+        v.push(format!("master token (shown once; set DARKPYONIX_MANAGER_TOKEN to fix it): {token}"));
+    }
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_fr_c1_ephemeral_stderr_notices_carry_no_token() {
+        let n = stderr_notices("http://127.0.0.1:5000", "sekret", false);
+        assert!(n.iter().all(|l| !l.contains("sekret")), "{n:?}");
+        assert!(stderr_notices("u", "sekret", true).iter().any(|l| l.contains("sekret")));
+    }
 
     #[test]
     fn test_fr_m3_url_and_token_are_printed_on_stdout() {
