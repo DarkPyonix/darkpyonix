@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import datetime
 import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -31,7 +30,6 @@ QUERY_TIMEOUT = 0.2            # FR-D1: all kernels answer within 200 ms
 # §3 control channel
 MAX_FRAME = 64 * 1024 * 1024
 HANDSHAKE_TIMEOUT = 5.0
-NONCE_BYTES = 32
 
 # §3.4 events
 EVENT_RING_MAX_EVENTS = 10000
@@ -42,7 +40,7 @@ STREAM_COALESCE_SECONDS = 0.05
 EXIT_ALREADY_RUNNING = 3
 
 ERROR_CODES = (
-    "auth_failed", "bad_request", "unknown_method", "busy", "not_found",
+    "bad_request", "unknown_method", "busy", "not_found",
     "frame_too_large", "shutting_down", "internal",
     "conflict", "locked", "forbidden",  # PROTOCOL §4 (collaborative document)
 )
@@ -85,21 +83,6 @@ def kernel_id_for(path: str) -> str:
     """``"k_" + hex(SHA-256(canonical path as UTF-8))[:20]`` (FR-K2)."""
     digest = hashlib.sha256(canonical_path(path).encode("utf-8")).hexdigest()
     return "k_" + digest[:20]
-
-
-# ---------------------------------------------------------------- auth (§3.2)
-
-def new_nonce() -> bytes:
-    return secrets.token_bytes(NONCE_BYTES)
-
-
-def auth_mac(key: bytes, nonce: bytes, kernel_id: str) -> str:
-    """``hex(HMAC-SHA256(user.key, nonce || kernel_id))``."""
-    return hmac.new(key, nonce + kernel_id.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def verify_mac(key: bytes, nonce: bytes, kernel_id: str, mac: str) -> bool:
-    return hmac.compare_digest(auth_mac(key, nonce, kernel_id), str(mac))
 
 
 # ---------------------------------------------------------------- frames (§3.1)

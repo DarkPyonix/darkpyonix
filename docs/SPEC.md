@@ -387,7 +387,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ## 9. 인증과 공유 (A)
 
-### FR-A1 커널 인증 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #55)
+### FR-A1 커널 인증 — `Agreed` (사용자 결정 2026-10-04, POSIX 구현됨 #55, Windows 이름 있는 파이프 구현 대기)
 INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 방법은 사용자가 고른 "OS가 알려 주는 상대 계정 확인"입니다. 커널의 제어 채널은 POSIX 유닉스 도메인 소켓과 Windows 이름 있는 파이프이고, 커널은 연결마다 상대 UID(POSIX)나 SID(Windows)가 자기 계정과 같은지 OS에 묻습니다. 매니저도 커널 쪽 계정을 같은 방법으로 확인합니다. 키 파일과 HMAC은 없습니다. 클라이언트의 인증과 권한 검사는 매니저가 하고, 커널은 매니저를 믿습니다.
 - 수용 기준(사용 가능한 모든 인터프리터, POSIX와 Windows):
   - 다른 OS 계정의 프로세스가 커널의 소켓이나 파이프에 붙으면 커널은 프레임을 하나도 보내지 않고 닫습니다.
@@ -396,7 +396,8 @@ INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 �
   - 매니저는 소켓이나 파이프 건너편이 다른 계정이면 요청을 보내지 않고 그 커널을 `kernel_unreachable`로 둡니다.
   - 런타임 홈에 `user.key`가 생기지 않습니다.
   - 다른 계정 시험은 두 번째 OS 계정을 만들 수 있는 CI에서 돕니다.
-- 테스트(계획): `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`. 지금의 `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`는 지웁니다(#55).
+- 상태 (#55): 유닉스 도메인 소켓, 상대 UID 확인(Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`, 그 밖의 BSD `getpeereid`), `user.key`와 HMAC 삭제, `user_tag`를 OS 계정에서 만들기까지 코드와 시험이 있습니다. Windows 파이프와 SID 확인은 아직 없어서 Windows 커널은 시작하지 못하고 `Done`이 아닙니다(후속 이슈). 실제로 다른 OS 계정을 쓰는 시험(`..._real_uid`)은 root로 도는 CI에서만 돕니다. 이 저장소의 로컬 실행에서는 건너뜁니다.
+- 테스트: Python `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_other_account_is_refused_by_peer_identity_real_uid`(root 필요), `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`, `test_fr_a1_client_refuses_a_socket_of_another_kernel`, `test_fr_a1_user_tag_comes_from_the_os_account`, `test_fr_a1_long_home_falls_back_to_a_short_private_socket_dir`; Rust `test_fr_a1_manager_refuses_a_kernel_of_another_account`, `test_fr_a1_same_account_socket_passes_the_peer_check`(`dkp.rs`), `pr_2_socket_of_another_kernel_id_is_refused`. 지웠습니다(#55): `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`, `test_fr_a1_mac_verification`.
 
 ### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 넷만 `Authorization: Bearer` 없이 열립니다. 초기 토큰 발급(FR-A6)은 인증이 없고, 매니저 로그인 `GET /api/auth`와 마스터 토큰 재설정 `PUT /api/auth/tokens/master`(FR-A4)는 `Authorization: Basic`의 비밀번호로, 커널 로그인 `POST /api/kernels/{kernel_id}/tokens/auth`(FR-A6)는 본문의 비밀번호로 인증합니다.
@@ -724,9 +725,9 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 PROTOCOL §3.1. 64 MiB를 넘는 프레임은 거절합니다.
 - 테스트: `test_pr_1_oversized_frame_is_refused`, `test_pr_1_frame_too_large_closes_connection`
 
-### PR-2 핸드셰이크 — `Agreed` (새 채널에서 다시 통과 대기 #55)
+### PR-2 핸드셰이크 — `Agreed` (유닉스 소켓 채널에서 통과, Windows 파이프 채널 대기 #55)
 PROTOCOL §3.2. 상대 계정 확인(FR-A1)이 먼저이고, 그다음 `hello`/`auth`/`welcome`입니다. 5초 제한. 비밀값이 없으므로 상수 시간 비교도 없습니다.
-- 테스트: `test_pr_2_handshake_times_out`(지금은 TCP 채널에서 통과. 소켓·파이프 채널로 옮긴 뒤 다시 통과해야 `Done`)
+- 테스트: `test_pr_2_handshake_times_out`(유닉스 소켓 채널에서 통과. Windows 파이프에서도 통과해야 `Done`)
 
 ### PR-3 이벤트 재전송 — `Done`
 PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있어도 이벤트를 내는 쪽은 막히지 않습니다(클라이언트별 송신 버퍼, 64 MiB를 넘으면 그 클라이언트를 끊음).

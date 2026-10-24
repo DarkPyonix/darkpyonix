@@ -15,7 +15,6 @@ serves until SIGTERM and writes its announce body to ANNOUNCE_JSON.
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
 import struct
@@ -52,16 +51,17 @@ async def _read(reader: asyncio.StreamReader) -> Dict[str, Any]:
 
 
 class FakeKernel:
-    def __init__(self, path: str, key: bytes, ring_max: int = 10000) -> None:
+    def __init__(self, path: str, ring_max: int = 10000) -> None:
         self.path = protocol.canonical_path(path)
         self.kernel_id = protocol.kernel_id_for(self.path)
-        self.key = key
         self.ring_max = ring_max
         self.pid = os.getpid()
-        self.port = 0
+        self.control = ""
         self.started_at = protocol.now_iso()
         self.calls = []  # type: List[tuple]
         self.connections = 0
+        self.open = 0
+        self.conn_file = None  # type: Optional[str]
         self.status = "idle"
         self.run_id = None  # type: Optional[str]
         self.queue = []  # type: List[str]
@@ -82,14 +82,24 @@ class FakeKernel:
         def run() -> None:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
+            from darkpyonix import _home
+            self.control = _home.control_path(self.kernel_id)
+            try:
+                os.unlink(self.control)
+            except FileNotFoundError:
+                pass
             self._server = self._loop.run_until_complete(
-                asyncio.start_server(self._handle, "127.0.0.1", 0))
-            self.port = self._server.sockets[0].getsockname()[1]
+                asyncio.start_unix_server(self._handle, self.control))
+            os.chmod(self.control, 0o600)
             ready.set()
             self._loop.run_forever()
             self._server.close()
             self._loop.run_until_complete(self._server.wait_closed())
             self._loop.close()
+            try:
+                os.unlink(self.control)
+            except OSError:
+                pass
 
         self._thread = threading.Thread(target=run, name="fake-kernel", daemon=True)
         self._thread.start()
@@ -136,9 +146,9 @@ class FakeKernel:
 
     def announce(self) -> Dict[str, Any]:
         from darkpyonix import _home
-        return {"dkp": 1, "op": "announce", "user_tag": _home.user_tag(self.key),
+        return {"dkp": 1, "op": "announce", "user_tag": _home.user_tag(),
                 "kernel_id": self.kernel_id, "path": self.path,
-                "pid": self.pid, "port": self.port, "status": self.status, "run_id": self.run_id,
+                "pid": self.pid, "control": self.control, "status": self.status, "run_id": self.run_id,
                 "python": {"version": "3.11.9", "implementation": "CPython", "executable": sys.executable},
                 "dkp_kernel_version": protocol.KERNEL_VERSION, "started_at": self.started_at, "host": "fake"}
 
@@ -266,18 +276,18 @@ class FakeKernel:
         raise protocol.DKPError("unknown_method", method)
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        nonce = protocol.new_nonce()
+        from darkpyonix import _peer
+        if not _peer.same_account(writer.get_extra_info("socket")):
+            writer.close()  # FR-A1: another account gets no frame
+            return
         writer.write(protocol.encode({"op": "hello", "kernel_id": self.kernel_id,
-                                      "nonce": base64.b64encode(nonce).decode(),
                                       "kernel_version": protocol.KERNEL_VERSION}))
+        counted = False
         try:
-            auth = await asyncio.wait_for(_read(reader), protocol.HANDSHAKE_TIMEOUT)
-            if not protocol.verify_mac(self.key, nonce, self.kernel_id, auth.get("mac", "")):
-                writer.write(protocol.encode({"op": "error", "code": "auth_failed", "message": "bad mac"}))
-                await writer.drain()
-                writer.close()
-                return
+            await asyncio.wait_for(_read(reader), protocol.HANDSHAKE_TIMEOUT)  # the auth frame
             self.connections += 1
+            self._count(+1)
+            counted = True
             writer.write(protocol.encode({"op": "welcome", "session": "s_fake", "seq": self.seq}))
             while True:
                 req = await _read(reader)
@@ -296,14 +306,26 @@ class FakeKernel:
         except (asyncio.IncompleteReadError, ConnectionError, asyncio.TimeoutError):
             pass
         finally:
+            if counted:
+                self._count(-1)
             self._subscribers.discard(writer)
             writer.close()
+
+    def _count(self, delta: int) -> None:
+        """Keep the number of open authenticated connections in ``conn_file`` (for Rust tests)."""
+        self.open += delta
+        if self.conn_file:
+            with open(self.conn_file + ".tmp", "w") as f:
+                f.write(str(self.open))
+            os.replace(self.conn_file + ".tmp", self.conn_file)
 
 
 def _standalone(path: str, out: str) -> None:
     import signal
     from darkpyonix import _home
-    kernel = FakeKernel(path, _home.user_key()).start()
+    kernel = FakeKernel(path)
+    kernel.conn_file = out + ".conns"
+    kernel.start()
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *a: stop.set())
     with open(out + ".tmp", "w") as f:

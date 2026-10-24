@@ -79,7 +79,6 @@ type Slot = Arc<AsyncMutex<Option<Arc<Connection>>>>;
 
 pub struct RealBackend {
     cfg: Config,
-    key: Vec<u8>,
     user_tag: String,
     discovery: Arc<Discovery>,
     conns: std::sync::Mutex<HashMap<String, Slot>>,
@@ -140,27 +139,21 @@ pub fn kernel_info(entry: &Entry) -> KernelInfo {
             .unwrap_or("")
             .to_string(),
         runs_dir: s("runs_dir"),
-        port: entry
-            .get("port")
-            .and_then(Value::as_u64)
-            .filter(|p| *p <= u16::MAX as u64)
-            .unwrap_or(0) as u16,
+        control: s("control"),
     }
 }
 
 impl RealBackend {
-    /// Open (and create if needed) the runtime home and its `user.key`.
+    /// Open (and create if needed) the runtime home.
     pub fn new(cfg: Config) -> Result<Self> {
         home::create_dir_private(&cfg.home)
             .map_err(|e| internal(format!("runtime home {}: {e}", cfg.home.display())))?;
-        let key = home::user_key(&cfg.home).map_err(|e| internal(format!("user.key: {e}")))?;
-        let user_tag = home::user_tag(&key);
+        let user_tag = home::user_tag().map_err(|e| internal(format!("OS account: {e}")))?;
         let kernels_dir = home::subdir(&cfg.home, "kernels")
             .map_err(|e| internal(format!("kernels dir: {e}")))?;
         let discovery = Discovery::new(user_tag.clone(), kernels_dir, cfg.multicast);
         Ok(Self {
             cfg,
-            key,
             user_tag,
             discovery,
             conns: Default::default(),
@@ -221,20 +214,20 @@ impl RealBackend {
                 .find(kernel_id)
                 .await
                 .ok_or_else(|| not_found(kernel_id))?;
-            let port = kernel_info(&entry).port;
-            if port == 0 {
+            let control = kernel_info(&entry).control;
+            if control.is_empty() {
                 return Err(DpxError::new(
                     "kernel_unreachable",
                     format!("kernel {kernel_id} has no control channel"),
                 ));
             }
-            match Connection::connect(port, kernel_id, &self.key, self.cfg.fanout).await {
+            match Connection::connect(&control, kernel_id, self.cfg.fanout).await {
                 Ok(c) => {
                     *guard = Some(c.clone());
                     return Ok(c);
                 }
                 Err(e) if e.code == "kernel_unreachable" && attempt == 0 => {
-                    // A cached announce may name an old port (e.g. after a hard restart).
+                    // A cached announce may name an old socket (e.g. after a hard restart).
                     self.discovery.forget_cached(kernel_id);
                     last_err = Some(e);
                 }
@@ -256,7 +249,7 @@ impl RealBackend {
 
     async fn info_with_status(&self, entry: Entry) -> KernelInfo {
         let mut info = kernel_info(&entry);
-        if info.port == 0 {
+        if info.control.is_empty() {
             return info;
         }
         let status = match self.connection(&info.kernel_id).await {

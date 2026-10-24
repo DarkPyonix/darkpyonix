@@ -36,7 +36,7 @@ async fn pr_2_handshake_and_requests_against_fake_kernel() {
     let list = be.list(true).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].kernel_id, fake.kernel_id);
-    assert_eq!(list[0].port, fake.port);
+    assert_eq!(list[0].control, fake.control);
 
     // get() enriches the announce with `status` over DKP.
     let info = be.get(&fake.kernel_id).await.unwrap();
@@ -109,51 +109,34 @@ async fn pr_2_handshake_and_requests_against_fake_kernel() {
 }
 
 #[tokio::test]
-async fn pr_2_wrong_key_is_refused() {
-    let dir = scratch("pr2-key");
+async fn pr_2_socket_of_another_kernel_id_is_refused() {
+    let dir = scratch("pr2-kid");
     let home = dir.join("home");
     let _be = backend(&home, false);
     let fake = FakeKernel::start(&home, &write_notebook(&dir, "nb.py"));
-    let err = Connection::connect(
-        fake.port,
-        &fake.kernel_id,
-        &[7u8; 32],
-        FanoutConfig::default(),
-    )
-    .await
-    .err()
-    .expect("wrong key must fail");
-    assert_eq!(err.code, "auth_failed");
-    // A port that belongs to another kernel id is refused before auth.
-    let err = Connection::connect(
-        fake.port,
-        "k_ffffffffffffffffffff",
-        &[7u8; 32],
-        FanoutConfig::default(),
-    )
-    .await
-    .err()
-    .unwrap();
+    // The same account connects without any key.
+    let ok = Connection::connect(&fake.control, &fake.kernel_id, FanoutConfig::default())
+        .await
+        .expect("same account needs no key");
+    assert!(ok.session.is_some());
+    // A socket that belongs to another kernel id is refused at the hello.
+    let err = Connection::connect(&fake.control, "k_ffffffffffffffffffff", FanoutConfig::default())
+        .await
+        .err()
+        .unwrap();
     assert_eq!(err.code, "kernel_unreachable");
 }
 
-/// Count ESTABLISHED TCP connections from this process to `port` (lsof).
-fn connections_to(port: u16) -> usize {
-    let out = std::process::Command::new("lsof")
-        .args([
-            "-nP",
-            "-a",
-            "-p",
-            &std::process::id().to_string(),
-            &format!("-iTCP:{port}"),
-            "-sTCP:ESTABLISHED",
-        ])
-        .output()
-        .expect("lsof");
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|l| l.contains(&format!("->127.0.0.1:{port}")))
-        .count()
+/// Open connections the fake kernel holds, as it reports them.
+fn connections_to(fake: &FakeKernel) -> usize {
+    for _ in 0..50 {
+        let n = fake.open_connections();
+        if n > 0 {
+            return n;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    0
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -174,7 +157,7 @@ async fn fr_m5_two_managers_share_one_kernel() {
     b.request(&kid, "status", json!({})).await.unwrap();
     // One connection per manager, shared by requests and every subscriber.
     assert_eq!(
-        connections_to(fake.port),
+        connections_to(&fake),
         2,
         "expected one connection per manager"
     );
@@ -211,7 +194,7 @@ async fn fr_m5_two_managers_share_one_kernel() {
     for s in subs.iter_mut() {
         assert!(quiet(s).await);
     }
-    assert_eq!(connections_to(fake.port), 2);
+    assert_eq!(connections_to(&fake), 2);
 }
 
 #[tokio::test]
@@ -327,7 +310,7 @@ async fn fr_m5_reconnects_on_demand_after_kernel_restart() {
     let fake2 = FakeKernel::start(&home, &nb);
     assert_eq!(fake2.kernel_id, kid);
     let st = be.request(&kid, "status", json!({})).await.unwrap();
-    assert_eq!(st["port"], fake2.port);
+    assert_eq!(st["control"], fake2.control);
 }
 
 #[tokio::test]

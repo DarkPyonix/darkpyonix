@@ -60,7 +60,7 @@ def kernel():
 # any of them, except the tiny host-context module it talks to.
 KERNEL_MODULES = (
     "__main__", "_capture", "_client", "_collab", "_discovery", "_display", "_document", "_events",
-    "_executor", "_figures", "_hostctx", "_launcher", "_lock", "_model", "_mplbackend", "_protocol",
+    "_executor", "_figures", "_hostctx", "_launcher", "_lock", "_model", "_mplbackend", "_peer", "_protocol",
     "_registry", "_runs", "_server",
 )
 
