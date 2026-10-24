@@ -1,6 +1,6 @@
 //! `RealBackend`: the [`KernelBackend`] of the DarkPyonix manager against real kernels.
 //!
-//! * discovery: loopback UDP multicast merged with the registry (FR-D1, FR-D2);
+//! * discovery: loopback UDP multicast only, no registry files (FR-D1, FR-D2);
 //! * one shared DKP/1 connection per kernel for requests and event fan-out (FR-M5, PR-2, PR-3);
 //! * idempotent start of the embedded stdlib-Python kernel (FR-M2, INTENT D3, D10);
 //! * the FR-R4 document via `darkpyonix._document` in Python.
@@ -13,7 +13,6 @@ pub mod home;
 pub mod ident;
 pub mod launch;
 pub mod process;
-pub mod registry;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -27,7 +26,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::discovery::Discovery;
 use crate::dkp::{Connection, FanoutConfig};
-use crate::registry::{entry_pid, Entry};
+pub use crate::discovery::{entry_pid, Entry};
 
 pub use crate::ident::{canonical_path, kernel_id_for};
 
@@ -37,14 +36,12 @@ pub const START_TIMEOUT: Duration = Duration::from_secs(10);
 const RUNS_WAIT_MARGIN: Duration = Duration::from_secs(15);
 const READY_STATUSES: [&str; 2] = ["idle", "busy"];
 
-/// Backend settings. [`Config::from_env`] reads `DARKPYONIX_HOME`, `DARKPYONIX_DISCOVERY` and
+/// Backend settings. [`Config::from_env`] reads `DARKPYONIX_HOME` and
 /// `DARKPYONIX_PYTHON`; tests build one explicitly so that parallel tests never share state.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The runtime home (PROTOCOL §1).
     pub home: PathBuf,
-    /// `false` = `DARKPYONIX_DISCOVERY=registry` (no multicast).
-    pub multicast: bool,
     /// Default interpreter for kernels and the document builder (`DARKPYONIX_PYTHON`).
     pub python: Option<String>,
     pub fanout: FanoutConfig,
@@ -55,9 +52,6 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             home: home::default_home(),
-            multicast: std::env::var("DARKPYONIX_DISCOVERY")
-                .map(|v| v.trim().to_lowercase() != "registry")
-                .unwrap_or(true),
             python: std::env::var("DARKPYONIX_PYTHON")
                 .ok()
                 .filter(|p| !p.is_empty()),
@@ -94,7 +88,7 @@ fn not_found(kernel_id: &str) -> DpxError {
     DpxError::new("not_found", format!("no running kernel {kernel_id}"))
 }
 
-/// Build the OpenAPI `Kernel` from an announce / registry entry / `status` result.
+/// Build the OpenAPI `Kernel` from an announce / `status` result.
 pub fn kernel_info(entry: &Entry) -> KernelInfo {
     let s = |k: &str| {
         entry
@@ -149,10 +143,7 @@ impl RealBackend {
         home::create_dir_private(&cfg.home)
             .map_err(|e| internal(format!("runtime home {}: {e}", cfg.home.display())))?;
         let user_tag = home::user_tag().map_err(|e| internal(format!("OS account: {e}")))?;
-        let kernels_dir = home::subdir(&cfg.home, "kernels")
-            .map_err(|e| internal(format!("kernels dir: {e}")))?;
-        let discovery =
-            Discovery::new_for_home(user_tag.clone(), kernels_dir, &cfg.home, cfg.multicast);
+        let discovery = Discovery::new_for_home(user_tag.clone(), &cfg.home);
         Ok(Self {
             cfg,
             user_tag,
@@ -229,7 +220,7 @@ impl RealBackend {
                 }
                 Err(e) if e.code == "kernel_unreachable" && attempt == 0 => {
                     // A cached announce may name an old socket (e.g. after a hard restart).
-                    self.discovery.forget_cached(kernel_id);
+                    self.discovery.forget(kernel_id);
                     last_err = Some(e);
                 }
                 Err(e) => return Err(e),
@@ -296,8 +287,8 @@ impl RealBackend {
             if !process::pid_alive(pid) {
                 // Lost a start race (exit 3) or crashed: give a winner's announce a moment.
                 if child_gone_since.is_none() {
-                    // The winner may be a live kernel whose registry entry is missing (it is
-                    // rewritten only every 5 s); ask it directly once.
+                    // The winner may be a live kernel this manager has not heard yet (it
+                    // announces every 5 s); ask it directly once.
                     self.discovery
                         .query(Some(kernel_id), discovery::QUERY_TIMEOUT, &Default::default())
                         .await;
@@ -377,12 +368,10 @@ impl KernelBackend for RealBackend {
 
         // Listen before launching so that the child's first announce is never missed.
         self.discovery.ensure_listening();
-        // Cache + registry only, no multicast query: every announce is mirrored to the
-        // registry (PROTOCOL §2.4), so a live kernel of this home is already visible here.
-        // A targeted query would cost its full QUERY_TIMEOUT (200 ms) on every real launch,
-        // because a kernel that does not exist never answers. The rare live kernel without a
-        // registry entry is still found: our child then loses the file lock (FR-K3) and
-        // `wait_ready` queries for the winner.
+        // Cache only, no multicast query up front: a targeted query would cost its full
+        // QUERY_TIMEOUT (200 ms) on every real launch, because a kernel that does not exist
+        // never answers. A live kernel this manager has not heard yet is still found: our
+        // child then loses the file lock (FR-K3) and `wait_ready` queries for the winner.
         if let Some(entry) = self.discovery.snapshot(Some(&kernel_id)).pop() {
             return Ok(Ensured {
                 kernel: self.info_with_status(entry).await,

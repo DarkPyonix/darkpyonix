@@ -5,9 +5,8 @@ status, run, cancel, interrupt, restart, shutdown, namespace, runs.list, runs.ge
 and unsubscribe with canned data. A started run stays ``running`` until the test calls
 ``finish_run()`` or a client interrupts it.
 
-It also writes the FR-D2 registry entry ``kernels/<kernel_id>.json`` under
-``DARKPYONIX_HOME``, so a manager written in any language finds it with
-``DARKPYONIX_DISCOVERY=registry``.
+It also runs the real ``DiscoveryResponder`` (FR-D1), so a manager written in any language
+finds it by loopback multicast. It writes no registry file.
 
 Runs on its own event loop thread, or standalone: ``python fake_kernel.py FILE ANNOUNCE_JSON``
 serves until SIGTERM and writes its announce body to ANNOUNCE_JSON.
@@ -104,18 +103,10 @@ class FakeKernel:
         self._thread = threading.Thread(target=run, name="fake-kernel", daemon=True)
         self._thread.start()
         ready.wait(5)
-        self._write_registry()
+        from darkpyonix import _discovery as discovery, _home
+        self._responder = discovery.DiscoveryResponder(self.announce, _home.user_tag())
+        self._responder.start()
         return self
-
-    def _registry_path(self) -> str:
-        from darkpyonix import _home
-        return os.path.join(_home.kernels_dir(), "%s.json" % self.kernel_id)
-
-    def _write_registry(self) -> None:
-        """FR-D2 registry entry, so any manager (DARKPYONIX_DISCOVERY=registry) can find us."""
-        from darkpyonix import _home
-        self._registry = self._registry_path()
-        _home.write_public(self._registry, json.dumps(self.announce()).encode("utf-8"))
 
     def stop(self) -> None:
         if self._loop is not None:
@@ -125,10 +116,9 @@ class FakeKernel:
                 self._loop.stop()
             self._loop.call_soon_threadsafe(close_all)
             self._thread.join(5)
-        try:
-            os.unlink(self._registry)
-        except (AttributeError, OSError):
-            pass
+        responder = getattr(self, "_responder", None)
+        if responder is not None:
+            responder.stop(bye=True)
 
     def _sync(self, fn, *args):
         """Run ``fn`` on the kernel loop from a test thread and return its result."""

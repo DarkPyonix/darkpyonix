@@ -125,13 +125,10 @@
 
 
     <h2 id="manager">Which manager</h2>
-    <p>Today the CLI picks a live manager from <code>~/.darkpyonix/managers/*.json</code> and starts an
-      ephemeral one when there is none. An agent does not need to know another manager's token; the same OS
-      user is enough. The ephemeral manager exits after 120 idle seconds by default; the kernels stay.</p>
-        <div class="warn">
-      <span class="label">Changing</span>
-      <p>Registry files are being removed <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>. The CLI will use <code>DARKPYONIX_MANAGER_URL</code> and <code>DARKPYONIX_TOKEN</code> when they are set, and otherwise start its own ephemeral manager and read its address and token from that process. The commands and their behavior above do not change.</p>
-    </div>
+    <p>The CLI uses the manager named by <code>DARKPYONIX_MANAGER_URL</code> and <code>DARKPYONIX_TOKEN</code>
+      when both are set. Otherwise it starts its own ephemeral manager and reads the address and token from
+      the one JSON line that manager prints on stdout (<code>{url, token, pid}</code>). No file is written or read.
+      An agent that does not know a token simply gets its own manager. The ephemeral manager exits after 120 idle seconds by default; the kernels stay.</p>
 
     <nav class="pagenav" aria-label="Pagination">
       <a class="prev" href="notebook-format.html"><span>Previous</span>&larr; Notebook files</a>

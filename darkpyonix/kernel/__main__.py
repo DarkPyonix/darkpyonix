@@ -19,7 +19,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from darkpyonix import _home
-from darkpyonix import _lock as lock, _registry as registry
+from darkpyonix import _lock as lock
 from darkpyonix._collab import DocumentState
 from darkpyonix._discovery import DiscoveryResponder
 from darkpyonix._events import EventLog
@@ -186,7 +186,9 @@ class Kernel(object):
 
     def run(self) -> int:
         if not self.lock.acquire():
-            existing = registry.read(self.kernel_id) or {"kernel_id": self.kernel_id}
+            from darkpyonix import _discovery as discovery
+            found = discovery.discover(self.kernel_id, timeout=0.5)
+            existing = found[0] if found else {"kernel_id": self.kernel_id}
             sys.stderr.write(json.dumps(existing, ensure_ascii=False) + "\n")
             sys.stderr.flush()
             return EXIT_ALREADY_RUNNING
@@ -230,7 +232,6 @@ class Kernel(object):
         for step in (
             lambda: self.store.flush() if self.store is not None else None,
             lambda: self.discovery.stop(bye=True) if self.discovery is not None else None,
-            lambda: registry.remove(self.kernel_id),
             lambda: self.server.stop() if self.server is not None else None,
             lambda: self.collab.stop() if self.collab is not None else None,
             lambda: self.lock.release(),

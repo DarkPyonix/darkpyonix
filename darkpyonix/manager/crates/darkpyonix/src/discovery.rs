@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::client::{Api, CliError};
@@ -14,20 +14,17 @@ pub const SELF_EXE_ENV: &str = "DARKPYONIX_SELF_EXE";
 /// How long a freshly spawned manager has to register itself and answer `/health`.
 pub const SPAWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// `<DARKPYONIX_HOME>/managers/<pid>.json` (PROTOCOL §1), written 0600 by every manager.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ManagerRecord {
+/// A manager given by the environment (an agent that already knows its token).
+pub const URL_ENV: &str = "DARKPYONIX_MANAGER_URL";
+pub const TOKEN_ENV: &str = "DARKPYONIX_TOKEN";
+
+/// The one JSON line a manager prints on stdout once it listens (SPEC FR-M3, FR-C1).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ManagerLine {
     pub url: String,
     pub token: String,
-    #[serde(default = "default_mode")]
-    pub mode: String,
-    pub pid: u32,
     #[serde(default)]
-    pub started_at: String,
-}
-
-fn default_mode() -> String {
-    "ephemeral".into()
+    pub pid: u32,
 }
 
 /// `DARKPYONIX_HOME`, else `~/.darkpyonix`.
@@ -39,40 +36,6 @@ pub fn home() -> PathBuf {
     PathBuf::from(base).join(".darkpyonix")
 }
 
-/// Registered managers whose process is alive, best first: dedicated before ephemeral,
-/// then the most recently started. Unreadable or stale files are skipped, never deleted
-/// (they belong to their manager).
-pub fn live_records(home: &Path) -> Vec<ManagerRecord> {
-    let Ok(dir) = std::fs::read_dir(home.join("managers")) else { return Vec::new() };
-    let mut recs: Vec<ManagerRecord> = dir
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
-        .filter_map(|p| serde_json::from_slice::<ManagerRecord>(&std::fs::read(p).ok()?).ok())
-        .filter(|r| pid_alive(r.pid))
-        .collect();
-    recs.sort_by(|a, b| {
-        (b.mode == "dedicated").cmp(&(a.mode == "dedicated")).then_with(|| b.started_at.cmp(&a.started_at))
-    });
-    recs
-}
-
-#[cfg(unix)]
-pub fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
-    if pid <= 0 {
-        return false;
-    }
-    // SAFETY: signal 0 only checks for existence and permission.
-    let r = unsafe { libc::kill(pid, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-pub fn pid_alive(_pid: u32) -> bool {
-    true // the /health check decides
-}
-
 async fn healthy(http: &reqwest::Client, url: &str) -> bool {
     let url = format!("{}/health", url.trim_end_matches('/'));
     matches!(
@@ -81,26 +44,31 @@ async fn healthy(http: &reqwest::Client, url: &str) -> bool {
     )
 }
 
-/// A live manager from the registry, else a freshly spawned ephemeral one (FR-C1).
-/// With `dedicated_only`, never spawns and fails when no dedicated manager is registered.
+/// The manager named by `DARKPYONIX_MANAGER_URL` and `DARKPYONIX_TOKEN`, else a freshly
+/// spawned ephemeral one whose address and token come from its stdout (FR-C1). No file is read.
+/// With `dedicated_only`, never spawns: sharing needs a dedicated manager the caller names.
 pub async fn connect(http: &reqwest::Client, dedicated_only: bool) -> Result<Api, CliError> {
-    let home = home();
-    for rec in live_records(&home) {
-        if dedicated_only && rec.mode != "dedicated" {
-            continue;
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    match (env(URL_ENV), env(TOKEN_ENV)) {
+        (Some(url), Some(token)) => return Ok(Api::new(http.clone(), &url, &token)),
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(CliError::new(
+                "bad_request",
+                format!("set both {URL_ENV} and {TOKEN_ENV}, or neither"),
+            ))
         }
-        if healthy(http, &rec.url).await {
-            return Ok(Api::new(http.clone(), &rec.url, &rec.token));
-        }
+        (None, None) => {}
     }
     if dedicated_only {
         return Err(CliError::new(
             "no_dedicated_manager",
-            "sharing needs a dedicated manager, and none is running for this user; \
-             start one with `darkpyonix manager --dedicated`",
+            format!(
+                "sharing needs a dedicated manager; start one with `darkpyonix manager --dedicated` \
+                 and set {URL_ENV} and {TOKEN_ENV}"
+            ),
         ));
     }
-    let rec = spawn_ephemeral(http, &home).await?;
+    let rec = spawn_ephemeral(http, &home()).await?;
     Ok(Api::new(http.clone(), &rec.url, &rec.token))
 }
 
@@ -113,19 +81,19 @@ fn self_exe() -> Result<PathBuf, CliError> {
 }
 
 /// Re-execute this binary as `darkpyonix manager --ephemeral` in its own session (so the
-/// terminal's Ctrl-C never reaches it), then wait for `managers/<pid>.json` and `/health`.
-pub async fn spawn_ephemeral(http: &reqwest::Client, home: &Path) -> Result<ManagerRecord, CliError> {
+/// terminal's Ctrl-C never reaches it), then read `{url, token, pid}` from its stdout pipe and
+/// wait for `/health`. Its stderr goes to `<home>/manager.log` for the failure message.
+pub async fn spawn_ephemeral(http: &reqwest::Client, home: &Path) -> Result<ManagerLine, CliError> {
     let fail = |m: String| CliError::new("spawn_failed", m);
-    let managers = home.join("managers");
-    std::fs::create_dir_all(&managers).map_err(|e| fail(format!("cannot create {}: {e}", managers.display())))?;
-    let log_path = managers.join("spawn.log");
+    std::fs::create_dir_all(home).map_err(|e| fail(format!("cannot create {}: {e}", home.display())))?;
+    let log_path = home.join("manager.log");
     let log = std::fs::File::create(&log_path).map_err(|e| fail(format!("cannot create {}: {e}", log_path.display())))?;
     let exe = self_exe()?;
     let mut cmd = Command::new(&exe);
     cmd.args(["manager", "--ephemeral"])
         .env("DARKPYONIX_HOME", home)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::from(log));
     #[cfg(unix)]
     {
@@ -133,7 +101,13 @@ pub async fn spawn_ephemeral(http: &reqwest::Client, home: &Path) -> Result<Mana
         cmd.process_group(0);
     }
     let mut child = cmd.spawn().map_err(|e| fail(format!("cannot start {} manager --ephemeral: {e}", exe.display())))?;
-    let reg = managers.join(format!("{}.json", child.id()));
+    let stdout = child.stdout.take().ok_or_else(|| fail("no stdout pipe".into()))?;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::BufRead::read_line(&mut std::io::BufReader::new(stdout), &mut line);
+        let _ = tx.send(line);
+    });
     let deadline = Instant::now() + SPAWN_TIMEOUT;
     let why_failed = |what: String| {
         let log = std::fs::read_to_string(&log_path).unwrap_or_default();
@@ -145,18 +119,36 @@ pub async fn spawn_ephemeral(http: &reqwest::Client, home: &Path) -> Result<Mana
         fail(m)
     };
     loop {
-        if let Ok(Some(status)) = child.try_wait() {
-            return Err(why_failed(format!("`{} manager --ephemeral` exited with {status}", exe.display())));
-        }
-        if let Some(rec) = std::fs::read(&reg).ok().and_then(|b| serde_json::from_slice::<ManagerRecord>(&b).ok()) {
-            if healthy(http, &rec.url).await {
-                return Ok(rec); // the child is left running on purpose: it is the manager
+        match rx.try_recv() {
+            Ok(line) if line.trim().is_empty() => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                return Err(why_failed(format!("`{} manager --ephemeral` exited before printing its address", exe.display())));
             }
+            Ok(line) => {
+                let Ok(rec) = serde_json::from_str::<ManagerLine>(line.trim()) else {
+                    return Err(why_failed(format!("unexpected first line on stdout: {}", line.trim())));
+                };
+                if healthy(http, &rec.url).await {
+                    return Ok(rec); // the child is left running on purpose: it is the manager
+                }
+                return Err(why_failed(format!("{} did not answer /health", rec.url)));
+            }
+            Err(_) => {}
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            // The line may have been sent just before it exited; give the reader a moment.
+            if let Ok(line) = rx.recv_timeout(Duration::from_millis(100)) {
+                if let Ok(rec) = serde_json::from_str::<ManagerLine>(line.trim()) {
+                    if healthy(http, &rec.url).await {
+                        return Ok(rec);
+                    }
+                }
+            }
+            return Err(why_failed(format!("`{} manager --ephemeral` exited with {status}", exe.display())));
         }
         if Instant::now() >= deadline {
             return Err(why_failed(format!(
-                "no healthy registration at {} within {} s",
-                reg.display(),
+                "no address on stdout within {} s",
                 SPAWN_TIMEOUT.as_secs()
             )));
         }
@@ -185,54 +177,14 @@ mod tests {
     fn scratch(name: &str) -> PathBuf {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../.scratch/rcli-unit").join(name);
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("managers")).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
         root
     }
 
-    fn write(home: &Path, rec: &ManagerRecord) {
-        let p = home.join("managers").join(format!("{}.json", rec.pid));
-        std::fs::write(p, serde_json::to_vec(rec).unwrap()).unwrap();
-    }
-
-    fn rec(pid: u32, mode: &str, started: &str) -> ManagerRecord {
-        ManagerRecord {
-            url: format!("http://127.0.0.1:{}", 40000 + pid % 1000),
-            token: "t".into(),
-            mode: mode.into(),
-            pid,
-            started_at: started.into(),
-        }
-    }
-
-    fn dead_pid() -> u32 {
-        let mut c = Command::new("true").spawn().unwrap();
-        let pid = c.id();
-        c.wait().unwrap();
-        pid
-    }
-
     #[test]
-    fn test_fr_c1_registry_keeps_live_managers_best_first() {
-        let home = scratch("registry");
-        let me = std::process::id();
-        let parent = std::os::unix::process::parent_id();
-        write(&home, &rec(dead_pid(), "dedicated", "2026-10-03T09:00:00Z"));
-        write(&home, &rec(me, "ephemeral", "2026-10-03T08:00:00Z"));
-        write(&home, &rec(parent, "ephemeral", "2026-10-03T08:30:00Z"));
-        std::fs::write(home.join("managers/garbage.json"), b"{not json").unwrap();
-        std::fs::write(home.join("managers/spawn.log"), b"x").unwrap();
-        let found = live_records(&home);
-        assert_eq!(found.iter().map(|r| r.pid).collect::<Vec<_>>(), vec![parent, me]);
-
-        write(&home, &rec(1, "dedicated", "2026-10-01T00:00:00Z")); // launchd/init: alive
-        assert_eq!(live_records(&home)[0].mode, "dedicated");
-    }
-
-    #[test]
-    fn test_fr_c1_missing_registry_dir_means_no_managers() {
-        let home = scratch("empty");
-        std::fs::remove_dir_all(home.join("managers")).unwrap();
-        assert!(live_records(&home).is_empty());
+    fn test_fr_c1_manager_line_parses_url_token_pid() {
+        let l: ManagerLine = serde_json::from_str(r#"{"url":"http://127.0.0.1:1","token":"t","pid":7}"#).unwrap();
+        assert_eq!((l.url.as_str(), l.token.as_str(), l.pid), ("http://127.0.0.1:1", "t", 7));
     }
 
     #[test]
@@ -242,7 +194,8 @@ mod tests {
         let home = scratch("kid");
         let f = home.join("a.py");
         std::fs::write(&f, "").unwrap();
-        let (canon, id) = resolve_file(&home.join("managers/../a.py")).unwrap();
+        std::fs::create_dir_all(home.join("sub")).unwrap();
+        let (canon, id) = resolve_file(&home.join("sub/../a.py")).unwrap();
         assert_eq!(canon, std::fs::canonicalize(&f).unwrap());
         assert_eq!(id, kernel_id_for(&canon.to_string_lossy()));
         assert!(resolve_file(&home.join("missing.py")).is_err());

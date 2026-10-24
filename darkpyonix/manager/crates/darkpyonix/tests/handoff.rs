@@ -4,7 +4,7 @@
 //! `cargo test -p darkpyonix --test handoff`
 #![cfg(unix)]
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -48,28 +48,21 @@ struct Manager {
 
 impl Manager {
     fn start(home: &Path) -> Manager {
-        let child = Command::new(env!("CARGO_BIN_EXE_darkpyonix"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_darkpyonix"))
             .args(["manager", "--ephemeral", "--idle-timeout", "600"])
             .env("DARKPYONIX_HOME", home)
             .env("DARKPYONIX_PYTHON", venv_python())
             .env("DARKPYONIX_MANAGER_TOKEN", TOKEN)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn darkpyonix manager");
-        let file = home.join("managers").join(format!("{}.json", child.id()));
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            if let Ok(text) = std::fs::read_to_string(&file) {
-                if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                    let url = v["url"].as_str().unwrap().to_string();
-                    return Manager { child, url };
-                }
-            }
-            assert!(Instant::now() < deadline, "manager did not register {}", file.display());
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        // The manager prints one JSON line {url, token, pid} once it listens (FR-M3).
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let v: Value = serde_json::from_str(line.trim()).expect("startup line");
+        Manager { child, url: v["url"].as_str().unwrap().to_string() }
     }
 
     fn addr(&self) -> String {
@@ -121,7 +114,7 @@ fn read_until(s: &mut TcpStream, needle: &str, seen: &mut String, within: Durati
 fn test_fr_m6_plain_stream_survives_manager_kill() {
     let dir = scratch("kill");
     let home = dir.join("home");
-    std::fs::create_dir_all(home.join("managers")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
     let nb = dir.join("nb.py");
     std::fs::write(&nb, "# %%\nprint('hello from the kernel')\n").unwrap();
 

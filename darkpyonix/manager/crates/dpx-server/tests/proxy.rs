@@ -134,7 +134,7 @@ async fn test_d10_proxy_passes_websocket_upgrades_through() {
     ws.send(Message::binary(vec![1u8, 2, 3])).await.unwrap();
     let echo = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
     assert_eq!(echo, Message::binary(vec![1u8, 2, 3]));
-    assert!(s.handle.as_ref().unwrap().registry_file.as_ref().unwrap().exists());
+    assert!(!s.home.join("managers").exists());
 }
 
 #[tokio::test]

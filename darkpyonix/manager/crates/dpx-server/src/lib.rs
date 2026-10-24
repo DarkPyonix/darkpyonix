@@ -5,8 +5,8 @@
 //! `/docs/`, configured reverse-proxy routes ([`ProxyRoute`]) and nothing else. It speaks
 //! HTTP/1.1 and HTTP/2 (h2c, or ALPN over TLS), SSE and WebSocket (proxied), without nginx.
 //!
-//! Ephemeral managers (FR-M3) bind `127.0.0.1`, publish `<home>/managers/<pid>.json` (0600)
-//! and stop by themselves after `idle_timeout` without requests or open streams. Dedicated
+//! Ephemeral managers (FR-M3) bind `127.0.0.1`, write no registry file (the process that started
+//! them gets the address and token on stdout, FR-M3) and stop by themselves after `idle_timeout` without requests or open streams. Dedicated
 //! managers (FR-M4) keep share tokens hashed in `<home>/manager.db`. Neither ever touches
 //! kernels when it stops.
 
@@ -51,7 +51,7 @@ use crate::auth::{Auth, ShareStore};
 use crate::error::ApiError;
 use crate::proxy::{ConnInfo, Proxy};
 
-/// Manager version reported by `/health`, `getManager` and the registry file.
+/// Manager version reported by `/health`, and `getManager`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_DEDICATED_PORT: u16 = 46881;
@@ -88,7 +88,7 @@ pub struct ServerConfig {
     pub port: u16,
     /// Ephemeral only; dedicated managers never idle out.
     pub idle_timeout: Option<Duration>,
-    /// `DARKPYONIX_HOME` (`managers/<pid>.json`, `manager.db`).
+    /// `DARKPYONIX_HOME` (`manager.db`).
     pub home: PathBuf,
     pub tls: Option<TlsConfig>,
     /// Share links are `<share_base>/<share_id>#<token>`.
@@ -312,8 +312,6 @@ pub struct ServerHandle {
     pub url: String,
     pub token: String,
     pub local_addr: SocketAddr,
-    /// `<home>/managers/<pid>.json` for an ephemeral manager.
-    pub registry_file: Option<PathBuf>,
     pub cert_store: Option<Arc<tls::CertStore>>,
     trigger: ShutdownTrigger,
     done: tokio::task::JoinHandle<ExitReason>,
@@ -326,7 +324,7 @@ impl ServerHandle {
     pub fn trigger(&self) -> ShutdownTrigger {
         self.trigger.clone()
     }
-    /// Resolves once the server has stopped and removed its registry file.
+    /// Resolves once the server has stopped.
     pub async fn wait(self) -> ExitReason {
         self.done.await.unwrap_or(ExitReason::Shutdown)
     }
@@ -410,19 +408,6 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
     });
     let app = router(state.clone(), proxy, activity.clone());
 
-    let registry_file = match mode {
-        Mode::Ephemeral => {
-            let path = config.home.join("managers").join(format!("{pid}.json"));
-            let record = serde_json::json!({
-                "pid": pid, "url": url, "token": token, "mode": mode.as_str(),
-                "started_at": started_at, "version": VERSION,
-            });
-            util::write_private_atomic(&path, record.to_string().as_bytes())?;
-            Some(path)
-        }
-        Mode::Dedicated => None,
-    };
-
     let idle = Arc::new(std::sync::atomic::AtomicBool::new(false));
     if let Some(limit) = idle_timeout {
         let activity = activity.clone();
@@ -445,7 +430,6 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         });
     }
 
-    let registry = registry_file.clone();
     let tls_on = acceptor.is_some();
     let done = tokio::spawn(async move {
         let graceful = hyper_util::server::graceful::GracefulShutdown::new();
@@ -491,9 +475,6 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         }
         drop(listener);
         let _ = tokio::time::timeout(GRACEFUL_TIMEOUT, graceful.shutdown()).await;
-        if let Some(path) = registry {
-            let _ = std::fs::remove_file(path);
-        }
         if idle.load(Ordering::SeqCst) {
             ExitReason::Idle
         } else {
@@ -501,7 +482,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         }
     });
 
-    Ok(ServerHandle { url, token, local_addr, registry_file, cert_store, trigger, done })
+    Ok(ServerHandle { url, token, local_addr, cert_store, trigger, done })
 }
 
 /// Serves until SIGINT/SIGTERM (or idle exit) and returns why it stopped.

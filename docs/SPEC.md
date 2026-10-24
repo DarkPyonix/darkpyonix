@@ -61,8 +61,8 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 ### FR-K8 종료 — `Done`
 `shutdown`은 실행 중인 셀을 인터럽트하고, 실행 기록을 마저 쓰고, `bye`를 보내고, 코드 0으로 끝납니다.
 - 수용 기준: 종료 뒤 잠금이 남지 않고 실행 기록의 상태는 `interrupted`입니다.
-- 상태 메모 (2026-10-03): 등록 파일을 지웠으므로(FR-D2) "종료 뒤 등록 파일 없음" 검사는 의미가 없어집니다. 테스트에서 그 검사를 빼는 일은 #50에서 합니다.
-- 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, 등록 파일 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
+- 상태 메모 (2026-10-05): 등록 파일이 없으므로(FR-D2) "종료 뒤 등록 파일 없음"은 "`kernels/` 아래에 `.json`이 없음"으로 바뀌었고, 테스트는 그것만 확인합니다.
+- 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, `kernels/` 아래에 `.json` 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
 
 ### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, POSIX 커널 구현됨 #47, Windows 구현 대기)
 커널은 매니저가 `adopt`로 넘긴 연결(PROTOCOL §3.7)에 직접 응답합니다. `events`는 SSE, `ws`는 2025 WebSocket 동기화(PROTOCOL §5), `wait`는 실행 대기 응답입니다. 커널은 넘겨받은 요청 바이트를 소켓에서 읽은 것처럼 다루고, 인증하거나 토큰을 검사하지 않습니다. 능력 집합(`label.capabilities`, FR-A3)은 보낼 내용을 거르는 데만 씁니다. `history`가 없으면 출력과 실행 기록을 보내지 않습니다. `read`가 없으면 셀 소스를 비워 보냅니다. `edit`이 없으면 WebSocket 편집 메시지(`start_typing`)를 받지 않습니다. `streams.close {share_id}`가 오면 그 공유로 넘겨받은 스트림을 모두 닫습니다.
@@ -173,7 +173,8 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 ### FR-R1 자동 기록 — `Done`
 모든 실행은 `<파일 폴더>/__runs__/<파일 이름>/<run_id>.ipynb`에 nbformat 4.5 노트북으로 기록됩니다. `run_id`는 `YYYYMMDD-HHMMSS-<4 hex>`(UTC)입니다. 노트북 `metadata.darkpyonix`에는 `run_id`, `kernel_id`, `file`, `file_sha256`, `mode`, `params`, `status`, `started_at`, `ended_at`, `python`, `host`가 들어갑니다. 셀마다 `metadata.darkpyonix`에 `index`, `type`, `title`, `source_sha256`, `status`, `started_at`, `ended_at`이 들어갑니다.
 - 수용 기준: 실행 기록이 `nbformat.validate`를 통과합니다(테스트 환경에 nbformat이 있을 때). 표준 라이브러리 `json`으로 읽은 구조가 위 필드를 모두 가집니다.
-- 테스트: `test_fr_r1_run_log_is_valid_nbformat`, `test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt`
+- 구현 메모: 4 hex 접미사는 무작위라 한 초에 30번 실행하면 약 1% 확률로 `run_id`가 겹쳐 기록 하나가 덮어써집니다(#57). 한 프로세스 안에서는 같은 초에 이미 쓴 접미사를 건너뛰어 `run_id`가 겹치지 않게 합니다.
+- 테스트: `test_fr_r1_run_ids_are_unique_within_a_second`, `test_fr_r1_run_log_is_valid_nbformat`, `test_fr_r1_index_lists_runs_newest_first_and_is_rebuilt_when_corrupt`
 
 ### FR-R2 실행 중 저장 — `Done`
 커널은 실행 중에도 기록을 최대 1초 간격으로 원자적으로(임시 파일 → `os.replace`) 다시 씁니다. `index.json`에는 최신순 실행 요약(`run_id`, `status`, `started_at`, `ended_at`, `mode`)을 둡니다.
@@ -233,11 +234,11 @@ PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모�
   - `user_tag`는 OS 계정에서 만들어 홈이 달라도 같으므로(FR-A1), 홈을 지정한 매니저는 announce의 `home`이 자기 홈(심볼릭 링크를 푼 경로)과 다르거나 없으면 버립니다. 응답 수에도 세지 않습니다(PROTOCOL §2.2).
 - 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-D2 등록 파일 보조 — `Withdrawn` (사용자 지시 2026-10-03, 코드 제거 대기 #50)
-커널 등록 파일(`kernels/<kernel_id>.json`)과 `DARKPYONIX_DISCOVERY=registry`를 지웁니다. 리더가 사용자 승인 없이 더한 보조 발견입니다. 사용자(2026-10-03): "커널 등록 파일 써도 된다고 내가 말한 적이 절대 없고요"(INTENT D4, §5).
-- 코드: 커널은 등록 파일을 쓰지 않고, 매니저는 등록 파일을 읽지 않습니다. `test_fr_d2_*`와 Rust `fr_d2_*` 테스트는 코드와 함께 지웁니다(#50).
-- 수용 기준(#50): 커널을 띄우고 끈 뒤에도 `DARKPYONIX_HOME/kernels/` 아래에 `.json`이 생기지 않습니다(진단 로그 `.log`만 있음). `DARKPYONIX_DISCOVERY=registry`를 줘도 동작이 같습니다.
-- 테스트(계획): `test_fr_d2_kernel_writes_no_registry_file`
+### FR-D2 등록 파일 없음 — `Agreed` (사용자 지시 2026-10-03, 2026-10-05 구현, Rust 테스트는 CI 확인 대기)
+커널 등록 파일(`kernels/<kernel_id>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 없습니다. 리더가 사용자 승인 없이 더했던 보조 발견이라 지웠습니다. 사용자(2026-10-03): "커널 등록 파일 써도 된다고 내가 말한 적이 절대 없고요"(INTENT D4, §5).
+- 코드: 커널은 등록 파일을 쓰지 않고 `DARKPYONIX_DISCOVERY`를 읽지 않습니다. 매니저는 등록 파일을 읽지 않고 `managers/<pid>.json`도 쓰지 않습니다. 죽은 커널은 `bye`가 없어도 다음 질의에 답하지 않으므로 목록에서 빠집니다(파일을 치울 일이 없습니다).
+- 수용 기준: 커널을 띄우고 끈 뒤에도 `DARKPYONIX_HOME/kernels/` 아래에 `.json`이 생기지 않습니다(진단 로그 `.log`만 있음). `DARKPYONIX_DISCOVERY=registry`를 줘도 동작이 같습니다. 다른 홈에 심은 항목은 읽지 않습니다.
+- 테스트: `test_fr_d2_kernel_writes_no_registry_file`, `test_fr_d2_registry_env_is_ignored`, `test_fr_d2_killed_kernel_vanishes_without_pruning`, Rust `fr_d2_manager_reads_no_registry_file`, `fr_d2_killed_kernel_vanishes_from_the_list`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-D3 지원 범위 — `Agreed` (사용자 결정 2026-10-03)
 사용자 결정: "멀티캐스트가 막힌 특수한 이상한 상황은 가정하지 말고, wsl 안에서 돌고 있는거에 윈도우에서 연결해야 할 이유도 없어. 안드로이드랑 iOS의 경우 PyREPL 구현처럼 별도 미리 정의된 프로세스 내에서만 노트북이 실행 가능하도록 하면 되는거야."
@@ -334,11 +335,11 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ### FR-M2 커널 시작은 멱등 — `Done`
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
-- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_missing_from_the_registry`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현됨 #47, CI 확인 대기)
-임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, 구현 대기 #50). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6). TLS·HTTP/2·터널로 퍼 나르는 스트림도 세지 않습니다(커널이 소유하고 `Handoff` 표시를 단 응답). 끝날 때 커널은 건드리지 않습니다.
-- 테스트: `test_fr_m3_idle_counts_http_requests_only_not_handed_off_streams`(Rust `darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`, 매니저가 직접 들고 있는 스트림은 요청으로 셈), Rust `test_fr_m3_registry_file_is_private_and_complete`, `test_fr_m3_shutdown_removes_registry_file`(등록 파일을 지우므로 #50에서 `test_fr_m3_url_and_token_are_printed_on_stdout`, `test_fr_m3_writes_no_registry_file`로 바꿉니다)
+임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, FR-D2). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6). TLS·HTTP/2·터널로 퍼 나르는 스트림도 세지 않습니다(커널이 소유하고 `Handoff` 표시를 단 응답). 끝날 때 커널은 건드리지 않습니다.
+- 테스트: `test_fr_m3_idle_counts_http_requests_only_not_handed_off_streams`(Rust `darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), Rust `test_fr_m3_writes_no_registry_file`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m3_url_and_token_are_printed_on_stdout`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`와 `src/manager.rs`)
 
 ### FR-M4 전용 모드 — `Done`
 `darkpyonix manager --dedicated`는 유휴 종료 없이 돌고, 설정한 호스트·포트에 리슨하고, 마스터 토큰과 공유 토큰으로 인증합니다. 토큰은 해시로만 `manager.db`(SQLite)에 저장합니다. 2025 비밀번호 로그인과 마스터·공유 토큰 재설정은 매니저 단위이고 전용 매니저가 맡습니다(FR-A4, 구현 대기 #48). 커널 접근 토큰(FR-A6)은 매니저가 아니라 커널에 묶입니다.
@@ -365,11 +366,12 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ## 8. CLI (C)
 
-### FR-C1 매니저 찾기 — `Agreed` (사용자 지시, 구현 대기 #50)
+### FR-C1 매니저 찾기 — `Agreed` (사용자 지시, 2026-10-05 구현, Rust 테스트는 CI 확인 대기)
 매니저의 주소와 토큰을 파일로 나누지 않습니다(INTENT D4). `darkpyonix` CLI는 `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN`이 있으면 그 매니저를 씁니다. 에이전트가 이미 아는 토큰입니다. 없으면 자기 임시 매니저를 자식 프로세스로 띄우고, 그 매니저가 표준 출력 첫 줄에 쓴 `{url, token, pid}`를 파이프로 읽어 씁니다. 토큰을 모르는 에이전트는 이렇게 자기 매니저를 씁니다. 커널은 모든 매니저가 멀티캐스트로 찾으므로 어느 매니저로 붙어도 같은 커널입니다(FR-M5).
 - `darkpyonix manager`를 직접 실행해도 같은 한 줄을 표준 출력에 씁니다. 에이전트는 그 값을 환경 변수로 두고 다음 호출에 쓸 수 있습니다. 두지 않으면 호출마다 새 임시 매니저가 뜨고, 각자 `idle_timeout` 뒤에 끝납니다.
 - 수용 기준: 환경 변수 없이 `darkpyonix run a.py`가 매니저를 띄워 동작하고, `DARKPYONIX_HOME/managers/`가 생기지 않습니다. 환경 변수를 주면 새 매니저를 띄우지 않습니다.
-- 테스트(계획): `test_fr_c1_cli_spawns_its_own_manager_and_reads_stdout`, `test_fr_c1_cli_uses_the_given_manager`, `test_fr_c1_spawn_failure_is_reported`. 지금의 `test_fr_c1_skips_dead_and_unhealthy_registrations`는 지웁니다.
+- `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN` 중 하나만 있으면 오류입니다. 공유(`share`)는 전용 매니저가 필요해서 새 매니저를 띄우지 않고, 두 변수가 없으면 오류로 안내합니다. 띄운 매니저의 표준 오류는 `DARKPYONIX_HOME/manager.log`에 남고, 실패 메시지가 그 끝부분을 보여 줍니다.
+- 테스트: Rust `test_fr_c1_cli_spawns_its_own_manager_and_reads_stdout`, `test_fr_c1_cli_uses_the_given_manager`, `test_fr_c1_spawn_failure_is_reported`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
 
 ### FR-C2 명령 — `Done`
 
@@ -406,7 +408,7 @@ INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 �
 
 ### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현 대기 #48, #49)
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 넷만 `Authorization: Bearer` 없이 열립니다. 초기 토큰 발급(FR-A6)은 인증이 없고, 매니저 로그인 `GET /api/auth`와 마스터 토큰 재설정 `PUT /api/auth/tokens/master`(FR-A4)는 `Authorization: Basic`의 비밀번호로, 커널 로그인 `POST /api/kernels/{kernel_id}/tokens/auth`(FR-A6)는 본문의 비밀번호로 인증합니다.
-- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `test_fr_a2_registry_token_is_used`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`, 등록 파일 제거와 함께 #50에서 `test_fr_a2_cli_uses_the_token_from_stdout`으로 바꿈)
+- 테스트: `test_fr_a2_requests_without_token_are_401`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `test_fr_a2_cli_uses_the_token_from_stdout`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
 
 ### FR-A3 권한: 능력의 집합 — `Agreed` (사용자 결정 2026-10-04, 구현 대기 #49)
 INTENT D18. 사용자 결정(2026-10-04): "권한 이름 저따위 아니거든? 시멘틱하게 다시 추론해 … 실행 권한이랑 코드 수정 권한은 다른거야. 권한 등급 개념 아니니까 이상한 방향으로 가지 마." 승인한 능력은 다섯이고 등급이 아닙니다. 토큰은 능력의 집합을 가지고, 매니저는 작업마다 그 작업의 능력 하나가 집합에 있는지만 봅니다. 능력 사이에 순서나 포함 관계는 없습니다.
@@ -686,10 +688,10 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 측정 기록 (2026-10-03, macOS arm64, `test_nfr_k3_print_overhead`): 셀 안 100,000번 `print`를 파이프로 출력하는 일반 실행과 비교, 5회 중 최솟값의 프로세스 CPU 시간 비율은 3.9 1.08, 3.11 1.17, 3.13 1.24, 3.14 1.42, 3.15 1.21입니다. 측정 당시 머신의 부하 평균이 100을 넘어 벽시계 시간은 같은 측정 안에서도 0.7~8배로 흔들렸으므로 판정에 쓰지 않았습니다. 한가한 머신에서 벽시계 시간을 다시 재야 `Done`이 됩니다.
 - 측정 기록 (2026-10-03 14:2x, 맥미니 M 시리즈, 부하 평균 약 4.5, `test_nfr_k3_print_overhead` 3회): 벽시계 시간 비율(5회 중 최솟값끼리)은 3.8 1.17~1.23, 3.9 1.07~1.23, 3.10 1.11~1.13, 3.11 1.12~1.24, 3.12 1.14~1.16, 3.13 1.06~1.15, 3.14 1.14~1.19, 3.15 1.08~1.14로 모두 1.5배 이하입니다. 100,000줄 일반 실행은 16~25 ms였습니다.
 
-### NFR-K4 시작 시간 — `Agreed` (재측정 대기 #50)
+### NFR-K4 시작 시간 — `Done`
 커널 시작(프로세스 실행부터 announce까지)은 기준 기계(맥미니 M 시리즈)에서 300 ms 이하입니다. 측정점은 프로세스를 실행한 순간부터 멀티캐스트 그룹의 리스너가 그 커널의 첫 announce를 받은 순간까지입니다.
-- 상태 메모 (2026-10-03): 아래 기록은 등록 파일이 생긴 순간을 측정점으로 썼습니다. 등록 파일을 지우므로(FR-D2) 첫 announce 수신 시각으로 다시 재야 `Done`입니다.
-- 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 4): `bootstrap_command`로 프로세스를 실행한 순간부터 등록 파일이 생길 때까지(등록 파일은 첫 멀티캐스트 announce 직전에 씁니다, `_discovery.announce_now`) 7회 중앙값이 3.8 38 ms, 3.9 63 ms, 3.11 54 ms, 3.12 39 ms, 3.13 56 ms, 3.14 46 ms입니다. 같은 인터프리터의 `python -c pass`는 13~22 ms였습니다. 측정 스크립트는 `.scratch/k4/measure.py`(커밋하지 않음)입니다.
+- 측정 기록 (2026-10-05, 맥미니 M 시리즈, 부하 평균 약 2): `bootstrap_command`로 프로세스를 실행한 순간부터 그룹 소켓의 리스너가 그 pid의 첫 announce 데이터그램을 받을 때까지, 7회 중앙값이 3.11 54 ms, 3.13 55 ms, 3.14 46 ms, 시스템 `/usr/bin/python3` 63 ms입니다. 측정 스크립트는 `.scratch/k4/measure.py`(커밋하지 않음)입니다.
+- 이전 기록 (2026-10-03): 측정점이 등록 파일이 생긴 순간(첫 announce 직전)이었고 3.8 38 ms, 3.9 63 ms, 3.11 54 ms, 3.12 39 ms, 3.13 56 ms, 3.14 46 ms였습니다. 같은 인터프리터의 `python -c pass`는 13~22 ms였습니다.
 - 참고: Rust 매니저의 `ensure()`는 처음에 300~344 ms였습니다. 커널을 띄우기 전에 보내는 표적 멀티캐스트 질의가 없는 커널을 기다리느라 늘 200 ms(`QUERY_TIMEOUT`)를 썼기 때문입니다. 질의를 없앤 뒤(FR-M2, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`) 호출부터 인터프리터 실행까지 5~8 ms, 전체 92~120 ms입니다(2026-10-03, 부하 평균 약 1.5, `/usr/bin/python3` 셈은 Xcode 셈 때문에 170~600 ms).
 
 ### NFR-M1 발견 지연 — `Done`
