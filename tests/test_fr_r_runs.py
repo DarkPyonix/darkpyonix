@@ -720,3 +720,13 @@ def test_fr_r5_twenty_mib_cell_log_stays_under_seventeen_mib(scratch):
     kept = "".join(o["text"] for o in outs[:-1])
     with open(side, encoding="utf-8") as f:
         assert kept + f.read() == line * 1024 * 20
+
+
+def test_fr_r1_run_ids_are_unique_within_a_second(monkeypatch):
+    # A random 4-hex suffix collided about once in 100 batches of 30 (issue #57).
+    import secrets
+    from darkpyonix import _protocol
+    picks = iter(["abcd", "abcd", "abcd", "1234"])
+    monkeypatch.setattr(secrets, "token_hex", lambda n: next(picks))
+    ids = [_protocol.new_run_id() for _ in range(2)]
+    assert len(set(ids)) == 2

@@ -190,7 +190,26 @@ def run_start_iso() -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (ms % 1000)
 
 
+_id_seen = {"second": "", "suffixes": set()}
+
+
 def new_run_id() -> str:
-    """``YYYYMMDD-HHMMSS-<4 hex>`` in UTC (FR-R1)."""
+    """``YYYYMMDD-HHMMSS-<4 hex>`` in UTC (FR-R1), unique within the process.
+
+    The suffix is random, so 30 runs in one second collide with probability near 1%
+    (birthday bound over 65536 values). Suffixes already issued in the current second
+    are skipped, so two runs never share an id.
+    """
     t = datetime.datetime.now(datetime.timezone.utc)
-    return t.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+    second = t.strftime("%Y%m%d-%H%M%S-")
+    with _start_lock:
+        if _id_seen["second"] != second:
+            _id_seen["second"] = second
+            _id_seen["suffixes"] = set()
+        used = _id_seen["suffixes"]
+        while True:
+            suffix = secrets.token_hex(2)
+            if suffix not in used or len(used) >= 65536:
+                break
+        used.add(suffix)
+    return second + suffix
