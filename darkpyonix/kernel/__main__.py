@@ -199,7 +199,7 @@ class Kernel(object):
             self.collab = DocumentState(self.path, self.events.append,
                                         seq_provider=lambda: self.events.seq)
             self.extra_handlers.update(self.collab.handlers())
-            self.tokens = TokenStore(self.path)  # FR-K10; the handoff code sets close_streams
+            self.tokens = TokenStore(self.path)  # FR-K10
             self.extra_handlers.update(self.tokens.handlers())
             self.store = RunStore(self.path, self.kernel_id)
             crashed = self.store.recover_crashed()
@@ -212,6 +212,7 @@ class Kernel(object):
 
             from darkpyonix._server import ControlServer
             self.server = ControlServer(self.kernel_id, self.events, self.handlers())
+            self.tokens.close_streams = self.server.streams.close_share  # FR-K9, PR-6
             self.collab.start()
             self.tokens.start()
             self.server.start()

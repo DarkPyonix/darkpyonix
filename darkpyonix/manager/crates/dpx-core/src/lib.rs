@@ -97,6 +97,21 @@ pub struct KernelEvent {
 
 pub type EventStream = Pin<Box<dyn Stream<Item = KernelEvent> + Send>>;
 
+/// A client connection the manager hands to a kernel (PROTOCOL §3.7, SPEC FR-M6).
+///
+/// `request` is the HTTP request the manager already read, verbatim and without the token.
+/// `transport` is `"fd"` for the client's own socket and `"pump"` for one end of a socket pair
+/// whose other end the manager pumps. The descriptor is closed once the kernel took it.
+pub struct AdoptRequest {
+    pub kind: String,
+    pub transport: String,
+    pub request: Vec<u8>,
+    /// `{capabilities, client_id, user, nickname, share_id}` (PROTOCOL §3.7.1).
+    pub label: Value,
+    #[cfg(unix)]
+    pub fd: std::os::fd::OwnedFd,
+}
+
 /// Everything the HTTP layer needs from kernels.
 #[async_trait]
 pub trait KernelBackend: Send + Sync + 'static {
@@ -117,4 +132,13 @@ pub trait KernelBackend: Send + Sync + 'static {
     async fn document(&self, path: &str, viewer_outputs: bool) -> Result<Value>;
     /// Force-kill a kernel process that did not exit after `shutdown` (DELETE ?force=true).
     async fn kill(&self, kernel_id: &str) -> Result<()>;
+    /// True if [`KernelBackend::adopt`] works, so the HTTP layer may hand long-lived streams to
+    /// kernels (FR-M6). Backends without real kernels keep serving those streams themselves.
+    fn supports_handoff(&self) -> bool {
+        false
+    }
+    /// Hand a client connection to the kernel (`adopt`); returns the kernel's `stream_id`.
+    async fn adopt(&self, _kernel_id: &str, _req: AdoptRequest) -> Result<String> {
+        Err(DpxError::new("internal", "this backend cannot hand off streams"))
+    }
 }

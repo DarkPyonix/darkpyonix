@@ -351,6 +351,16 @@ impl ShareStore {
 
     /// Replaces the manager shared token of one type: the old one is marked revoked, a new one is
     /// stored hashed. Returns `(share_id, token, created_at)`.
+    /// Share ids of the active shared token of `token_type` (before a reset revokes it).
+    pub fn active_shared_ids(&self, token_type: &str) -> rusqlite::Result<Vec<String>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT share_id FROM manager_shared WHERE token_type = ?1 AND revoked_at IS NULL",
+        )?;
+        let rows = stmt.query_map(params![token_type], |r| r.get::<_, String>(0))?;
+        rows.collect()
+    }
+
     pub fn reset_shared(&self, token_type: &str) -> rusqlite::Result<(String, String, String)> {
         let share_id = format!("s_{}", random_hex(8));
         let token = random_hex(32);
