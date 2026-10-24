@@ -233,8 +233,19 @@ fn test_fr_c2_cli_commands() {
     let o = run(h, &["share", "train.py", "--permission", "viewer1"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("dedicated manager"), "{}", text(&o.stderr));
+    // The given manager is asked once and refuses; the CLI cannot tell its mode beforehand.
     let shares = fake.state.calls().iter().filter(|c| c.0.ends_with("/shares")).count();
-    assert_eq!(shares, 0, "share must not reach an ephemeral manager");
+    assert_eq!(shares, 1, "share goes to the manager named by the environment");
+
+    // Without DARKPYONIX_MANAGER_URL/TOKEN, share refuses and spawns nothing.
+    let home = scratch_home("share_no_env");
+    notebook(&home);
+    let exe = home.join("must-not-run.sh");
+    write_script(&exe, "touch \"$DARKPYONIX_HOME/spawned\"\nexit 9\n");
+    let o = cli(&home).args(["share", "train.py", "--permission", "viewer1"]).env("DARKPYONIX_SELF_EXE", &exe).output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o.stderr).contains("dedicated manager"), "{}", text(&o.stderr));
+    assert!(!home.join("spawned").exists(), "share must not spawn a manager");
 }
 
 #[test]
