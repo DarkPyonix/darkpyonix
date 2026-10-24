@@ -151,7 +151,8 @@ impl RealBackend {
         let user_tag = home::user_tag().map_err(|e| internal(format!("OS account: {e}")))?;
         let kernels_dir = home::subdir(&cfg.home, "kernels")
             .map_err(|e| internal(format!("kernels dir: {e}")))?;
-        let discovery = Discovery::new(user_tag.clone(), kernels_dir, cfg.multicast);
+        let discovery =
+            Discovery::new_for_home(user_tag.clone(), kernels_dir, &cfg.home, cfg.multicast);
         Ok(Self {
             cfg,
             user_tag,

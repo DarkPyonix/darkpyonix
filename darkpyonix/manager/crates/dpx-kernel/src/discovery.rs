@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
@@ -28,9 +28,15 @@ struct Cached {
     seen: Instant,
 }
 
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
 pub struct Discovery {
     user_tag: String,
     kernels_dir: PathBuf,
+    /// Canonical runtime home; announces that name another `home` are ignored. `None`: no filter.
+    home: Option<PathBuf>,
     multicast: bool,
     cache: Mutex<HashMap<String, Cached>>,
     listening: Mutex<bool>,
@@ -87,9 +93,30 @@ fn str_field<'a>(e: &'a Entry, k: &str) -> Option<&'a str> {
 
 impl Discovery {
     pub fn new(user_tag: String, kernels_dir: PathBuf, multicast: bool) -> Arc<Self> {
+        Self::build(user_tag, kernels_dir, None, multicast)
+    }
+
+    /// Like [`Discovery::new`], and ignores announces from a runtime home other than `home`
+    /// (the `user_tag` is the same for every home of one OS account).
+    pub fn new_for_home(
+        user_tag: String,
+        kernels_dir: PathBuf,
+        home: &Path,
+        multicast: bool,
+    ) -> Arc<Self> {
+        Self::build(user_tag, kernels_dir, Some(canonical(home)), multicast)
+    }
+
+    fn build(
+        user_tag: String,
+        kernels_dir: PathBuf,
+        home: Option<PathBuf>,
+        multicast: bool,
+    ) -> Arc<Self> {
         Arc::new(Self {
             user_tag,
             kernels_dir,
+            home,
             multicast,
             cache: Mutex::new(HashMap::new()),
             listening: Mutex::new(false),
@@ -125,10 +152,10 @@ impl Discovery {
 
     fn remember(&self, mut entry: Entry) {
         entry.remove("nonce");
-        // The user_tag is the same for every runtime home of one OS account, so a kernel of
-        // another home (its announce names it in `home`) is not ours to list or connect to.
-        if let (Some(theirs), Some(mine)) = (str_field(&entry, "home"), self.kernels_dir.parent()) {
-            if std::path::Path::new(theirs) != mine {
+        // A kernel of another runtime home (its announce names it in `home`) is not ours to list
+        // or connect to. An announce without `home` is accepted.
+        if let (Some(theirs), Some(mine)) = (str_field(&entry, "home"), self.home.as_ref()) {
+            if &canonical(Path::new(theirs)) != mine {
                 return;
             }
         }
