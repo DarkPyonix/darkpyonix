@@ -374,3 +374,26 @@ fn test_fr_m3_url_and_token_are_printed_on_stdout() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+#[test]
+fn test_fr_c1_spawned_manager_log_has_no_token_and_is_0600() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch_home("log_no_token");
+    // The manager honours DARKPYONIX_MANAGER_TOKEN, so the real token value is known here.
+    let secret = "log-test-token-9f3c1a7e5b2d4068";
+    let o = cli(&home)
+        .args(["ps"])
+        .env("DARKPYONIX_SELF_EXE", env!("CARGO_BIN_EXE_darkpyonix"))
+        .env("DARKPYONIX_MANAGER_TOKEN", secret)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let log = home.join("manager.log");
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    // The ephemeral manager's token is only on its stdout pipe, never in its stderr log.
+    let body = std::fs::read_to_string(&log).unwrap();
+    assert!(!body.contains("token"), "manager.log must not mention a token: {body}");
+    assert!(!body.contains("master token"), "{body}");
+    assert!(!body.contains(secret), "manager.log must not contain the real token value: {body}");
+}
