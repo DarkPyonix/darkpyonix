@@ -34,7 +34,7 @@ def _records(nb: Dict[str, Any]) -> List[Dict[str, Any]]:
         out.append({
             "index": dp["index"], "id": dp.get("id"), "source_sha256": dp.get("source_sha256"),
             "status": dp.get("status"), "execution_count": cell.get("execution_count"),
-            "outputs": cell.get("outputs") or [],
+            "outputs": cell.get("outputs") or [], "ended_at": dp.get("ended_at"),
         })
     return out
 
