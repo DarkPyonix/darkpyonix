@@ -338,7 +338,7 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 | `type` | 2025 필드 | 커널 이벤트 |
 |---|---|---|
 | `code_data` | `cells: [{cell_id, cell_type, source, execution_count}]` | `doc.snapshot` |
-| `history_data` | `history: [{cell_id, execution_count, outputs, executed_at}]` | 최신 실행 기록 |
+| `history_data` | `history: [{cell_id, execution_count, outputs, executed_at, stale}]` | 최신 실행 기록. 셀 맵핑은 FR-R4와 같고(FR-S9), 맞는 셀이 없으면 `cell_id`가 `null` |
 | `locks_data` | `locks: [{cell_id, is_locked, locked_by?, user_name?, locked_at?}]` | 문서의 잠금 |
 | `users_focus_data` | `users_focus: [{user_id, user_name, user_avatar, focused_cell_id, focused_at}]` | 접속자. 연결 직후 한 번 |
 | `other_user_focus` | `cell_id, user_id, user_name, user_avatar, timestamp` | `presence.update`(포커스 있음) |
