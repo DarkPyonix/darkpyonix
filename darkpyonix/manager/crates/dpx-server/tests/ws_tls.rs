@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use common::{kernel_id_for, scratch, FakeBackend};
 use dpx_core::{AdoptRequest, Ensured, EventStream, KernelBackend, KernelInfo, Result, StartKernel};
-use dpx_server::{serve, Mode, ServerConfig, TlsConfig};
+use dpx_server::{serve, ServerConfig, TlsConfig};
 use futures::{SinkExt, StreamExt};
 use http_body_util::Empty;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -123,7 +123,6 @@ async fn start() -> Rig {
     let mut cfg = ServerConfig::dedicated(dir.join("home"), "127.0.0.1", 0);
     cfg.idle_timeout = None;
     cfg.tls = Some(TlsConfig::PemFiles { cert: dir.join("cert.pem"), key: dir.join("key.pem") });
-    let _ = Mode::Dedicated;
     let inner = FakeBackend::new();
     let nb = dir.join("train.py");
     std::fs::write(&nb, "print('hello')\n").unwrap();
