@@ -932,11 +932,11 @@ pub async fn sync_ws(
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Capability::Read)?;
-        let upgrade = headers
+        let wants_ws = headers
             .get(axum::http::header::UPGRADE)
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
-        if !upgrade || !headers.contains_key("sec-websocket-key") {
+        if !wants_ws || !headers.contains_key("sec-websocket-key") {
             return Err(ApiError::invalid("a WebSocket upgrade request is required (Upgrade, Sec-WebSocket-Key)"));
         }
         if !st.backend.supports_handoff() {
