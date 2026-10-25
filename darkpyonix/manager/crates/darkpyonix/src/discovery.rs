@@ -80,6 +80,34 @@ fn self_exe() -> Result<PathBuf, CliError> {
     }
 }
 
+/// Size past which `manager.log` is rotated to `manager.log.1` before the next spawn (SPEC FR-C1).
+pub const MANAGER_LOG_LIMIT: u64 = 1024 * 1024;
+
+/// Open `manager.log` for appending with mode 0600 (Unix), first rotating it to `<name>.1`
+/// (replacing an older one) when it is larger than `limit` bytes.
+pub fn open_manager_log(path: &Path, limit: u64) -> std::io::Result<std::fs::File> {
+    if std::fs::metadata(path).map(|m| m.len() > limit).unwrap_or(false) {
+        let mut rotated = path.as_os_str().to_owned();
+        rotated.push(".1");
+        std::fs::rename(path, PathBuf::from(rotated))?;
+    }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let file = opts.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // A log left by an older version may have wider permissions.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
+
 /// Re-execute this binary as `darkpyonix manager --ephemeral` in its own session (so the
 /// terminal's Ctrl-C never reaches it), then read `{url, token, pid}` from its stdout pipe and
 /// wait for `/health`. Its stderr goes to `<home>/manager.log` for the failure message.
@@ -87,7 +115,8 @@ pub async fn spawn_ephemeral(http: &reqwest::Client, home: &Path) -> Result<Mana
     let fail = |m: String| CliError::new("spawn_failed", m);
     std::fs::create_dir_all(home).map_err(|e| fail(format!("cannot create {}: {e}", home.display())))?;
     let log_path = home.join("manager.log");
-    let log = std::fs::File::create(&log_path).map_err(|e| fail(format!("cannot create {}: {e}", log_path.display())))?;
+    let log = open_manager_log(&log_path, MANAGER_LOG_LIMIT)
+        .map_err(|e| fail(format!("cannot open {}: {e}", log_path.display())))?;
     let exe = self_exe()?;
     let mut cmd = Command::new(&exe);
     cmd.args(["manager", "--ephemeral"])
@@ -179,6 +208,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_fr_c1_manager_log_is_created_with_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = scratch("log_mode");
+        let p = home.join("manager.log");
+        std::fs::write(&p, "old\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        drop(open_manager_log(&p, MANAGER_LOG_LIMIT).unwrap());
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let q = home.join("fresh.log");
+        drop(open_manager_log(&q, MANAGER_LOG_LIMIT).unwrap());
+        assert_eq!(std::fs::metadata(&q).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn test_fr_c1_manager_log_appends_and_rotates_past_the_limit() {
+        use std::io::Write;
+        let home = scratch("log_rotate");
+        let p = home.join("manager.log");
+        let one = home.join("manager.log.1");
+        std::fs::write(&one, "ancient").unwrap();
+        writeln!(open_manager_log(&p, 100).unwrap(), "first").unwrap();
+        writeln!(open_manager_log(&p, 100).unwrap(), "second").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "first\nsecond\n");
+        assert_eq!(std::fs::read_to_string(&one).unwrap(), "ancient");
+        std::fs::write(&p, "x".repeat(101)).unwrap();
+        writeln!(open_manager_log(&p, 100).unwrap(), "third").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "third\n");
+        assert_eq!(std::fs::read_to_string(&one).unwrap(), "x".repeat(101));
     }
 
     #[test]

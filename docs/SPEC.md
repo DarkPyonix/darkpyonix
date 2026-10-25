@@ -370,7 +370,9 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 매니저의 주소와 토큰을 파일로 나누지 않습니다(INTENT D4). `darkpyonix` CLI는 `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN`이 있으면 그 매니저를 씁니다. 에이전트가 이미 아는 토큰입니다. 없으면 자기 임시 매니저를 자식 프로세스로 띄우고, 그 매니저가 표준 출력 첫 줄에 쓴 `{url, token, pid}`를 파이프로 읽어 씁니다. 토큰을 모르는 에이전트는 이렇게 자기 매니저를 씁니다. 커널은 모든 매니저가 멀티캐스트로 찾으므로 어느 매니저로 붙어도 같은 커널입니다(FR-M5).
 - `darkpyonix manager`를 직접 실행해도 같은 한 줄을 표준 출력에 씁니다. 에이전트는 그 값을 환경 변수로 두고 다음 호출에 쓸 수 있습니다. 두지 않으면 호출마다 새 임시 매니저가 뜨고, 각자 `idle_timeout` 뒤에 끝납니다.
 - 수용 기준: 환경 변수 없이 `darkpyonix run a.py`가 매니저를 띄워 동작하고, `DARKPYONIX_HOME/managers/`가 생기지 않습니다. 환경 변수를 주면 새 매니저를 띄우지 않습니다.
-- `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN` 중 하나만 있으면 오류입니다. 공유(`share`)는 전용 매니저가 필요해서 새 매니저를 띄우지 않고, 두 변수가 없으면 오류로 안내합니다. 띄운 매니저의 표준 오류는 `DARKPYONIX_HOME/manager.log`에 남고, 실패 메시지가 그 끝부분을 보여 줍니다. 오너 결정(2026-10-25, "K1/K2 -- 우리 웹 소켓으로 하나?, K5 -- 실제 구현까지 보류 | 외 전부 추천대로"): 이 파일을 승인합니다(K10). 권한은 0600이고 토큰은 기록하지 않으며(테스트로 고정) 크기에 한도를 두어 회전합니다. 구현은 이슈 #88입니다.
+- `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN` 중 하나만 있으면 오류입니다. 공유(`share`)는 전용 매니저가 필요해서 새 매니저를 띄우지 않고, 두 변수가 없으면 오류로 안내합니다. 띄운 매니저의 표준 오류는 `DARKPYONIX_HOME/manager.log`에 남고, 실패 메시지가 그 끝부분을 보여 줍니다.
+- `manager.log` (이슈 #88, 오너 결정 K10 2026-10-25): 권한은 0600(Unix, 기존 파일도 0600으로 좁힘, Windows는 기본값)이고, 매번 덮어쓰지 않고 이어 씁니다. 1 MiB를 넘으면 다음 실행 전에 `manager.log.1`로 옮기고(이전 `.1`은 교체) 새로 시작합니다. 임시 매니저의 표준 오류에는 토큰을 쓰지 않습니다. 토큰은 표준 출력 파이프로만 갑니다. 전용 매니저가 터미널에 보여 주는 마스터 토큰 줄은 로그로 가지 않습니다. 구현됨(PR #90, CI 통과).
+- 테스트: Rust `test_fr_c1_manager_log_is_created_with_mode_0600`, `test_fr_c1_manager_log_appends_and_rotates_past_the_limit`, `test_fr_c1_ephemeral_stderr_notices_carry_no_token`(`darkpyonix/manager/crates/darkpyonix/src/discovery.rs`, `src/manager.rs`), `test_fr_c1_spawned_manager_log_has_no_token_and_is_0600`(`tests/cli.rs`)
 - 테스트: Rust `test_fr_c1_cli_spawns_its_own_manager_and_reads_stdout`, `test_fr_c1_cli_uses_the_given_manager`, `test_fr_c1_spawn_failure_is_reported`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`)
 
 ### FR-C2 명령 — `Done`
