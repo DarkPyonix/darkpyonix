@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Brings develop's public tree onto the `release` branch, append-only.
+# Brings develop's public tree onto the `release` branch, append-only, keeping develop's
+# commits (and their authors) in the history that reaches main.
 #
 # Usage: sync-release.sh [--push]
 #
@@ -8,15 +9,24 @@
 #   TARGET  branch to write (default: release)
 #   MAIN    branch the release PR targets (default: main)
 #
+# Approach: a commit built with plumbing, never a checkout. develop's tree is read into a
+# temporary index (GIT_INDEX_FILE), the internal documents are dropped from that index, and
+# `git commit-tree` writes the commit. The working tree and the real index are not touched.
+#
+# The release commit's parents, in order:
+#   1. the previous release tip (linear first-parent history; absent on the first run);
+#   2. origin/main, only when main is not already an ancestor of the release tip, so a
+#      release -> main pull request never conflicts, whether main took the previous PR by
+#      merge commit, squash or rebase (main's tree is not used);
+#   3. origin/develop, so every develop commit is an ancestor of release and, once the PR
+#      merges, of main: the original authors stay visible on main.
+#
 # Guarantees:
-#   - Never force-pushes and never rewrites history. Each run adds at most one commit
-#     on top of the current release tip, so `git push` is always a fast-forward.
-#   - release always has origin/main as an ancestor (merged with `-s ours`, then the
-#     tree is replaced), so a release -> main pull request cannot conflict, whether
-#     main took the previous PR by merge commit, squash or rebase.
+#   - Never force-pushes and never rewrites history; `git push` is always a fast-forward.
 #   - Internal planning documents are dropped: PROJECT.md, AGENTS.md, CLAUDE.md,
-#     docs/INTENT.md and docs/SPEC.md. The public references (docs/ARCHITECTURE.md,
-#     PROTOCOL.md, FORMAT.md, docs/api/) and docs/guide/ are kept.
+#     docs/INTENT.md and docs/SPEC.md. The public references and docs/guide/ are kept.
+#   - No commit when the tree is unchanged AND main is already absorbed AND develop is
+#     already an ancestor of release.
 #   - Prints `changed=true|false` lines for the caller (also appended to $GITHUB_OUTPUT).
 set -euo pipefail
 
@@ -27,49 +37,50 @@ TARGET="${TARGET:-release}"
 MAIN="${MAIN:-main}"
 
 out() { echo "$1"; [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "$1" >> "$GITHUB_OUTPUT" || true; }
+resolve() { git rev-parse --verify -q "refs/remotes/origin/$1^{commit}" || true; }
 
-git rev-parse --verify -q "refs/remotes/origin/$SOURCE" >/dev/null \
-  || { echo "error: origin/$SOURCE not found" >&2; exit 1; }
-src="$(git rev-parse "refs/remotes/origin/$SOURCE")"
+src="$(resolve "$SOURCE")"
+[[ -n "$src" ]] || { echo "error: origin/$SOURCE not found" >&2; exit 1; }
+tip="$(resolve "$TARGET")"
+main="$(resolve "$MAIN")"
 
-have_main=0; have_target=0
-git rev-parse --verify -q "refs/remotes/origin/$MAIN" >/dev/null && have_main=1
-git rev-parse --verify -q "refs/remotes/origin/$TARGET" >/dev/null && have_target=1
-
-# 1. Start from the current release tip, else from main, else from develop alone.
-if (( have_target )); then
-  git checkout -q -B "$TARGET" "origin/$TARGET"
-elif (( have_main )); then
-  git checkout -q -B "$TARGET" "origin/$MAIN"
-else
-  git checkout -q --orphan "$TARGET"
+# main joins only when the release tip does not contain it yet.
+if [[ -n "$main" && -n "$tip" ]] && git merge-base --is-ancestor "$main" "$tip"; then
+  main=""
 fi
 
-# 2. Record main as merged, keeping the current content (tree is replaced below).
-if (( have_main )); then
-  git merge -s ours --no-commit --no-ff "origin/$MAIN" >/dev/null 2>&1 || true
-fi
-
-# 3. Replace the content with develop's tree, minus the internal documents.
-git read-tree --reset -u "$src"
+# develop's tree minus the internal documents, in a scratch index.
 private=(PROJECT.md AGENTS.md CLAUDE.md docs/INTENT.md docs/SPEC.md)
-git rm -q --cached --ignore-unmatch -- "${private[@]}"
-for f in "${private[@]}"; do rm -f -- "$f"; done
+tmp_index="$(mktemp -u "${TMPDIR:-/tmp}/release-index.XXXXXX")"
+trap 'rm -f "$tmp_index"' EXIT
+tree="$(
+  export GIT_INDEX_FILE="$tmp_index"
+  git read-tree "$src"
+  git rm -r --cached --force --quiet --ignore-unmatch -- "${private[@]}"
+  git write-tree
+)"
 
-# 4. Commit when there is something to record: a tree change or a pending main merge.
-merging=0
-git rev-parse -q --verify MERGE_HEAD >/dev/null && merging=1
-if (( ! merging )) && git rev-parse -q --verify HEAD >/dev/null 2>&1 && git diff --cached --quiet; then
+# Nothing to record: same tree, main absorbed, develop already in history.
+if [[ -n "$tip" && -z "$main" && "$(git rev-parse "$tip^{tree}")" == "$tree" ]] \
+   && git merge-base --is-ancestor "$src" "$tip"; then
   echo "$TARGET is already up to date with $SOURCE"
   out "changed=false"
   exit 0
 fi
+
+parents=()
+[[ -n "$tip" ]] && parents+=(-p "$tip")
+[[ -n "$main" ]] && parents+=(-p "$main")
+parents+=(-p "$src")
+
 excluded="$(printf '  %s\n' "${private[@]}")"
-git commit -q -m "Publish: $SOURCE $(git rev-parse --short "$src") to $TARGET" \
+new="$(git commit-tree "$tree" "${parents[@]}" \
+  -m "Publish: $SOURCE $(git rev-parse --short "$src") to $TARGET" \
   -m "Internal planning documents kept on $SOURCE only:
-$excluded"
+$excluded")"
+git update-ref "refs/heads/$TARGET" "$new"
 out "changed=true"
 
 if (( push )); then
-  git push origin "$TARGET"   # plain push: a non fast-forward fails instead of overwriting
+  git push origin "refs/heads/$TARGET:refs/heads/$TARGET"   # plain push: non fast-forward fails
 fi

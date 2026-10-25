@@ -1,20 +1,31 @@
-//! Manager side of PROTOCOL §2: loopback UDP multicast query/announce/bye, merged with the
-//! registry (FR-D1, FR-D2). A background listener keeps a live cache of unsolicited
-//! announces and byes so that `list` without `refresh` costs no network round trip.
+//! Manager side of PROTOCOL §2: loopback UDP multicast query/announce/bye (FR-D1). There is
+//! no registry file and no fallback (FR-D2, INTENT D4). A background listener keeps a live
+//! cache of unsolicited announces and byes so that `list` without `refresh` costs no network
+//! round trip.
 
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::Notify;
 
 use crate::process::pid_alive;
-use crate::registry::{self, entry_pid, Entry};
+
+/// An announce body (PROTOCOL §2.3) as a JSON object.
+pub type Entry = Map<String, Value>;
+
+pub fn entry_pid(entry: &Entry) -> u32 {
+    entry
+        .get("pid")
+        .and_then(Value::as_u64)
+        .map(|p| p.min(u32::MAX as u64) as u32)
+        .unwrap_or(0)
+}
 
 pub const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 68, 80);
 pub const PORT: u16 = 46880;
@@ -28,10 +39,14 @@ struct Cached {
     seen: Instant,
 }
 
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
 pub struct Discovery {
     user_tag: String,
-    kernels_dir: PathBuf,
-    multicast: bool,
+    /// Canonical runtime home; announces that name another `home` are ignored. `None`: no filter.
+    home: Option<PathBuf>,
     cache: Mutex<HashMap<String, Cached>>,
     listening: Mutex<bool>,
     queried: Mutex<bool>,
@@ -86,11 +101,20 @@ fn str_field<'a>(e: &'a Entry, k: &str) -> Option<&'a str> {
 }
 
 impl Discovery {
-    pub fn new(user_tag: String, kernels_dir: PathBuf, multicast: bool) -> Arc<Self> {
+    pub fn new(user_tag: String) -> Arc<Self> {
+        Self::build(user_tag, None)
+    }
+
+    /// Like [`Discovery::new`], and ignores announces from a runtime home other than `home`
+    /// (the `user_tag` is the same for every home of one OS account).
+    pub fn new_for_home(user_tag: String, home: &Path) -> Arc<Self> {
+        Self::build(user_tag, Some(canonical(home)))
+    }
+
+    fn build(user_tag: String, home: Option<PathBuf>) -> Arc<Self> {
         Arc::new(Self {
             user_tag,
-            kernels_dir,
-            multicast,
+            home,
             cache: Mutex::new(HashMap::new()),
             listening: Mutex::new(false),
             queried: Mutex::new(false),
@@ -98,15 +122,8 @@ impl Discovery {
         })
     }
 
-    pub fn multicast(&self) -> bool {
-        self.multicast
-    }
-
     /// Start the background listener once (needs a tokio runtime).
     pub fn ensure_listening(self: &Arc<Self>) {
-        if !self.multicast {
-            return;
-        }
         let mut started = self.listening.lock().unwrap();
         if *started {
             return;
@@ -123,10 +140,20 @@ impl Discovery {
         tokio::spawn(listen(weak, sock));
     }
 
-    fn remember(&self, mut entry: Entry) {
+    /// Cache `entry`; false when it is not ours (no kernel_id, or another runtime home).
+    fn remember(&self, mut entry: Entry) -> bool {
         entry.remove("nonce");
+        // A kernel of another runtime home is not ours to list or connect to; the user_tag is the
+        // same for every home of one OS account. A filtering discovery also rejects an announce
+        // that names no `home`: every kernel of this version sends it.
+        if let Some(mine) = self.home.as_ref() {
+            match str_field(&entry, "home") {
+                Some(theirs) if &canonical(Path::new(theirs)) == mine => {}
+                _ => return false,
+            }
+        }
         let Some(kid) = str_field(&entry, "kernel_id").map(str::to_string) else {
-            return;
+            return false;
         };
         self.cache.lock().unwrap().insert(
             kid,
@@ -135,6 +162,7 @@ impl Discovery {
                 seen: Instant::now(),
             },
         );
+        true
     }
 
     fn handle_datagram(&self, data: &[u8]) {
@@ -143,7 +171,9 @@ impl Discovery {
             return;
         }
         match str_field(&msg, "op") {
-            Some("announce") => self.remember(msg),
+            Some("announce") => {
+                self.remember(msg);
+            }
             Some("bye") => {
                 if let Some(kid) = str_field(&msg, "kernel_id") {
                     self.cache.lock().unwrap().remove(kid);
@@ -154,34 +184,14 @@ impl Discovery {
         self.changed.notify_waiters();
     }
 
-    /// Drop a kernel from the live cache only (the registry is left alone).
-    pub fn forget_cached(&self, kernel_id: &str) {
-        self.cache.lock().unwrap().remove(kernel_id);
-    }
-
-    /// Forget a kernel (after a force kill).
+    /// Drop a kernel from the live cache (after a force kill, or a stale port).
     pub fn forget(&self, kernel_id: &str) {
         self.cache.lock().unwrap().remove(kernel_id);
-        let _ = std::fs::remove_file(self.kernels_dir.join(format!("{kernel_id}.json")));
     }
 
-    /// Registry (pruned) merged with the live cache; a fresh announce beats the file.
+    /// The live cache: announces seen recently from kernels whose process still exists.
     pub fn snapshot(&self, kernel_id: Option<&str>) -> Vec<Entry> {
         let mut merged: HashMap<String, Entry> = HashMap::new();
-        match kernel_id {
-            Some(kid) => {
-                if let Some(e) = registry::read(&self.kernels_dir, &self.user_tag, kid) {
-                    merged.insert(kid.to_string(), e);
-                }
-            }
-            None => {
-                for e in registry::scan(&self.kernels_dir, &self.user_tag, true) {
-                    if let Some(kid) = str_field(&e, "kernel_id") {
-                        merged.insert(kid.to_string(), e.clone());
-                    }
-                }
-            }
-        }
         {
             let mut cache = self.cache.lock().unwrap();
             cache.retain(|_, c| c.seen.elapsed() < STALE_AFTER && pid_alive(entry_pid(&c.entry)));
@@ -204,9 +214,6 @@ impl Discovery {
         timeout: Duration,
         expect: &HashSet<String>,
     ) -> usize {
-        if !self.multicast {
-            return 0;
-        }
         let nonce = crate::home::random_hex(8);
         let mut msg = json!({"dkp": 1, "op": "query", "user_tag": self.user_tag, "nonce": nonce});
         if let Some(kid) = kernel_id {
@@ -259,18 +266,19 @@ impl Discovery {
             if kernel_id.is_some_and(|k| k != kid) || !pid_alive(entry_pid(&reply)) {
                 continue;
             }
-            self.remember(reply);
-            answered.insert(kid);
+            if self.remember(reply) {
+                answered.insert(kid);
+            }
         }
         answered.len()
     }
 
-    /// FR-D1/D2: live kernels of this user. Queries the group when `refresh` is set or no
-    /// query was ever made; otherwise relies on the listener's cache and the registry.
+    /// FR-D1: live kernels of this user. Queries the group when `refresh` is set or no
+    /// query was ever made; otherwise relies on the listener's cache.
     pub async fn discover(self: &Arc<Self>, refresh: bool) -> Vec<Entry> {
         self.ensure_listening();
         let queried = *self.queried.lock().unwrap();
-        if self.multicast && (refresh || !queried) {
+        if refresh || !queried {
             let known: HashSet<String> = self
                 .snapshot(None)
                 .iter()
@@ -281,16 +289,14 @@ impl Discovery {
         self.snapshot(None)
     }
 
-    /// One kernel: cache/registry first, then a targeted query.
+    /// One kernel: the cache first, then a targeted query.
     pub async fn find(self: &Arc<Self>, kernel_id: &str) -> Option<Entry> {
         self.ensure_listening();
         if let Some(e) = self.snapshot(Some(kernel_id)).pop() {
             return Some(e);
         }
-        if self.multicast {
-            self.query(Some(kernel_id), QUERY_TIMEOUT, &HashSet::new())
-                .await;
-        }
+        self.query(Some(kernel_id), QUERY_TIMEOUT, &HashSet::new())
+            .await;
         self.snapshot(Some(kernel_id)).pop()
     }
 }

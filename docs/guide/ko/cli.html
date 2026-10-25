@@ -71,7 +71,7 @@
           <tr><td><code>darkpyonix restart FILE [--hard]</code></td><td>soft 재시작은 네임스페이스를 비웁니다. <code>--hard</code>는 같은 인터프리터로 프로세스를 다시 실행하고, 커널 ID는 그대로입니다.</td></tr>
           <tr><td><code>darkpyonix shutdown FILE [--force]</code></td><td>인터럽트하고 실행 기록을 마저 쓴 뒤 정상 종료합니다. 프로세스를 죽이는 것은 <code>--force</code>뿐입니다.</td></tr>
           <tr><td><code>darkpyonix kernel FILE [--python PATH]</code></td><td>아무것도 실행하지 않고 커널만 띄웁니다.</td></tr>
-          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>그 파일 커널의 공유 토큰을 발급합니다. 전용 매니저가 필요합니다. <code>--capabilities read,history,...</code>로 바뀝니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></td></tr>
+          <tr><td><code>darkpyonix share FILE --capabilities read,history[,execute,edit,manage]</code></td><td>나열한 능력만 가지는 공유 토큰을 발급합니다. 전용 매니저가 필요합니다. 예전 등급 이름 <code>viewer1</code>, <code>viewer2</code>, <code>viewer3</code>, <code>admin</code>, <code>editor</code>는 400으로 거절됩니다. PR <a href="https://github.com/DarkPyonix/darkpyonix/pull/84">#84</a>에서 들어갔습니다.</td></tr>
           <tr><td><code>darkpyonix manager [--ephemeral|--dedicated] [--host H] [--port P] [--idle-timeout S]</code></td><td>매니저를 실행합니다. 기본은 임시 모드로, 루프백에만 열고 유휴 상태가 이어지면 끝납니다. 두 모드를 함께 주면 오류입니다.</td></tr>
         </tbody>
       </table>
@@ -124,13 +124,10 @@
 
 
     <h2 id="manager">어느 매니저를 쓰는가</h2>
-    <p>지금 CLI는 <code>~/.darkpyonix/managers/*.json</code>에서 살아 있는 매니저를 고르고, 없으면 임시 매니저를
-      띄웁니다. 에이전트가 다른 매니저의 토큰을 몰라도 같은 OS 사용자면 됩니다. 임시 매니저는 기본 120초 동안
+    <p>CLI는 <code>DARKPYONIX_MANAGER_URL</code>과 <code>DARKPYONIX_TOKEN</code>이 둘 다 있으면 그 매니저를 씁니다.
+      없으면 자기 임시 매니저를 띄우고, 그 매니저가 표준 출력에 쓰는 JSON 한 줄(<code>{url, token, pid}</code>)에서
+      주소와 토큰을 받습니다. 파일은 쓰지도 읽지도 않습니다. 토큰을 모르는 에이전트는 자기 매니저를 씁니다. 임시 매니저는 기본 120초 동안
       유휴 상태면 끝나고, 커널은 남습니다.</p>
-        <div class="warn">
-      <span class="label">변경 중</span>
-      <p>등록 파일을 없애는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>. 바뀐 뒤 CLI는 <code>DARKPYONIX_MANAGER_URL</code>과 <code>DARKPYONIX_TOKEN</code>이 있으면 그것을 쓰고, 없으면 자기 임시 매니저를 띄워 그 프로세스에서 주소와 토큰을 받습니다. 위의 명령과 동작은 바뀌지 않습니다.</p>
-    </div>
 
     <nav class="pagenav" aria-label="페이지 이동">
       <a class="prev" href="notebook-format.html"><span>이전</span>&larr; 노트북 파일</a>

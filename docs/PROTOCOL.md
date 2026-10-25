@@ -23,7 +23,7 @@ Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-
 
 - 그룹 `239.255.68.80`, 포트 `46880`, 인터페이스 `127.0.0.1`, TTL 0(호스트 밖으로 나가지 않음), `IP_MULTICAST_LOOP` 켬.
 - 커널과 매니저 모두 `SO_REUSEADDR`(가능하면 `SO_REUSEPORT`)로 같은 포트에 바인드하고 그룹에 가입합니다.
-- 발견은 이 멀티캐스트 하나입니다. 등록 파일(`kernels/<kernel_id>.json`, `managers/<pid>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 사용자 지시로 지웁니다(INTENT D4, 구현 대기 #50). 루프백 멀티캐스트가 막힌 환경과 WSL↔Windows 사이 발견은 지원 범위 밖입니다(SPEC FR-D3).
+- 발견은 이 멀티캐스트 하나입니다. 등록 파일(`kernels/<kernel_id>.json`, `managers/<pid>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 없습니다(INTENT D4, SPEC FR-D2). 죽은 커널은 질의에 답하지 않아서 목록에서 빠지고, 치울 파일이 없습니다. 루프백 멀티캐스트가 막힌 환경과 WSL↔Windows 사이 발견은 지원 범위 밖입니다(SPEC FR-D3).
 - 그룹 주소와 포트는 사용자 결정입니다(2026-10-04, "그대로 사용", INTENT D4, PROJECT Q14).
 
 ### 2.2 사용자 태그
@@ -51,7 +51,9 @@ Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-
 }
 ```
 
-`control`은 제어 채널의 주소입니다(§3). POSIX는 유닉스 도메인 소켓 경로, Windows는 파이프 이름입니다. 2026-10-04까지 있던 TCP `port`와 넘김용 `handoff`는 이 하나로 합쳤습니다(INTENT D5). 구현 대기(#55).
+`control`은 제어 채널의 주소입니다(§3). POSIX는 유닉스 도메인 소켓 경로, Windows는 파이프 이름입니다. 2026-10-04까지 있던 TCP `port`와 넘김용 `handoff`는 이 하나로 합쳤습니다(INTENT D5). POSIX는 구현됨(#55), Windows 파이프는 구현 대기.
+
+`home`은 커널의 런타임 홈 경로입니다. `user_tag`는 같은 OS 계정이면 홈이 달라도 같으므로, 매니저는 `home`이 자기 홈과 다른 announce를 무시합니다(홈마다 따로 보는 격리를 유지합니다). 경로는 심볼릭 링크를 풀어(canonical) 비교하고, `home`을 제대로 가진 announce만 받습니다(홈을 지정한 매니저는 `home`이 없는 announce도 버립니다).
 
 커널은 다음 때 announce를 보냅니다.
 - query에 응답할 때(`nonce`를 그대로 돌려줌)
@@ -93,7 +95,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 ### 3.2 핸드셰이크
 
-INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 확인은 OS가 알려 주는 상대 계정으로 합니다. 키 파일과 비밀값은 없습니다. 구현 대기(#55).
+INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 확인은 OS가 알려 주는 상대 계정으로 합니다. 키 파일과 비밀값은 없습니다. POSIX 구현됨(#55), Windows 파이프는 구현 대기.
 
 **먼저 계정을 확인합니다.** 연결이 맺어지면 프레임을 주고받기 전에 양쪽이 OS에 상대 프로세스의 계정을 묻습니다. 커널은 상대가 자기 계정이 아니면 아무것도 보내지 않고 닫습니다. 매니저도 커널 쪽이 자기 계정이 아니면 닫습니다. 다른 계정이 같은 경로나 파이프 이름을 먼저 차지해 커널인 척하는 것을 막으려는 것입니다.
 
@@ -138,12 +140,12 @@ INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 �
 | `runs.get` | `run_id: str \| "latest" \| "current"` | nbformat 4 노트북 | |
 | `subscribe` | `since: int?` | `{seq: int, replayed: int}` | `since` 이후의 이벤트를 다시 보내고 이어서 실시간 전송 |
 | `unsubscribe` | `{}` | `{}` | |
-| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. 구현 대기(#47) |
-| `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현 대기(#47) |
-| `tokens.issue` | `kind: "initial"\|"login"\|"share"`, `capabilities: [str]`, `label?`, `expires_at?` | `{token, share_id?}` | 커널이 토큰을 만들고 해시만 영속화(§6). 구현 대기(#48) |
-| `tokens.verify` | `token` | `{valid, revoked, kind?, capabilities?, share_id?}` | 커널 접근 토큰 확인(§6). 구현 대기(#48) |
-| `tokens.revoke` | `share_id` | `{revoked: int, closed: int}` | 그 공유의 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫음(§6). 구현 대기(#48) |
-| `tokens.list` | `{}` | `{shares: [{share_id, capabilities, label, created_at, expires_at, revoked_at}]}` | 토큰 값과 해시는 주지 않음. 구현 대기(#48) |
+| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. POSIX 구현됨(#47), Windows `share`는 구현 대기 |
+| `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현됨(#47) |
+| `tokens.issue` | `kind: "initial"\|"login"\|"share"`, `capabilities: [str]`, `label?`, `expires_at?` | `{token, share_id?}` | 커널이 토큰을 만들고 해시만 영속화(§6). 커널 구현됨(#48) |
+| `tokens.verify` | `token` | `{valid, revoked, kind?, capabilities?, share_id?}` | 커널 접근 토큰 확인(§6). 커널 구현됨(#48) |
+| `tokens.revoke` | `share_id` | `{revoked: int, closed: int}` | 그 공유의 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫음(§6). 커널 구현됨(#48) |
+| `tokens.list` | `{}` | `{shares: [{share_id, capabilities, label, created_at, expires_at, revoked_at}]}` | 토큰 값과 해시는 주지 않음. 커널 구현됨(#48) |
 
 오류 코드: `bad_request`, `unknown_method`, `busy`, `not_found`, `frame_too_large`, `shutting_down`, `internal`.
 
@@ -200,7 +202,7 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
 | `ws` | `GET /api/ws/kernels/{kernel_id}` (Upgrade) | `101 Switching Protocols`, §5의 2025 WebSocket 동기화 |
 | `wait` | `GET /api/kernels/{kernel_id}/runs/{run_ref}/wait` | 실행이 끝나거나 `timeout`이 지나면 JSON 한 번(SPEC FR-S7) |
 
-짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. 구현 대기(#47).
+짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. POSIX 커널은 구현됨(#47), Windows `share`는 구현 대기(#47). `ws`의 동기화 메시지(§5)는 POSIX 커널에 구현됨(#49).
 
 #### 3.7.1 `adopt` 요청
 
@@ -239,6 +241,17 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 - 매니저는 본문 바이트를 바꾸지 않습니다. 매니저가 맡는 것은 바깥 운반뿐입니다. TLS 레코드의 암복호화, HTTP/2에서는 커널 응답 머리(상태 줄과 헤더)를 HEADERS 프레임으로 옮기고 본문을 DATA 프레임에 그대로 싣는 일, 터널에서는 터널 스트림에 싣는 일입니다.
 - 이런 스트림은 매니저와 함께 끝납니다. 매니저가 끝나면 소켓 쌍이 닫히고, 커널은 그 스트림을 닫힌 연결로 처리합니다.
 
+#### 3.7.3a 커널이 쓰는 응답
+
+커널은 넘겨받은 요청 줄과 헤더를 읽고 HTTP/1.1로 답합니다. 본문은 항등 인코딩이고(청크 없음), 모든 응답에 `Connection: close`가 있어서 HTTP/2나 터널로 옮기는 매니저가 본문 바이트를 그대로 DATA에 실을 수 있습니다.
+
+- `events`: `200`, `Content-Type: text/event-stream`, `Cache-Control: no-cache`. 본문은 `: darkpyonix events <kernel_id>`로 시작하고, 이벤트마다 `id: <seq>`, `event: <type>`, `data: <JSON>`입니다(`replay_truncated`는 `id` 없음). 이어 받기는 `Last-Event-ID` 헤더가 `since` 쿼리보다 앞섭니다. 15초 동안 아무 일이 없으면 `: keepalive` 주석을 씁니다. `since`가 정수가 아니면 `400` JSON입니다. 라벨에 `history`가 없으면 `output`과 `output.clear` 이벤트를 보내지 않습니다.
+- `wait`: `timeout`(1~300초, 기본 60) 안에 끝나거나 시간이 지나면 `200 application/json` 한 번(`Content-Length`)입니다. 본문은 `runs.wait` 결과에 `next`(끝나지 않았으면 다시 부를 경로, 끝났으면 `null`)를 더한 것입니다. `history`가 없으면 `run`은 `null`입니다. 오류는 `{code, message}` JSON이고 `not_found`는 `404`, `bad_request`는 `400`입니다.
+- `ws`: `101 Switching Protocols`와 `Sec-WebSocket-Accept` 뒤에 §5의 2025 동기화 메시지를 주고받습니다(구현됨 #49).
+- `client_id`가 있는 `events`와 `ws` 스트림이 열려 있는 동안 커널이 10초마다 자기 `presence.update`를 부릅니다. 매니저의 하트비트는 필요 없습니다.
+- 커널은 스트림마다 스레드 하나를 쓰고, 보내기 제한 시간은 10초입니다. 느린 클라이언트는 자기 스트림만 막습니다.
+- 제어 채널은 인증 전 연결이 보낸 FD를 모두 닫고, 아직 `adopt`가 가져가지 않은 FD는 최대 4개까지만 쥡니다.
+
 #### 3.7.4 공유 철회 (`streams.close`)
 
 ```json
@@ -270,7 +283,7 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 | `presence.leave` | `client, request_id?` | `{}` |
 | `runs.wait` | `run_id \| "latest" \| "current", timeout` | 끝나면 실행 요약, 아니면 `{status: "running", progress?}` |
 
-오류 코드 추가: `conflict`, `locked`. 2026-10-03까지 있던 `forbidden`(커널 쪽 권한 검사)은 지웁니다(구현 대기 #49).
+오류 코드 추가: `conflict`, `locked`. 2026-10-03까지 있던 `forbidden`(커널 쪽 권한 검사)은 지웠습니다(#49). 커널은 `forbidden`을 내지 않습니다.
 
 | event type | data |
 |---|---|
@@ -298,7 +311,7 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 
 ## 5. 2025 WebSocket 동기화
 
-SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`을 `/api/ws/kernels/{kernel_id}`로 되살립니다. 매니저가 토큰과 권한을 확인하고 연결을 넘기면(§3.7, `kind: "ws"`), 커널이 업그레이드에 `101 Switching Protocols`로 답하고 이 절의 메시지를 주고받습니다. 구현 대기(#49).
+SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`을 `/api/ws/kernels/{kernel_id}`로 되살립니다. 매니저가 토큰과 권한을 확인하고 연결을 넘기면(§3.7, `kind: "ws"`), 커널이 업그레이드에 `101 Switching Protocols`로 답하고 이 절의 메시지를 주고받습니다. 구현됨(#49, 커널 `darkpyonix/kernel/_wsync.py`).
 
 ### 5.1 프레임
 
@@ -325,7 +338,7 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 | `type` | 2025 필드 | 커널 이벤트 |
 |---|---|---|
 | `code_data` | `cells: [{cell_id, cell_type, source, execution_count}]` | `doc.snapshot` |
-| `history_data` | `history: [{cell_id, execution_count, outputs, executed_at}]` | 최신 실행 기록 |
+| `history_data` | `history: [{cell_id, execution_count, outputs, executed_at, stale}]` | 최신 실행 기록. 셀 맵핑은 FR-R4와 같고(FR-S9), 맞는 셀이 없으면 `cell_id`가 `null` |
 | `locks_data` | `locks: [{cell_id, is_locked, locked_by?, user_name?, locked_at?}]` | 문서의 잠금 |
 | `users_focus_data` | `users_focus: [{user_id, user_name, user_avatar, focused_cell_id, focused_at}]` | 접속자. 연결 직후 한 번 |
 | `other_user_focus` | `cell_id, user_id, user_name, user_avatar, timestamp` | `presence.update`(포커스 있음) |
@@ -345,7 +358,7 @@ SPEC FR-S9, INTENT D19. 2025 설계의 `/ws/kernels/{kernel_id}?token={token}`�
 
 ## 6. 커널 접근 토큰
 
-SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그인, 공유)은 커널에 묶이고, 어느 매니저로 들어와도 통해야 합니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아." 그리고 사용자 결정(2026-10-04): "커널이 들고 있게". 구현 대기(#48).
+SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그인, 공유)은 커널에 묶이고, 어느 매니저로 들어와도 통해야 합니다. 사용자(2026-10-04): "아니, 그게 아니고 해당 커널에 접근 가능한 토큰을 말하는거야. 매니저가 여러개잖아." 그리고 사용자 결정(2026-10-04): "커널이 들고 있게". 커널 쪽은 구현됨(#48, `darkpyonix/kernel/_tokens.py`).
 
 - **커널이 주인입니다.** 커널이 토큰을 만들고, 확인하고, 거두고, 영속화합니다. 매니저는 토큰 파일을 읽거나 쓰지 않고, 제어 채널(§3)의 `tokens.*` 메서드로 요청합니다. 같은 계정의 어느 매니저든 같은 커널에 묻으므로 같은 토큰이 통합니다.
 - **커널이 꺼져 있으면.** 매니저가 그 커널을 먼저 띄웁니다(SPEC FR-M2의 ensure). 커널은 뜨면서 저장소를 읽어 옵니다.
@@ -356,6 +369,7 @@ SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그
   - 요청마다 확인: 매니저는 클라이언트가 낸 토큰이 마스터 토큰이나 매니저 공유 토큰(`manager.db`)이 아니면 `tokens.verify {token}`을 보냅니다. `valid`이면 `capabilities`로 권한을 검사합니다(SPEC FR-A3). `revoked`이면 `401 token_revoked`입니다.
   - 철회: `tokens.revoke {share_id}`. 커널은 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫습니다(§3.7.4와 같은 일).
 - **영속화.** 커널은 토큰 값을 두지 않고 SHA-256 해시, `kind`, `capabilities`, `share_id`, `label`, `created_at`, `expires_at`, `revoked_at`만 둡니다. 토큰은 `secrets.token_urlsafe(32)`이라 소금 없는 SHA-256으로 충분하고, 비교는 `hmac.compare_digest`입니다. 쓸 때는 임시 파일에 쓰고 `os.replace`로 바꿉니다. 거둔 토큰은 거둔 표시로 남깁니다(2025 `blacklisted`).
-- **저장소 위치 [provisional].** 원칙: 커널만 읽고 쓴다. 노트북 파일과 수명을 같이 한다(커널이 꺼져도 남고, 파일이 지워지면 지워진다). 정확한 위치는 구현 이슈 #48에서 정합니다. 커널은 자기 파일이 지워진 것을 알아채면(SPEC FR-S5) 저장소를 지웁니다. 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다.
+- **저장소 위치 [provisional].** `<노트북 옆 __runs__/파일이름/>tokens.json`(런타임 홈이 아니라 실행 기록 폴더, 권한 0600). 커널만 읽고 쓰고, 노트북 파일 옆에 있어 커널이 꺼져도 남고 홈이 달라도 같은 파일의 토큰입니다. 커널은 0.5초마다 자기 파일이 있는지 보고, 지워진 것을 알아채면 저장소를 지웁니다(SPEC FR-S5 감시와 별개의 스레드). 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 커널이 꺼져 있는 동안 파일이 지워졌다 같은 경로에 다시 만들어지면 옛 토큰이 되살아납니다(알려진 한계, 사용자 확인 대기).
+- **스트림 닫기 연결점.** `TokenStore(close_streams=...)`가 `tokens.revoke`의 `closed` 수를 정합니다. 넘겨받은 스트림(§3.7)을 닫는 코드(#47)가 이 함수를 채웁니다. 그 전에는 0입니다.
 - **지운 설계.** 2026-10-04 초안의 런타임 홈 `tokens/<kernel_id>.json`(같은 계정의 모든 매니저가 함께 읽고 쓰는 파일)과 `tokens/<kernel_id>.lock`은 지웁니다.
 - **측정.** 매니저는 요청마다 커널에 한 번 묻습니다. 커널은 메모리에서 답하므로 제어 채널 왕복 한 번입니다. 지연은 #48 구현 때 재고 SPEC NFR-M2 옆에 적습니다.

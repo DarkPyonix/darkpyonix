@@ -1,4 +1,4 @@
-//! DKP/1 client (PROTOCOL §3): length-prefixed JSON frames, HMAC handshake, request/response
+//! DKP/1 client (PROTOCOL §3): length-prefixed JSON frames, peer-account check, request/response
 //! by id and event fan-out.
 //!
 //! One [`Connection`] per kernel is shared by every request and every event subscriber of
@@ -13,14 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use base64::Engine as _;
 use dpx_core::{DpxError, EventStream, KernelEvent, Result};
-use hmac::{Hmac, Mac};
 use serde_json::{json, Value};
-use sha2::Sha256;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
@@ -65,8 +60,8 @@ pub fn encode(msg: &Value) -> Result<Vec<u8>> {
 }
 
 /// Read one frame; returns the parsed object and its payload size.
-async fn read_frame(
-    reader: &mut OwnedReadHalf,
+async fn read_frame<R: AsyncRead + Unpin>(
+    reader: &mut R,
 ) -> std::io::Result<(serde_json::Map<String, Value>, usize)> {
     let len = reader.read_u32().await? as usize;
     if len > MAX_FRAME {
@@ -86,12 +81,44 @@ async fn read_frame(
     }
 }
 
-/// `hex(HMAC-SHA256(user.key, nonce || kernel_id))` (PROTOCOL §3.2).
-pub fn auth_mac(key: &[u8], nonce: &[u8], kernel_id: &str) -> String {
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac accepts any key length");
-    mac.update(nonce);
-    mac.update(kernel_id.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+/// Open the kernel's Unix socket and ask the OS who serves it (PROTOCOL §3.2, FR-A1): a socket
+/// of another account is refused before a single byte is sent, so that account cannot pose as
+/// the kernel.
+#[cfg(unix)]
+async fn open_stream(control: &str) -> Result<tokio::net::UnixStream> {
+    let stream = tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        tokio::net::UnixStream::connect(control),
+    )
+    .await
+    .map_err(|_| unreachable("connect timed out"))?
+    .map_err(|e| unreachable(format!("cannot connect to kernel: {e}")))?;
+    let cred = stream
+        .peer_cred()
+        .map_err(|e| unreachable(format!("cannot read the kernel's account: {e}")))?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    require_same_account(control, cred.uid(), unsafe { libc::geteuid() })?;
+    Ok(stream)
+}
+
+/// The kernel's account must be ours; otherwise nothing is sent to it (FR-A1).
+#[cfg(unix)]
+fn require_same_account(control: &str, peer_uid: u32, my_uid: u32) -> Result<()> {
+    if peer_uid == my_uid {
+        Ok(())
+    } else {
+        Err(unreachable(format!(
+            "{control} is served by another OS account (uid {peer_uid}), not uid {my_uid}"
+        )))
+    }
+}
+
+/// Windows would use a named pipe with a server SID check; not implemented yet (#55 follow-up).
+#[cfg(not(unix))]
+async fn open_stream(_control: &str) -> Result<tokio::io::DuplexStream> {
+    Err(unreachable(
+        "the Windows named-pipe control channel is not implemented yet",
+    ))
 }
 
 /// UTC now as `YYYY-MM-DDTHH:MM:SS.mmmZ`.
@@ -268,7 +295,7 @@ impl Shared {
     }
 }
 
-/// An authenticated control connection to one kernel.
+/// A control connection to one kernel.
 pub struct Connection {
     shared: Arc<Shared>,
     tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -278,20 +305,15 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Connect to `127.0.0.1:port` and complete hello → auth → welcome (PROTOCOL §3.2).
+    /// Connect to the kernel's control socket and complete hello → auth → welcome
+    /// (PROTOCOL §3.2). `control` is the announce's `control` field.
     pub async fn connect(
-        port: u16,
+        control: &str,
         kernel_id: &str,
-        key: &[u8],
         fanout: FanoutConfig,
     ) -> Result<Arc<Connection>> {
-        let stream =
-            tokio::time::timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(("127.0.0.1", port)))
-                .await
-                .map_err(|_| unreachable("connect timed out"))?
-                .map_err(|e| unreachable(format!("cannot connect to kernel: {e}")))?;
-        let _ = stream.set_nodelay(true);
-        let (mut reader, mut writer) = stream.into_split();
+        let stream = open_stream(control).await?;
+        let (mut reader, mut writer) = tokio::io::split(stream);
         let handshake = async {
             let (hello, _) = read_frame(&mut reader)
                 .await
@@ -305,16 +327,12 @@ impl Connection {
             let kid = hello.get("kernel_id").and_then(Value::as_str).unwrap_or("");
             if kid != kernel_id {
                 return Err(unreachable(format!(
-                    "port {port} belongs to {kid}, not {kernel_id}"
+                    "{control} belongs to {kid}, not {kernel_id}"
                 )));
             }
-            let nonce = base64::engine::general_purpose::STANDARD
-                .decode(hello.get("nonce").and_then(Value::as_str).unwrap_or(""))
-                .map_err(|e| unreachable(format!("bad hello nonce: {e}")))?;
             let auth = json!({
                 "dkp": 1, "op": "auth",
                 "client": {"name": "darkpyonix-manager", "kind": "manager", "pid": std::process::id()},
-                "mac": auth_mac(key, &nonce, kernel_id),
             });
             writer
                 .write_all(&encode(&auth)?)
@@ -329,7 +347,7 @@ impl Connection {
                     let code = welcome
                         .get("code")
                         .and_then(Value::as_str)
-                        .unwrap_or("auth_failed");
+                        .unwrap_or("internal");
                     let msg = welcome
                         .get("message")
                         .and_then(Value::as_str)
@@ -495,8 +513,8 @@ async fn next_event(mut st: SubState) -> Option<(KernelEvent, SubState)> {
     }
 }
 
-async fn write_loop(
-    mut writer: OwnedWriteHalf,
+async fn write_loop<W: AsyncWrite + Unpin>(
+    mut writer: W,
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     shared: Arc<Shared>,
 ) {
@@ -512,7 +530,7 @@ async fn write_loop(
     let _ = writer.shutdown().await;
 }
 
-async fn read_loop(mut reader: OwnedReadHalf, shared: Arc<Shared>) {
+async fn read_loop<R: AsyncRead + Unpin>(mut reader: R, shared: Arc<Shared>) {
     loop {
         if shared.closed.load(Ordering::SeqCst) {
             return;
@@ -541,6 +559,124 @@ async fn read_loop(mut reader: OwnedReadHalf, shared: Arc<Shared>) {
     }
 }
 
+/// Standard base64 with padding (PROTOCOL §3.7.1 carries the request bytes this way).
+pub fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// One byte `F` carrying `fd` in `SCM_RIGHTS` (PROTOCOL §3.7.2).
+#[cfg(unix)]
+fn sendmsg_fd(sock: std::os::fd::RawFd, fd: std::os::fd::RawFd) -> std::io::Result<()> {
+    use std::mem::size_of;
+    let mut byte = b'F';
+    let mut iov = libc::iovec {
+        iov_base: (&mut byte as *mut u8).cast::<libc::c_void>(),
+        iov_len: 1,
+    };
+    // SAFETY: `buf` is large and aligned enough for one cmsghdr plus a c_int, `msg` points
+    // only at locals that outlive the call, and CMSG_* are the libc macros for that layout.
+    unsafe {
+        let space = libc::CMSG_SPACE(size_of::<libc::c_int>() as u32) as usize;
+        let mut buf = vec![0u64; space.div_ceil(8)];
+        let mut msg: libc::msghdr = std::mem::zeroed();
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = buf.as_mut_ptr().cast::<libc::c_void>();
+        msg.msg_controllen = space as _;
+        let cmsg = libc::CMSG_FIRSTHDR(&msg);
+        (*cmsg).cmsg_level = libc::SOL_SOCKET;
+        (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(size_of::<libc::c_int>() as u32) as _;
+        std::ptr::copy_nonoverlapping(
+            (&fd as *const libc::c_int).cast::<u8>(),
+            libc::CMSG_DATA(cmsg),
+            size_of::<libc::c_int>(),
+        );
+        let n = libc::sendmsg(sock, &msg, 0);
+        if n == 1 {
+            Ok(())
+        } else if n < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "sendmsg sent no byte"))
+        }
+    }
+}
+
+/// Hand a client connection to the kernel on a fresh control connection of its own, so that no
+/// other frame can come between the `adopt` frame and its descriptor (PROTOCOL §3.7.2). The
+/// descriptor in `req` is closed when this returns; the kernel holds its own copy by then.
+#[cfg(unix)]
+pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest) -> Result<String> {
+    use std::os::fd::AsRawFd;
+    let mut stream = open_stream(control).await?;
+    let work = async {
+        let err = |what: &str, e: std::io::Error| unreachable(format!("{what}: {e}"));
+        let (hello, _) = read_frame(&mut stream).await.map_err(|e| err("handshake", e))?;
+        if hello.get("op").and_then(Value::as_str) != Some("hello")
+            || hello.get("kernel_id").and_then(Value::as_str) != Some(kernel_id)
+        {
+            return Err(unreachable(format!("{control} is not kernel {kernel_id}")));
+        }
+        let auth = json!({
+            "dkp": 1, "op": "auth",
+            "client": {"name": "darkpyonix-manager", "kind": "manager", "pid": std::process::id()},
+        });
+        stream.write_all(&encode(&auth)?).await.map_err(|e| err("handshake", e))?;
+        let (welcome, _) = read_frame(&mut stream).await.map_err(|e| err("handshake", e))?;
+        if welcome.get("op").and_then(Value::as_str) != Some("welcome") {
+            return Err(unreachable(format!("expected welcome, got {:?}", welcome.get("op"))));
+        }
+        let params = json!({
+            "kind": req.kind, "transport": req.transport, "share": null,
+            "request": base64_encode(&req.request), "label": req.label,
+        });
+        let frame = json!({"dkp": 1, "op": "request", "id": 1, "method": "adopt", "params": params});
+        stream.write_all(&encode(&frame)?).await.map_err(|e| err("adopt", e))?;
+        loop {
+            stream.writable().await.map_err(|e| err("adopt", e))?;
+            let sock = stream.as_raw_fd();
+            match stream.try_io(tokio::io::Interest::WRITABLE, || sendmsg_fd(sock, req.fd.as_raw_fd())) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(err("adopt descriptor", e)),
+            }
+        }
+        loop {
+            let (frame, _) = read_frame(&mut stream).await.map_err(|e| err("adopt", e))?;
+            if frame.get("op").and_then(Value::as_str) != Some("response") {
+                continue;
+            }
+            if frame.get("ok").and_then(Value::as_bool) == Some(true) {
+                let id = frame
+                    .get("result")
+                    .and_then(|r| r.get("stream_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                return Ok(id.to_string());
+            }
+            let e = frame.get("error").cloned().unwrap_or(Value::Null);
+            let code = e.get("code").and_then(Value::as_str).unwrap_or("internal");
+            let message = e.get("message").and_then(Value::as_str).unwrap_or(code);
+            return Err(DpxError::new(code, message));
+        }
+    };
+    tokio::time::timeout(HANDSHAKE_TIMEOUT, work)
+        .await
+        .map_err(|_| unreachable("adopt timed out"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,12 +692,109 @@ mod tests {
     }
 
     #[test]
-    fn pr_2_auth_mac_matches_python_vector() {
-        // python -c "import hmac,hashlib;print(hmac.new(b'k'*32,b'n'*32+b'k_abc',hashlib.sha256).hexdigest())"
-        let mac = auth_mac(&[b'k'; 32], &[b'n'; 32], "k_abc");
-        assert_eq!(
-            mac,
-            "90e6e83290e15a1069fa5e223f8ae795a1f1d1ac20c9909659ac6c4299c01910"
-        );
+    fn base64_matches_rfc4648_vectors() {
+        for (raw, enc) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
+            assert_eq!(base64_encode(raw.as_bytes()), enc);
+        }
+    }
+
+    /// PR-5: the descriptor really arrives (SCM_RIGHTS) after the adopt frame, and the kernel's
+    /// answer comes back; a fake kernel on a Unix socket plays the Python side.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_pr_5_adopt_sends_the_frame_then_the_descriptor() {
+        use std::io::Write;
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::net::UnixStream;
+        let dir = std::env::temp_dir().join(format!("dpx-adopt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("k.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let kernel = std::thread::spawn(move || {
+            use std::io::Read;
+            let (mut c, _) = listener.accept().unwrap();
+            let send = |c: &mut UnixStream, v: Value| c.write_all(&encode(&v).unwrap()).unwrap();
+            let recv = |c: &mut UnixStream| -> Value {
+                let mut len = [0u8; 4];
+                c.read_exact(&mut len).unwrap();
+                let mut buf = vec![0u8; u32::from_be_bytes(len) as usize];
+                c.read_exact(&mut buf).unwrap();
+                serde_json::from_slice(&buf).unwrap()
+            };
+            send(&mut c, json!({"dkp": 1, "op": "hello", "kernel_id": "k_x"}));
+            assert_eq!(recv(&mut c)["op"], "auth");
+            send(&mut c, json!({"dkp": 1, "op": "welcome", "session": "s", "seq": 0}));
+            let req = recv(&mut c);
+            assert_eq!(req["method"], "adopt");
+            assert_eq!(req["params"]["request"], base64_encode(b"GET / HTTP/1.1
+
+"));
+            // The byte F and one descriptor follow the frame.
+            let mut byte = [0u8; 1];
+            let mut iov = libc::iovec { iov_base: byte.as_mut_ptr().cast(), iov_len: 1 };
+            let mut buf = vec![0u64; 8];
+            let fd;
+            // SAFETY: plain recvmsg into local buffers; the received descriptor is owned below.
+            unsafe {
+                use std::os::fd::AsRawFd;
+                let mut msg: libc::msghdr = std::mem::zeroed();
+                msg.msg_iov = &mut iov;
+                msg.msg_iovlen = 1;
+                msg.msg_control = buf.as_mut_ptr().cast();
+                msg.msg_controllen = 64 as _;
+                assert_eq!(libc::recvmsg(c.as_raw_fd(), &mut msg, 0), 1);
+                let cmsg = libc::CMSG_FIRSTHDR(&msg);
+                assert!(!cmsg.is_null());
+                assert_eq!((*cmsg).cmsg_type, libc::SCM_RIGHTS);
+                fd = std::ptr::read_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>());
+            }
+            assert_eq!(&byte, b"F");
+            // SAFETY: the descriptor was just received and nothing else owns it.
+            let mut handed = UnixStream::from(unsafe { OwnedFd::from_raw_fd(fd) });
+            handed.write_all(b"from the kernel").unwrap();
+            send(&mut c, json!({"dkp": 1, "op": "response", "id": 1, "ok": true, "result": {"stream_id": "st_1"}}));
+        });
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let req = dpx_core::AdoptRequest {
+            kind: "events".into(),
+            transport: "pump".into(),
+            request: b"GET / HTTP/1.1
+
+".to_vec(),
+            label: json!({"capabilities": ["read"]}),
+            fd: theirs.into(),
+        };
+        let id = adopt(path.to_str().unwrap(), "k_x", req).await.unwrap();
+        assert_eq!(id, "st_1");
+        kernel.join().unwrap();
+        let mut got = String::new();
+        let mut ours = ours;
+        std::io::Read::read_to_string(&mut ours, &mut got).unwrap();
+        assert_eq!(got, "from the kernel");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_fr_a1_manager_refuses_a_kernel_of_another_account() {
+        let err = require_same_account("/x/k.sock", 502, 501).unwrap_err();
+        assert_eq!(err.code, "kernel_unreachable");
+        assert!(require_same_account("/x/k.sock", 501, 501).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_fr_a1_same_account_socket_passes_the_peer_check() {
+        let dir = std::env::temp_dir().join(format!("dpx-peer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let accept = tokio::spawn(async move { listener.accept().await });
+        let stream = open_stream(path.to_str().unwrap()).await;
+        assert!(stream.is_ok(), "{:?}", stream.err());
+        let _ = accept.await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

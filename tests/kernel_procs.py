@@ -6,7 +6,7 @@ import signal
 import subprocess
 import time
 
-from darkpyonix import _launcher as launcher, _registry as registry
+from darkpyonix import _launcher as launcher
 
 
 def notebook(scratch: str, name: str = "nb.py") -> str:
@@ -49,7 +49,7 @@ def reap(proc: subprocess.Popen, timeout: float = 5.0) -> None:
 def wait_pid_gone(pid: int, timeout: float = 5.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not registry.pid_alive(pid):
+        if not launcher.pid_alive(pid):
             return True
         time.sleep(0.02)
     return False
@@ -69,7 +69,7 @@ def write_notebook(scratch: str, name: str, text: str) -> str:
 def connect(info):
     """A connected, subscribed ``KernelClient`` for an announce body."""
     from darkpyonix._client import KernelClient
-    c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+    c = KernelClient(info["control"], info["kernel_id"], name="test", kind="cli")
     c.connect()
     c.subscribe()
     return c

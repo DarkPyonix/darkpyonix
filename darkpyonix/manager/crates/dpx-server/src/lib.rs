@@ -5,8 +5,8 @@
 //! `/docs/`, configured reverse-proxy routes ([`ProxyRoute`]) and nothing else. It speaks
 //! HTTP/1.1 and HTTP/2 (h2c, or ALPN over TLS), SSE and WebSocket (proxied), without nginx.
 //!
-//! Ephemeral managers (FR-M3) bind `127.0.0.1`, publish `<home>/managers/<pid>.json` (0600)
-//! and stop by themselves after `idle_timeout` without requests or open streams. Dedicated
+//! Ephemeral managers (FR-M3) bind `127.0.0.1`, write no registry file (the process that started
+//! them gets the address and token on stdout, FR-M3) and stop by themselves after `idle_timeout` without requests or open streams. Dedicated
 //! managers (FR-M4) keep share tokens hashed in `<home>/manager.db`. Neither ever touches
 //! kernels when it stops.
 
@@ -14,6 +14,7 @@ pub mod api;
 pub mod auth;
 pub mod docs;
 pub mod error;
+pub mod handoff;
 pub mod proxy;
 pub mod sse;
 pub mod tls;
@@ -46,11 +47,11 @@ pub use proxy::ProxyRoute;
 pub use tls::TlsConfig;
 
 use crate::api::AppState;
-use crate::auth::{Auth, ShareStore};
+use crate::auth::{Auth, Principal, ShareStore};
 use crate::error::ApiError;
 use crate::proxy::{ConnInfo, Proxy};
 
-/// Manager version reported by `/health`, `getManager` and the registry file.
+/// Manager version reported by `/health`, and `getManager`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_DEDICATED_PORT: u16 = 46881;
@@ -87,7 +88,7 @@ pub struct ServerConfig {
     pub port: u16,
     /// Ephemeral only; dedicated managers never idle out.
     pub idle_timeout: Option<Duration>,
-    /// `DARKPYONIX_HOME` (`managers/<pid>.json`, `manager.db`).
+    /// `DARKPYONIX_HOME` (`manager.db`).
     pub home: PathBuf,
     pub tls: Option<TlsConfig>,
     /// Share links are `<share_base>/<share_id>#<token>`.
@@ -194,10 +195,20 @@ async fn track(State(activity): State<Arc<Activity>>, mut req: Request, next: Ne
     let guard = activity.enter();
     req.extensions_mut().insert(activity.clone());
     let resp = next.run(req).await;
+    if resp.extensions().get::<handoff::Handoff>().is_some() {
+        // The kernel owns this stream (FR-M6); only HTTP requests keep an ephemeral manager alive.
+        return resp;
+    }
     resp.map(|inner| Body::new(GuardedBody { inner, _guard: guard }))
 }
 
 // ------------------------------------------------------------------ auth gate (FR-A2)
+
+/// `/api/ws/kernels/{id}`: the browser WebSocket API cannot set headers either.
+fn is_ws_path(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    matches!(parts.as_slice(), ["", "api", "ws", "kernels", id] if !id.is_empty())
+}
 
 fn is_events_path(path: &str) -> bool {
     let mut parts = path.split('/');
@@ -214,10 +225,65 @@ fn query_token(uri: &Uri) -> Option<String> {
     pairs.into_iter().find(|(k, _)| k == "token").map(|(_, v)| v)
 }
 
+/// Paths that authenticate by themselves, without `Authorization: Bearer` (SPEC FR-A2): the
+/// manager login and master token reset (password in `Authorization: Basic`), and a kernel's
+/// initial token and login (FR-A6).
+fn is_open_auth_path(method: &axum::http::Method, path: &str) -> bool {
+    use axum::http::Method;
+    let method = method.clone();
+    if (method == Method::GET && path == "/api/auth") || (method == Method::PUT && path == "/api/auth/tokens/master") {
+        return true;
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    method == Method::POST
+        && parts.len() == 6
+        && parts[1] == "api"
+        && parts[2] == "kernels"
+        && parts[4] == "tokens"
+        && (parts[5] == "initial" || parts[5] == "auth")
+}
+
+/// The kernel id in `/api/kernels/{id}/...` or `/api/ws/kernels/{id}`.
+fn path_kernel_id(path: &str) -> Option<&str> {
+    let parts: Vec<&str> = path.split('/').collect();
+    let id = match parts.as_slice() {
+        ["", "api", "kernels", id, ..] => *id,
+        ["", "api", "ws", "kernels", id] => *id,
+        _ => return None,
+    };
+    util::is_kernel_id(id).then_some(id)
+}
+
+/// Asks the kernel about a token it may hold (`tokens.verify`, PROTOCOL §6).
+async fn kernel_principal(st: &AppState, kernel_id: &str, token: &str) -> Result<Option<Principal>, ApiError> {
+    let Ok(v) = st.backend.request(kernel_id, "tokens.verify", serde_json::json!({ "token": token })).await else {
+        return Ok(None);
+    };
+    if v["revoked"].as_bool() == Some(true) {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked"));
+    }
+    if v["valid"].as_bool() != Some(true) {
+        return Ok(None);
+    }
+    let names: Vec<String> = v["capabilities"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let Some(caps) = auth::Caps::from_names(&names) else { return Ok(None) };
+    Ok(Some(Principal {
+        caps,
+        kernel_id: Some(kernel_id.to_string()),
+        share_id: v["share_id"].as_str().map(String::from),
+        label: v["label"].as_str().map(String::from),
+        master: false,
+        initial: v["kind"].as_str() == Some("initial"),
+    }))
+}
+
 /// Authenticates before routing, so an anonymous caller always gets 401 (never 400/404).
 async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next) -> Response {
-    let path = req.uri().path();
-    if path == "/health" || path == "/docs" || path.starts_with("/docs/") {
+    let path = req.uri().path().to_string();
+    if path == "/health" || path == "/docs" || path.starts_with("/docs/") || is_open_auth_path(req.method(), &path) {
         return next.run(req).await;
     }
     let bearer = req
@@ -229,8 +295,34 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
             scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim().to_string())
         });
     // `?token=` only on the events stream (EventSource cannot set headers).
-    let token = bearer.or_else(|| if is_events_path(path) { query_token(req.uri()) } else { None });
-    match st.auth.authenticate(token.as_deref()) {
+    let token = bearer.or_else(|| if is_events_path(&path) || is_ws_path(&path) { query_token(req.uri()) } else { None });
+    let found = match st.auth.lookup(token.as_deref()) {
+        auth::Lookup::Found(p) => Some(p),
+        auth::Lookup::Revoked => {
+            return ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked")
+                .into_response()
+        }
+        auth::Lookup::Unknown => match (token.as_deref().filter(|t| !t.is_empty()), path_kernel_id(&path)) {
+            (Some(t), Some(kid)) => match kernel_principal(&st, kid, t).await {
+                Ok(p) => p,
+                Err(e) => return e.into_response(),
+            },
+            // The password path names no kernel: an initial token (FR-A4) is looked for among
+            // the running kernels.
+            (Some(t), None) if path == "/api/auth/password" => {
+                let mut found = None;
+                for k in st.backend.list(false).await.unwrap_or_default() {
+                    if let Ok(Some(p)) = kernel_principal(&st, &k.kernel_id, t).await {
+                        found = Some(p);
+                        break;
+                    }
+                }
+                found
+            }
+            _ => None,
+        },
+    };
+    match found {
         Some(p) => {
             req.extensions_mut().insert(p);
             next.run(req).await
@@ -251,6 +343,13 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
     let api = Router::new()
         .route("/health", get(api::get_health))
         .route("/api/manager", get(api::get_manager))
+        .route("/api/auth", get(api::login))
+        .route("/api/auth/password", put(api::set_password))
+        .route("/api/auth/tokens/master", put(api::reset_master_token))
+        .route("/api/auth/tokens/shared/{token_type}", put(api::reset_shared_token))
+        .route("/api/kernels/{kernel_id}/tokens/initial", post(api::create_initial_token))
+        .route("/api/kernels/{kernel_id}/tokens/auth", post(api::kernel_login))
+        .route("/api/kernels/{kernel_id}/tokens/{token}/verify", get(api::verify_token))
         .route("/api/kernels", get(api::list_kernels).post(api::start_kernel))
         .route("/api/kernels/{kernel_id}", get(api::get_kernel).delete(api::shutdown_kernel))
         .route("/api/kernels/{kernel_id}/interrupt", post(api::interrupt_kernel))
@@ -261,6 +360,8 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .route("/api/kernels/{kernel_id}/runs", get(api::list_runs).post(api::start_run))
         .route("/api/kernels/{kernel_id}/runs/{run_ref}", get(api::get_run).delete(api::cancel_run))
         .route("/api/kernels/{kernel_id}/events", get(api::stream_events))
+        .route("/api/ws/kernels/{kernel_id}", get(api::sync_ws))
+        .route("/api/kernels/{kernel_id}/tokens/share", post(api::create_share_token))
         .route("/api/kernels/{kernel_id}/shares", get(api::list_shares).post(api::create_share))
         .route("/api/kernels/{kernel_id}/shares/{share_id}", delete(api::revoke_share))
         .route("/api/kernels/{kernel_id}/cells", post(api::create_cell))
@@ -307,8 +408,6 @@ pub struct ServerHandle {
     pub url: String,
     pub token: String,
     pub local_addr: SocketAddr,
-    /// `<home>/managers/<pid>.json` for an ephemeral manager.
-    pub registry_file: Option<PathBuf>,
     pub cert_store: Option<Arc<tls::CertStore>>,
     trigger: ShutdownTrigger,
     done: tokio::task::JoinHandle<ExitReason>,
@@ -321,7 +420,7 @@ impl ServerHandle {
     pub fn trigger(&self) -> ShutdownTrigger {
         self.trigger.clone()
     }
-    /// Resolves once the server has stopped and removed its registry file.
+    /// Resolves once the server has stopped.
     pub async fn wait(self) -> ExitReason {
         self.done.await.unwrap_or(ExitReason::Shutdown)
     }
@@ -403,20 +502,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         avatars: Mutex::new(std::collections::HashMap::new()),
         shutdown: rx.clone(),
     });
-    let app = router(state, proxy, activity.clone());
-
-    let registry_file = match mode {
-        Mode::Ephemeral => {
-            let path = config.home.join("managers").join(format!("{pid}.json"));
-            let record = serde_json::json!({
-                "pid": pid, "url": url, "token": token, "mode": mode.as_str(),
-                "started_at": started_at, "version": VERSION,
-            });
-            util::write_private_atomic(&path, record.to_string().as_bytes())?;
-            Some(path)
-        }
-        Mode::Dedicated => None,
-    };
+    let app = router(state.clone(), proxy, activity.clone());
 
     let idle = Arc::new(std::sync::atomic::AtomicBool::new(false));
     if let Some(limit) = idle_timeout {
@@ -440,7 +526,6 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         });
     }
 
-    let registry = registry_file.clone();
     let tls_on = acceptor.is_some();
     let done = tokio::spawn(async move {
         let graceful = hyper_util::server::graceful::GracefulShutdown::new();
@@ -460,6 +545,8 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
             let svc = TowerToHyperService::new(svc);
             let watcher = graceful.watcher();
             let acceptor = acceptor.clone();
+            #[cfg(unix)]
+            let (hand_state, hand_activity) = (state.clone(), activity.clone());
             tokio::spawn(async move {
                 let builder = auto::Builder::new(TokioExecutor::new());
                 match acceptor {
@@ -471,6 +558,11 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
                         let _ = watcher.watch(conn.into_owned()).await;
                     }
                     None => {
+                        // FR-M6: stream requests on plain TCP go to the kernel by descriptor.
+                        #[cfg(unix)]
+                        let Some(stream) = handoff::intercept(stream, &hand_state, &hand_activity).await else {
+                            return;
+                        };
                         let conn = builder.serve_connection_with_upgrades(TokioIo::new(stream), svc);
                         let _ = watcher.watch(conn.into_owned()).await;
                     }
@@ -479,9 +571,6 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         }
         drop(listener);
         let _ = tokio::time::timeout(GRACEFUL_TIMEOUT, graceful.shutdown()).await;
-        if let Some(path) = registry {
-            let _ = std::fs::remove_file(path);
-        }
         if idle.load(Ordering::SeqCst) {
             ExitReason::Idle
         } else {
@@ -489,7 +578,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         }
     });
 
-    Ok(ServerHandle { url, token, local_addr, registry_file, cert_store, trigger, done })
+    Ok(ServerHandle { url, token, local_addr, cert_store, trigger, done })
 }
 
 /// Serves until SIGINT/SIGTERM (or idle exit) and returns why it stopped.

@@ -19,7 +19,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from darkpyonix import _home
-from darkpyonix import _lock as lock, _registry as registry
+from darkpyonix import _lock as lock
 from darkpyonix._collab import DocumentState
 from darkpyonix._discovery import DiscoveryResponder
 from darkpyonix._events import EventLog
@@ -29,6 +29,7 @@ from darkpyonix._protocol import (
     EXIT_ALREADY_RUNNING, KERNEL_VERSION, DKPError, canonical_path, kernel_id_for, now_iso,
 )
 from darkpyonix._runs import RunStore, runs_dir_for
+from darkpyonix._tokens import TokenStore
 
 FINISHED = ("ok", "error", "interrupted", "cancelled", "crashed")
 
@@ -45,12 +46,12 @@ class Kernel(object):
     def __init__(self, path: str) -> None:
         self.path = canonical_path(path)
         self.kernel_id = kernel_id_for(self.path)
-        self.key = _home.user_key()
-        self.user_tag = _home.user_tag(self.key)
+        self.user_tag = _home.user_tag()
         self.lock = lock.FileLock(lock.lock_path(self.kernel_id))
         self.events = EventLog()
         self.collab = None  # type: Optional[DocumentState]
         self.store = None  # type: Optional[RunStore]
+        self.tokens = None  # type: Optional[TokenStore]
         self.executor = None  # type: Optional[Executor]
         self.server = None
         self.discovery = None  # type: Optional[DiscoveryResponder]
@@ -73,7 +74,7 @@ class Kernel(object):
             "kernel_id": self.kernel_id,
             "path": self.path,
             "pid": os.getpid(),
-            "port": self.server.port if self.server is not None else 0,
+            "control": self.server.address if self.server is not None else "",
             "status": st.get("status", "starting"),
             "run_id": st.get("run_id"),
             "python": self.python,
@@ -81,6 +82,7 @@ class Kernel(object):
             "runs_dir": runs_dir_for(self.path),
             "started_at": self.started_at,
             "host": self.host,
+            "home": _home.home(),
         }
 
     def emit(self, type: str, data: Dict[str, Any]) -> None:
@@ -186,14 +188,19 @@ class Kernel(object):
 
     def run(self) -> int:
         if not self.lock.acquire():
-            existing = registry.read(self.kernel_id) or {"kernel_id": self.kernel_id}
+            from darkpyonix import _discovery as discovery
+            found = discovery.discover(self.kernel_id, timeout=0.5)
+            existing = found[0] if found else {"kernel_id": self.kernel_id}
             sys.stderr.write(json.dumps(existing, ensure_ascii=False) + "\n")
             sys.stderr.flush()
             return EXIT_ALREADY_RUNNING
         try:
+            _home.expose_package()
             self.collab = DocumentState(self.path, self.events.append,
                                         seq_provider=lambda: self.events.seq)
             self.extra_handlers.update(self.collab.handlers())
+            self.tokens = TokenStore(self.path)  # FR-K10
+            self.extra_handlers.update(self.tokens.handlers())
             self.store = RunStore(self.path, self.kernel_id)
             crashed = self.store.recover_crashed()
             if crashed:
@@ -204,8 +211,10 @@ class Kernel(object):
             self.diag = getattr(self.executor, "original_stderr", sys.stderr)
 
             from darkpyonix._server import ControlServer
-            self.server = ControlServer(self.kernel_id, self.key, self.events, self.handlers())
+            self.server = ControlServer(self.kernel_id, self.events, self.handlers())
+            self.tokens.close_streams = self.server.streams.close_share  # FR-K9, PR-6
             self.collab.start()
+            self.tokens.start()
             self.server.start()
             self.discovery = DiscoveryResponder(self.info, self.user_tag)
             self.discovery.start()
@@ -213,7 +222,7 @@ class Kernel(object):
             signal.signal(signal.SIGTERM, lambda signum, frame: self.request_shutdown())
             if hasattr(signal, "SIGHUP"):
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
-            _log(self.diag, "kernel %s for %s on port %d" % (self.kernel_id, self.path, self.server.port))
+            _log(self.diag, "kernel %s for %s on %s" % (self.kernel_id, self.path, self.server.address))
 
             self.executor.run_forever()      # main thread until shutdown / hard restart
         finally:
@@ -229,9 +238,9 @@ class Kernel(object):
         for step in (
             lambda: self.store.flush() if self.store is not None else None,
             lambda: self.discovery.stop(bye=True) if self.discovery is not None else None,
-            lambda: registry.remove(self.kernel_id),
             lambda: self.server.stop() if self.server is not None else None,
             lambda: self.collab.stop() if self.collab is not None else None,
+            lambda: self.tokens.stop() if self.tokens is not None else None,
             lambda: self.lock.release(),
         ):
             try:

@@ -48,7 +48,7 @@ info:
 
     A stream handed off as a raw socket survives the manager (INTENT D6, SPEC FR-M6,
 
-    PROTOCOL §3.7). Status: planned, issue #47.
+    PROTOCOL §3.7). Served since issue #47.
 
 
     **Planned operations.** Operations marked `x-darkpyonix-status: planned` are designed but not
@@ -121,7 +121,7 @@ tags:
 
     `/api/kernels/{kernel_id}/tokens/…` are access tokens bound to one kernel (SPEC FR-A6, FR-A5).
 
-    Status: planned, issue #48.
+    Served.
 
     '
 paths:
@@ -161,8 +161,6 @@ paths:
       tags:
       - Auth
       operationId: login
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Log in to the manager
       description: 'The 2025 "login" (`GET /auth`, "the password goes in the session"). The password of this
 
@@ -201,8 +199,6 @@ paths:
       tags:
       - Auth
       operationId: setPassword
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Set or reset the manager's password
       description: 'The 2025 "password reset" (`PUT /auth/password`): authenticate with a token, then register a
 
@@ -210,7 +206,8 @@ paths:
 
         (SPEC FR-A6) may set the first one; once a password exists, an initial token answers `403`
 
-        (user decision 2026-10-04, PROJECT Q15). Stored as a salted slow hash. SPEC FR-A4.
+        (user decision 2026-10-04, PROJECT Q15). The path names no kernel, so the manager asks its running kernels
+        which one issued an initial token. Stored as a salted slow hash (PBKDF2-HMAC-SHA256). SPEC FR-A4.
 
         '
       requestBody:
@@ -251,8 +248,6 @@ paths:
       tags:
       - Auth
       operationId: resetMasterToken
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Issue a new master token for the manager
       description: 'The 2025 "master token reset" (`PUT /auth/tokens/master`): authenticate with the password in
 
@@ -293,8 +288,6 @@ paths:
       tags:
       - Auth
       operationId: resetSharedToken
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Issue a new manager shared token of one type
       description: 'The 2025 "shared token reset" (`PUT /auth/tokens/shared/{token_type}`): authenticate with the
 
@@ -313,7 +306,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ShareWithToken'
+                $ref: '#/components/schemas/ManagerSharedToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -356,6 +351,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -420,6 +417,8 @@ paths:
                 $ref: '#/components/schemas/Kernel'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -482,6 +481,20 @@ paths:
         queue are kept (SPEC FR-X4). This is what "stop" means in DarkPyonix.
 
         '
+      parameters:
+      - name: user_permission
+        in: query
+        required: false
+        description: 'The capability this operation needs, `execute`. Another value is `400`. The token''s capability
+          set decides access (SPEC FR-A3). Served since issue #49.'
+        schema:
+          type: string
+          enum:
+          - read
+          - history
+          - execute
+          - edit
+          - manage
       responses:
         '200':
           description: Whether anything was running.
@@ -496,6 +509,8 @@ paths:
                     type: boolean
                   run_id:
                     $ref: '#/components/schemas/RunId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -620,6 +635,8 @@ paths:
                 $ref: '#/components/schemas/Document'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -887,6 +904,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -945,6 +964,8 @@ paths:
                 label:
                   type: string
                   maxLength: 120
+                user_permission:
+                  $ref: '#/components/schemas/UserPermission'
                 expires_at:
                   type: string
                   format: date-time
@@ -1172,15 +1193,20 @@ paths:
       summary: Lock a cell for editing (or renew the lock)
       description: One lock per cell; released by unlock, after 3 minutes without activity, or when the client disconnects
         (SPEC FR-S3). Needs `edit` (SPEC FR-A3).
-      requestBody:
+      parameters:
+      - name: user_permission
+        in: query
         required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                user_permission:
-                  $ref: '#/components/schemas/UserPermission'
+        description: 'The capability this operation needs, `edit`. Another value is `400`. The token''s capability
+          set decides access (SPEC FR-A3). Served since issue #49.'
+        schema:
+          type: string
+          enum:
+          - read
+          - history
+          - execute
+          - edit
+          - manage
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -1346,7 +1372,7 @@ paths:
           type: string
       - name: poll_sequence
         in: query
-        description: The 2025 polling sequence number, starting at 1. Status planned, issue #49.
+        description: The 2025 polling sequence number, starting at 1.
         schema:
           type: integer
           minimum: 1
@@ -1383,8 +1409,6 @@ paths:
       tags:
       - Auth
       operationId: createInitialToken
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Issue the initial token of a kernel
       description: 'The 2025 "initial token" (`POST /kernels/{kernel_id}/tokens/initial`), unchanged. A client
 
@@ -1412,14 +1436,15 @@ paths:
       responses:
         '201':
           description: The initial token (shown once). Issued and kept by the kernel (`tokens.issue`), so it works
-            through any manager. The manager starts the kernel first if it is not running (SPEC FR-A5, FR-M2,
-            PROTOCOL §6).
+            through any manager. The kernel must be running (`404` otherwise, SPEC FR-A5, PROTOCOL §6).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/InitialToken'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
         '502':
@@ -1437,8 +1462,6 @@ paths:
       tags:
       - Auth
       operationId: kernelLogin
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Log in to one kernel with the manager's password
       description: 'The 2025 kernel login (`POST /kernels/{kernel_id}/tokens/auth`): the password in, an access
 
@@ -1495,8 +1518,6 @@ paths:
       tags:
       - Sharing
       operationId: createShareToken
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Issue a share token for one kernel (2025 shape)
       description: 'The 2025 `POST /kernels/{kernel_id}/tokens/share` (`get_sharing_settings`). The same operation as
 
@@ -1528,6 +1549,12 @@ paths:
                   description: The 2025 body field; must equal the path parameter when present.
                 user_permission:
                   $ref: '#/components/schemas/UserPermission'
+                label:
+                  type: string
+                  maxLength: 120
+                expires_at:
+                  type: string
+                  format: date-time
       responses:
         '201':
           description: The share token (shown once).
@@ -1581,14 +1608,12 @@ paths:
       tags:
       - Auth
       operationId: verifyToken
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 48
       summary: Check a token against a file
       description: 'The 2025 `GET /kernels/{kernel_id}/tokens/{token}/verify`, sent with the same token as
 
         `Authorization: Bearer`. The manager asks the kernel, which holds its tokens (`tokens.verify`,
 
-        PROTOCOL §6); if the kernel is not running, the manager starts it first (SPEC FR-M2). A revoked token answers `401 token_revoked`
+        PROTOCOL §6); a kernel that is not running answers `404` (the manager cannot start a kernel from its id alone, open question on #48). A revoked token answers `401 token_revoked`
 
         (2025 `TOKEN_BLACKLISTED`). `password_set` tells whether the answering manager has a password.
 
@@ -1625,8 +1650,6 @@ paths:
       tags:
       - Events
       operationId: syncWebSocket
-      x-darkpyonix-status: planned
-      x-darkpyonix-issue: 49
       x-darkpyonix-handoff: kernel
       summary: 2025 WebSocket synchronization (cells, history, locks, focus, execution)
       description: 'The 2025 `/ws/kernels/{kernel_id}?token={token}`, restored by user decision 2026-10-03
@@ -1643,7 +1666,7 @@ paths:
 
         `execution_started`, `execution_output`, `execution_complete`, `execution_error`,
 
-        `execution_interrupted` out. Status: planned, issue #49.
+        `execution_interrupted` out. Served since issue #49.
 
         '
       security:
@@ -1666,6 +1689,8 @@ paths:
           description: Switching Protocols; the kernel speaks the 2025 sync messages (PROTOCOL §5).
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1811,6 +1836,30 @@ components:
         password_required:
           type: boolean
           const: true
+    ManagerSharedToken:
+      type: object
+      description: 'A manager shared token (`PUT /api/auth/tokens/shared/{token_type}`, SPEC FR-A4). Not bound to a
+        kernel; works on every kernel through this manager only.'
+      required:
+      - share_id
+      - token_type
+      - capabilities
+      - token
+      - created_at
+      properties:
+        share_id:
+          type: string
+          pattern: ^s_[0-9a-f]{16}$
+        token_type:
+          $ref: '#/components/schemas/TokenType'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+        token:
+          type: string
+          description: Shown only in this response. Stored hashed.
+        created_at:
+          type: string
+          format: date-time
     MasterToken:
       type: object
       description: The manager's master token (`GET /api/auth`, `PUT /api/auth/tokens/master`, SPEC FR-A4).
@@ -1952,7 +2001,7 @@ components:
 
         field: a token without that capability answers `403 forbidden` (2025 `INSUFFICIENT_PERMISSION`).
 
-        SPEC FR-A3, FR-S8. Status: planned, issue #49.
+        SPEC FR-A3, FR-S8. Served since issue #49.
 
         '
     KernelStatus:
@@ -2620,7 +2669,7 @@ components:
           additionalProperties: true
     WaitResult:
       description: Fields `poll_sequence`, `next_poll_sequence` and `auto_repoll` restore the 2025 alarm response
-        (SPEC FR-S7). Status planned, issue #49.
+        (SPEC FR-S7). Served since issue #49.
       type: object
       required:
       - status

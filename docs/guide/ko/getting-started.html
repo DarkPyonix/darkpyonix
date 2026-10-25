@@ -85,7 +85,7 @@ tcl install darkpyonix                    <span class="c"># toolchain-lite</span
 
         <div class="note">
       <span class="label">배포 상태</span>
-      <p>0.2.0은 아직 PyPI에 없습니다 <span class="pill planned">계획 <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a></span>. 지금 PyPI에 있는 것은 2025년에 올린 0.1.0이고, MIT 라이선스이며 이 가이드가 설명하는 런타임 API가 아닙니다. 0.2.0은 PR <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a>이 들어간 뒤 GitHub 릴리스를 만들면 Apache-2.0으로 배포됩니다(이슈 <a href="https://github.com/DarkPyonix/darkpyonix/issues/45">#45</a>). 패키지는 표준 라이브러리만 쓰고 의존성이 없습니다.</p>
+      <p>0.2.0은 PyPI에 올라 있습니다(릴리스 <code>v0.2.0</code>, 이슈 <a href="https://github.com/DarkPyonix/darkpyonix/issues/45">#45</a>, PR <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a>). 라이선스는 Apache-2.0입니다. 2025년에 올린 0.1.0(MIT)도 목록에 남아 있지만 이 가이드가 설명하는 런타임 API가 아니므로, <code>0.2.0</code> 이상으로 고정하십시오. 패키지는 표준 라이브러리만 쓰고 의존성이 없습니다.</p>
     </div>
 
     <h2 id="interpreter">인터프리터 고르기</h2>
@@ -118,10 +118,8 @@ darkpyonix run train.py --param lr=0.02   <span class="c"># 두 번째 실행: �
       <table>
         <thead><tr><th scope="col">경로</th><th scope="col">내용</th></tr></thead>
         <tbody>
-          <tr><td><code>user.key</code></td><td>같은 OS 사용자의 커널과 매니저가 인증에 쓰는 키입니다. 권한 0600, 처음 쓸 때 만듭니다. 없어지는 중입니다. 커널은 OS가 알려 주는 상대 계정이 같을 때만 받게 됩니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/55">#55</a></span></td></tr>
           <tr><td><code>locks/&lt;kernel_id&gt;.lock</code></td><td>파일당 커널 하나를 지키는 OS 잠금입니다. 커널이 죽으면 OS가 풀어 주므로 남은 파일 때문에 막히지 않습니다.</td></tr>
           <tr><td><code>runtime/</code></td><td>바이너리에서 풀어 낸 커널 소스입니다.</td></tr>
-          <tr><td><code>kernels/&lt;kernel_id&gt;.json</code>, <code>managers/&lt;pid&gt;.json</code></td><td>발견과 CLI의 매니저 찾기에 쓰는 등록 파일입니다. 없애는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>.</td></tr>
           <tr><td><code>manager.db</code></td><td>전용 매니저의 공유 토큰 해시입니다.</td></tr>
         </tbody>
       </table>

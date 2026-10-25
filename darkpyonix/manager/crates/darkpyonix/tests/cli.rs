@@ -230,11 +230,22 @@ fn test_fr_c2_cli_commands() {
     assert_eq!(deletes, vec![json!({}), json!({"force": "true"})]);
 
     // The fake is ephemeral: share needs a dedicated manager.
-    let o = run(h, &["share", "train.py", "--permission", "viewer1"]);
+    let o = run(h, &["share", "train.py", "--capabilities", "read"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("dedicated manager"), "{}", text(&o.stderr));
+    // The given manager is asked once and refuses; the CLI cannot tell its mode beforehand.
     let shares = fake.state.calls().iter().filter(|c| c.0.ends_with("/shares")).count();
-    assert_eq!(shares, 0, "share must not reach an ephemeral manager");
+    assert_eq!(shares, 1, "share goes to the manager named by the environment");
+
+    // Without DARKPYONIX_MANAGER_URL/TOKEN, share refuses and spawns nothing.
+    let home = scratch_home("share_no_env");
+    notebook(&home);
+    let exe = home.join("must-not-run.sh");
+    write_script(&exe, "touch \"$DARKPYONIX_HOME/spawned\"\nexit 9\n");
+    let o = cli(&home).args(["share", "train.py", "--capabilities", "read"]).env("DARKPYONIX_SELF_EXE", &exe).output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o.stderr).contains("dedicated manager"), "{}", text(&o.stderr));
+    assert!(!home.join("spawned").exists(), "share must not spawn a manager");
 }
 
 #[test]
@@ -260,22 +271,15 @@ fn test_fr_c2_logs_follow_replays_the_executing_run() {
 }
 
 #[test]
-fn test_fr_c1_skips_dead_and_unhealthy_registrations() {
-    let fake = Fake::start("stale", Scenario::Ok);
-    let mut c = std::process::Command::new("true").spawn().unwrap();
-    let dead = c.id();
-    c.wait().unwrap();
-    // A dead dedicated manager (would be preferred) and a live pid that does not answer.
-    let dead_rec = json!({"url": "http://127.0.0.1:9", "token": "x", "mode": "dedicated", "pid": dead,
-                          "started_at": "2026-10-04T00:00:00Z"});
-    std::fs::write(fake.home.join(format!("managers/{dead}.json")), dead_rec.to_string()).unwrap();
-    let parent = std::os::unix::process::parent_id();
-    let mute = json!({"url": "http://127.0.0.1:9", "token": "x", "mode": "ephemeral", "pid": parent,
-                      "started_at": "2026-10-05T00:00:00Z"});
-    std::fs::write(fake.home.join(format!("managers/{parent}.json")), mute.to_string()).unwrap();
-    let o = run(&fake.home, &["ps", "--json"]);
+fn test_fr_c1_cli_uses_the_given_manager() {
+    let fake = Fake::start("given", Scenario::Ok);
+    let exe = fake.home.join("must-not-run.sh");
+    write_script(&exe, "touch \"$DARKPYONIX_HOME/spawned\"\nexit 9\n");
+    let o = cli(&fake.home).args(["ps", "--json"]).env("DARKPYONIX_SELF_EXE", &exe).output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
     assert_eq!(fake.state.count("GET /kernels"), 1);
+    assert!(!fake.home.join("spawned").exists(), "a given manager means no new manager");
+    assert!(!fake.home.join("managers").exists(), "no managers directory is created");
 }
 
 fn write_script(path: &std::path::Path, body: &str) {
@@ -285,17 +289,15 @@ fn write_script(path: &std::path::Path, body: &str) {
 }
 
 #[test]
-fn test_fr_c1_cli_spawns_manager_when_none_is_running() {
+fn test_fr_c1_cli_spawns_its_own_manager_and_reads_stdout() {
     let home = scratch_home("spawn");
     let fake = Fake::start_unregistered(home.clone(), Scenario::Ok);
     let exe = home.join("fake-manager.sh");
-    // Stands in for `darkpyonix manager --ephemeral`: registers the fake under its own pid.
+    // Stands in for `darkpyonix manager --ephemeral`: prints the fake's address and token.
     write_script(
         &exe,
         r#"echo "$$ $*" > "$DARKPYONIX_HOME/spawned-args"
-printf '{"url":"%s","token":"%s","mode":"ephemeral","pid":%s,"started_at":"2026-10-03T00:00:00Z"}' \
-  "$FAKE_URL" "$FAKE_TOKEN" "$$" > "$DARKPYONIX_HOME/managers/$$.json.tmp"
-mv "$DARKPYONIX_HOME/managers/$$.json.tmp" "$DARKPYONIX_HOME/managers/$$.json"
+printf '{"url":"%s","token":"%s","pid":%s}\n' "$FAKE_URL" "$FAKE_TOKEN" "$$"
 exec sleep 30
 "#,
     );
@@ -315,6 +317,7 @@ exec sleep 30
     assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
     assert_eq!(args, "manager --ephemeral");
     assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(!home.join("managers").exists(), "no managers directory is created");
     let v: Value = serde_json::from_slice(&o.stdout).unwrap();
     assert!(v["kernels"].is_array());
 }
@@ -332,12 +335,65 @@ fn test_fr_c1_spawn_failure_is_reported() {
 }
 
 #[test]
-fn test_fr_a2_registry_token_is_used() {
-    let fake = Fake::start("token", Scenario::Ok);
-    let pid = std::process::id();
-    let bad = json!({"url": fake.url(), "token": "wrong", "mode": "ephemeral", "pid": pid});
-    std::fs::write(fake.home.join(format!("managers/{pid}.json")), bad.to_string()).unwrap();
-    let o = run(&fake.home, &["ps"]);
+fn test_fr_a2_cli_uses_the_token_from_stdout() {
+    let home = scratch_home("stdout_token");
+    let fake = Fake::start_unregistered(home.clone(), Scenario::Ok);
+    let exe = home.join("wrong-token-manager.sh");
+    write_script(
+        &exe,
+        r#"printf '{"url":"%s","token":"wrong","pid":%s}\n' "$FAKE_URL" "$$"
+exec sleep 5
+"#,
+    );
+    let o = cli(&home).args(["ps"]).env("DARKPYONIX_SELF_EXE", &exe).env("FAKE_URL", fake.url()).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o.stderr).contains("missing or invalid token"), "{}", text(&o.stderr));
+}
+
+#[test]
+fn test_fr_m3_url_and_token_are_printed_on_stdout() {
+    let home = scratch_home("stdout_line");
+    let mut child = cli(&home)
+        .args(["manager", "--ephemeral"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let v: Value = serde_json::from_str(line.trim()).unwrap();
+    let (url, token, pid) = (v["url"].as_str().unwrap(), v["token"].as_str().unwrap(), v["pid"].as_u64().unwrap());
+    assert!(url.starts_with("http://127.0.0.1:"), "{line}");
+    assert!(!token.is_empty());
+    assert_eq!(pid, u64::from(child.id()));
+    // The printed address and token are the real ones.
+    let r = std::net::TcpStream::connect(url.trim_start_matches("http://"));
+    assert!(r.is_ok(), "manager is not listening on {url}");
+    // And nothing was written for other processes to find (FR-M3).
+    assert!(!home.join("managers").exists());
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+fn test_fr_c1_spawned_manager_log_has_no_token_and_is_0600() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch_home("log_no_token");
+    // The manager honours DARKPYONIX_MANAGER_TOKEN, so the real token value is known here.
+    let secret = "log-test-token-9f3c1a7e5b2d4068";
+    let o = cli(&home)
+        .args(["ps"])
+        .env("DARKPYONIX_SELF_EXE", env!("CARGO_BIN_EXE_darkpyonix"))
+        .env("DARKPYONIX_MANAGER_TOKEN", secret)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let log = home.join("manager.log");
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    // The ephemeral manager's token is only on its stdout pipe, never in its stderr log.
+    let body = std::fs::read_to_string(&log).unwrap();
+    assert!(!body.contains("token"), "manager.log must not mention a token: {body}");
+    assert!(!body.contains("master token"), "{body}");
+    assert!(!body.contains(secret), "manager.log must not contain the real token value: {body}");
 }

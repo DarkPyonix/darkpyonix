@@ -18,7 +18,7 @@ async fn test_fr_m1_health_and_manager_info() {
     let info = s.admin().get("/api/manager").await;
     assert_eq!(info.status, 200);
     assert_eq!(info.body["mode"], "ephemeral");
-    assert_eq!(info.body["permission"], "admin");
+    assert_eq!(info.body["capabilities"], json!(["read", "history", "execute", "edit", "manage"]));
     assert_eq!(info.body["idle_timeout"], 120);
     assert_eq!(info.body["pid"], std::process::id());
     for k in ["version", "started_at", "host"] {
@@ -72,7 +72,7 @@ async fn test_fr_m1_list_and_get_kernels() {
     let ks = list.body["kernels"].as_array().unwrap();
     assert_eq!(ks.len(), 1);
     assert_eq!(ks[0]["kernel_id"], kid);
-    assert!(ks[0].get("port").is_none());
+    assert!(ks[0].get("port").is_none() && ks[0].get("control").is_none());
     assert_eq!(ks[0]["run_id"], json!(null));
     let runs_dir = std::path::Path::new(&path).parent().unwrap().join("__runs__").join("train.py");
     assert_eq!(ks[0]["runs_dir"], runs_dir.to_string_lossy().as_ref());
@@ -174,7 +174,7 @@ async fn test_fr_x3_busy_run_is_409_with_busy_error() {
     assert_eq!(m, "run");
     // `client` (FR-S6) is checked in collab.rs.
     let client = p.as_object_mut().unwrap().remove("client").expect("run carries the client");
-    assert_eq!(client["permission"], "admin");
+    assert_eq!(client["capabilities"], json!(["read", "history", "execute", "edit", "manage"]));
     assert_eq!(p, json!({"mode": "all", "on_busy": "queue", "params": {"lr": 0.1}, "source": "x=1"}));
     // busy data without `current` is wrapped so the BusyError shape holds.
     s.backend.fail_on("run", DpxError::new("busy", "busy").with_data(json!({"run_id": "r"})));
@@ -332,67 +332,63 @@ async fn test_fr_a3_ephemeral_manager_refuses_share_creation() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let (kid, _) = s.kernel("train.py");
     let a = s.admin();
-    a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer1"})).await.error(403, "forbidden");
+    a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"]})).await.error(403, "forbidden");
     let l = a.get(&format!("/api/kernels/{kid}/shares")).await;
     assert_eq!((l.status, l.body.clone()), (200, json!({"shares": []})));
     a.delete(&format!("/api/kernels/{kid}/shares/s_0000000000000000")).await.error(404, "not_found");
 }
 
-/// The FR-A3 matrix: every operation × every permission, plus kernel scoping.
+const CAPS: [&str; 5] = ["read", "history", "execute", "edit", "manage"];
+
+/// The FR-A3 matrix: every operation x a token holding only that capability, plus kernel scoping.
 #[tokio::test]
-async fn test_fr_a3_permission_matrix() {
+async fn test_fr_a3_each_operation_needs_its_capability() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, path) = s.kernel("train.py");
     let (other, _) = s.kernel("other.py");
     let a = s.admin();
     let mut tokens = vec![];
-    for perm in ["viewer1", "viewer2", "viewer3", "editor"] {
-        let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": perm, "label": perm})).await;
+    for cap in CAPS {
+        let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": [cap], "label": cap})).await;
         assert_eq!(c.status, 201, "{}", c.text);
-        tokens.push((perm, c.body["token"].as_str().unwrap().to_string(), c.body["share_id"].as_str().unwrap().to_string()));
+        assert_eq!(c.body["capabilities"], json!([cap]));
+        tokens.push((cap, c.body["token"].as_str().unwrap().to_string()));
     }
-    let rank = |p: &str| match p {
-        "viewer1" => 1,
-        "viewer2" => 2,
-        "viewer3" => 3,
-        "editor" => 4,
-        _ => 5,
-    };
-    // (method, path, body, minimum permission)
+    // (method, path, body, the one capability it needs)
     let b = format!("/api/kernels/{kid}");
     let ops: Vec<(&str, String, Option<serde_json::Value>, &str)> = vec![
-        ("GET", "/api/manager".into(), None, "viewer1"),
-        ("GET", "/api/kernels".into(), None, "viewer1"),
-        ("GET", b.clone(), None, "viewer1"),
-        ("GET", format!("{b}/document"), None, "viewer1"),
-        ("GET", format!("{b}/namespace"), None, "viewer2"),
-        ("GET", format!("{b}/runs"), None, "viewer2"),
-        ("GET", format!("{b}/runs/latest"), None, "viewer2"),
-        ("POST", format!("{b}/interrupt"), None, "viewer3"),
-        ("DELETE", format!("{b}/runs/20261003-120000-ffff"), None, "viewer3"),
-        ("POST", format!("{b}/runs"), Some(json!({"mode": "all", "on_busy": "queue"})), "viewer3"),
-        ("POST", format!("{b}/restart"), Some(json!({})), "admin"),
-        ("GET", format!("{b}/shares"), None, "admin"),
-        ("POST", format!("{b}/shares"), Some(json!({"permission": "viewer1"})), "admin"),
-        ("DELETE", format!("{b}/shares/s_0000000000000000"), None, "admin"),
-        ("POST", "/api/kernels".into(), Some(json!({"path": path})), "admin"),
-        ("GET", format!("/api/documents?path={path}"), None, "admin"),
+        ("GET", "/api/kernels".into(), None, "read"),
+        ("GET", b.clone(), None, "read"),
+        ("GET", format!("{b}/document"), None, "read"),
+        ("GET", format!("{b}/namespace"), None, "history"),
+        ("GET", format!("{b}/runs"), None, "history"),
+        ("GET", format!("{b}/runs/latest"), None, "history"),
+        ("POST", format!("{b}/interrupt"), None, "execute"),
+        ("DELETE", format!("{b}/runs/20261003-120000-ffff"), None, "execute"),
+        ("POST", format!("{b}/runs"), Some(json!({"mode": "all", "on_busy": "queue"})), "execute"),
+        ("POST", format!("{b}/restart"), Some(json!({})), "execute"),
+        ("GET", format!("{b}/shares"), None, "manage"),
+        ("POST", format!("{b}/shares"), Some(json!({"capabilities": ["read"]})), "manage"),
+        ("DELETE", format!("{b}/shares/s_0000000000000000"), None, "manage"),
     ];
-    for (perm, token, _) in &tokens {
+    for (cap, token) in &tokens {
         let v = s.with_token(token);
-        assert_eq!(v.get("/api/manager").await.body["permission"], *perm);
-        for (m, p, body, min) in &ops {
+        assert_eq!(v.get("/api/manager").await.body["capabilities"], json!([cap]));
+        for (m, p, body, need) in &ops {
             let r = v.call(m, p, body.clone()).await;
-            if rank(perm) >= rank(min) {
-                assert!(r.status < 400 || (r.status == 404 && p.contains("/runs/")), "{perm} {m} {p}: {}", r.text);
+            if need == cap {
+                let missing = r.status == 404 && (p.contains("/runs/") || p.contains("/shares/"));
+                assert!(r.status < 400 || missing, "{cap} {m} {p}: {}", r.text);
             } else {
                 r.error(403, "forbidden");
             }
         }
-        // Scoped to one kernel: other kernels are 404, never 403, and invisible in lists.
-        let ks = v.get("/api/kernels").await;
-        assert_eq!(ks.body["kernels"].as_array().unwrap().len(), 1);
-        assert_eq!(ks.body["kernels"][0]["kernel_id"], kid);
+        // A token bound to one kernel cannot start kernels or read files by path.
+        if *cap == "execute" || *cap == "read" {
+            v.post("/api/kernels", json!({"path": path})).await.error(403, "forbidden");
+            v.get(&format!("/api/documents?path={path}")).await.error(403, "forbidden");
+        }
+        // Scoped to one kernel: other kernels are 404, never 403.
         for (m, p) in [
             ("GET", format!("/api/kernels/{other}")),
             ("GET", format!("/api/kernels/{other}/document")),
@@ -403,23 +399,132 @@ async fn test_fr_a3_permission_matrix() {
         ] {
             v.call(m, &p, None).await.error(404, "not_found");
         }
-        // viewer1 gets cells without outputs.
-        let doc = v.get(&format!("{b}/document")).await;
-        assert_eq!(doc.body["cells"][0].get("outputs").is_none(), *perm == "viewer1");
+        if *cap == "read" {
+            let ks = v.get("/api/kernels").await;
+            assert_eq!(ks.body["kernels"].as_array().unwrap().len(), 1);
+            assert_eq!(ks.body["kernels"][0]["kernel_id"], kid);
+            // read without history: cells without outputs.
+            let doc = v.get(&format!("{b}/document")).await;
+            assert!(doc.body["cells"][0].get("outputs").is_none());
+        }
     }
-    // Shutdown last (admin only).
-    for (_, token, _) in &tokens {
-        s.with_token(token).delete(&b).await.error(403, "forbidden");
+    // Shutdown needs execute; only the execute token (and the master) may.
+    for (cap, token) in &tokens {
+        if *cap != "execute" {
+            s.with_token(token).delete(&b).await.error(403, "forbidden");
+        }
     }
     assert_eq!(a.delete(&b).await.status, 202);
 }
 
 #[tokio::test]
-async fn test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission() {
+async fn test_fr_a3_capabilities_have_no_order() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let b = format!("/api/kernels/{kid}");
+    // manage alone is not read: it makes shares but cannot see the document.
+    let m = a.post(&format!("{b}/shares"), json!({"capabilities": ["manage"]})).await;
+    let v = s.with_token(m.body["token"].as_str().unwrap());
+    assert_eq!(v.post(&format!("{b}/shares"), json!({"capabilities": ["read"]})).await.status, 201);
+    v.get(&format!("{b}/document")).await.error(403, "forbidden");
+    // read + history sees outputs.
+    let h = a.post(&format!("{b}/shares"), json!({"capabilities": ["history", "read"]})).await;
+    assert_eq!(h.body["capabilities"], json!(["read", "history"]), "canonical order");
+    let v = s.with_token(h.body["token"].as_str().unwrap());
+    let doc = v.get(&format!("{b}/document")).await;
+    assert!(doc.body["cells"][0].get("outputs").is_some());
+}
+
+#[tokio::test]
+async fn test_fr_a3_tier_names_are_refused() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let url = format!("/api/kernels/{kid}/shares");
+    for tier in ["viewer1", "viewer2", "viewer3", "admin", "editor", "write"] {
+        a.post(&url, json!({"capabilities": [tier]})).await.error(400, "bad_request");
+        a.post(&url, json!({"permission": tier})).await.error(400, "bad_request");
+    }
+    a.post(&url, json!({"capabilities": []})).await.error(400, "bad_request");
+    a.post(&format!("/api/kernels/{kid}/tokens/share"), json!({"capabilities": ["viewer2"]}))
+        .await
+        .error(400, "bad_request");
+}
+
+#[tokio::test]
+async fn test_fr_a3_user_permission_names_the_needed_capability() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let b = format!("/api/kernels/{kid}");
+    // The right name passes (the token's set decides), a wrong or unknown one is 400.
+    let ok = a.post(&format!("{b}/runs"), json!({"mode": "all", "user_permission": "execute"})).await;
+    assert_eq!(ok.status, 202, "{}", ok.text);
+    for bad in ["edit", "write", "viewer3", "admin"] {
+        a.post(&format!("{b}/runs"), json!({"mode": "all", "user_permission": bad})).await.error(400, "bad_request");
+    }
+    a.post(&format!("{b}/shares"), json!({"capabilities": ["read"], "user_permission": "manage"})).await;
+    a.post(&format!("{b}/shares"), json!({"capabilities": ["read"], "user_permission": "edit"}))
+        .await
+        .error(400, "bad_request");
+    // A token without the capability is 403 even with the right name.
+    let c = a.post(&format!("{b}/shares"), json!({"capabilities": ["read"]})).await;
+    let v = s.with_token(c.body["token"].as_str().unwrap());
+    v.post(&format!("{b}/runs"), json!({"mode": "all", "user_permission": "execute"})).await.error(403, "forbidden");
+}
+
+#[tokio::test]
+async fn test_fr_a3_token_share_is_issued_by_the_kernel() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let url = format!("/api/kernels/{kid}/tokens/share");
+    let c = a
+        .post(&url, json!({"capabilities": ["read", "history"], "kernel_id": kid, "user_permission": "manage"}))
+        .await;
+    assert_eq!(c.status, 201, "{}", c.text);
+    let sid = c.body["share_id"].as_str().unwrap();
+    let token = c.body["share_token"].as_str().unwrap();
+    assert!(dpx_server::util::is_share_id(sid));
+    assert_eq!(c.body["capabilities"], json!(["read", "history"]));
+    assert_eq!(c.body["share_url"], format!("https://darkpyonix.dev/s/{sid}#{token}"));
+    let issued = s.backend.calls_of(&kid, "tokens.issue").pop().unwrap();
+    assert_eq!(issued["kind"], "share");
+    assert_eq!(issued["capabilities"], json!(["read", "history"]));
+    // The kernel holds it: it works as a bearer token and lists, then revokes through the kernel.
+    let v = s.with_token(token);
+    let runs = format!("/api/kernels/{kid}/runs");
+    assert_eq!(v.get(&runs).await.status, 200);
+    v.post(&runs, json!({"mode": "all"})).await.error(403, "forbidden");
+    let listed = a.get(&format!("/api/kernels/{kid}/shares")).await.body["shares"].clone();
+    assert!(listed.as_array().unwrap().iter().any(|x| x["share_id"] == sid && x["kernel_id"] == kid.as_str()));
+    assert_eq!(a.delete(&format!("/api/kernels/{kid}/shares/{sid}")).await.status, 204);
+    v.get(&runs).await.error(401, "token_revoked");
+    // Validation.
+    a.post(&url, json!({"capabilities": ["read"], "kernel_id": "k_00000000000000000000"})).await.error(400, "bad_request");
+    a.post(&url, json!({"capabilities": ["read"], "user_permission": "read"})).await.error(400, "bad_request");
+    let m = a.post(&url, json!({"capabilities": ["read"]})).await;
+    let r = s.with_token(m.body["share_token"].as_str().unwrap());
+    r.post(&url, json!({"capabilities": ["read"]})).await.error(403, "forbidden");
+}
+
+#[tokio::test]
+async fn test_fr_a3_ephemeral_manager_refuses_token_share() {
+    let s = TestServer::start(Mode::Ephemeral).await;
+    let (kid, _) = s.kernel("train.py");
+    s.admin()
+        .post(&format!("/api/kernels/{kid}/tokens/share"), json!({"capabilities": ["read"]}))
+        .await
+        .error(403, "forbidden");
+}
+
+#[tokio::test]
+async fn test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_capabilities() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, path) = s.kernel("train.py");
     let a = s.admin();
-    let created = a.post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer1", "label": "demo"})).await;
+    let created = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"], "label": "demo"})).await;
     assert_eq!(created.status, 201);
     let share = created.body;
     let sid = share["share_id"].as_str().unwrap();
@@ -435,19 +540,19 @@ async fn test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission() {
     assert!(listed[0].get("token").is_none());
 
     let v = s.with_token(token);
-    assert_eq!(v.get("/api/manager").await.body["permission"], "viewer1");
+    assert_eq!(v.get("/api/manager").await.body["capabilities"], json!(["read"]));
     v.post("/api/kernels", json!({"path": path})).await.error(403, "forbidden");
 
     // Validation of createShare.
     let url = format!("/api/kernels/{kid}/shares");
-    a.post(&url, json!({"permission": "admin"})).await.error(400, "bad_request");
+    a.post(&url, json!({"capabilities": ["admin"]})).await.error(400, "bad_request");
     a.post(&url, json!({"label": "x"})).await.error(400, "bad_request");
-    a.post(&url, json!({"permission": "viewer1", "label": "x".repeat(121)})).await.error(400, "bad_request");
-    a.post(&url, json!({"permission": "viewer1", "expires_at": "tomorrow"})).await.error(400, "bad_request");
-    a.post("/api/kernels/k_00000000000000000000/shares", json!({"permission": "viewer1"})).await.error(404, "not_found");
+    a.post(&url, json!({"capabilities": ["read"], "label": "x".repeat(121)})).await.error(400, "bad_request");
+    a.post(&url, json!({"capabilities": ["read"], "expires_at": "tomorrow"})).await.error(400, "bad_request");
+    a.post("/api/kernels/k_00000000000000000000/shares", json!({"capabilities": ["read"]})).await.error(404, "not_found");
 
     // Expired shares do not authenticate.
-    let expired = a.post(&url, json!({"permission": "viewer2", "expires_at": "2000-01-01T00:00:00Z"})).await;
+    let expired = a.post(&url, json!({"capabilities": ["read", "history"], "expires_at": "2000-01-01T00:00:00Z"})).await;
     assert_eq!(expired.status, 201);
     assert_eq!(expired.body["expires_at"], "2000-01-01T00:00:00Z");
     s.with_token(expired.body["token"].as_str().unwrap()).get("/api/manager").await.error(401, "unauthorized");
@@ -470,7 +575,7 @@ async fn test_fr_m4_shares_are_stored_hashed_and_survive_restart() {
     let mut s = TestServer::start_cfg(cfg.clone(), backend.clone(), scratch.clone()).await;
     let (kid, _) = s.kernel("train.py");
     assert_eq!(s.token, "master-secret");
-    let c = s.admin().post(&format!("/api/kernels/{kid}/shares"), json!({"permission": "viewer2"})).await;
+    let c = s.admin().post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read", "history"]})).await;
     let token = c.body["token"].as_str().unwrap().to_string();
     assert!(c.body["url"].as_str().unwrap().starts_with("https://example.test/share/s_"));
     s.stop().await;
@@ -487,7 +592,7 @@ async fn test_fr_m4_shares_are_stored_hashed_and_survive_restart() {
 
     let s2 = TestServer::start_cfg(cfg, backend, scratch.clone()).await;
     let v = s2.with_token(&token);
-    assert_eq!(v.get("/api/manager").await.body["permission"], "viewer2");
+    assert_eq!(v.get("/api/manager").await.body["capabilities"], json!(["read", "history"]));
     let info = s2.admin().get("/api/manager").await;
     assert_eq!(info.body["mode"], "dedicated");
     assert_eq!(info.body["idle_timeout"], json!(null));

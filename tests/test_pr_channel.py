@@ -1,21 +1,22 @@
 """DKP/1 control channel (FR-A1, PR-1, PR-2, PR-3, PR-4; PROTOCOL §3)."""
 from __future__ import annotations
 
-import base64
+import os
 import socket
+import stat
 import struct
 import threading
 import time
 
 import pytest
 
+from darkpyonix import _peer
 from darkpyonix import _protocol as p
 from darkpyonix._client import KernelClient
 from darkpyonix._events import EventLog
 from darkpyonix._server import ControlServer
 
 KID = "k_0123456789abcdef0123"
-KEY = b"k" * 32
 
 
 def _handlers():
@@ -41,30 +42,30 @@ def events():
 
 
 @pytest.fixture
-def server(events):
-    srv = ControlServer(KID, KEY, events, _handlers())
+def server(events, dp_home):
+    srv = ControlServer(KID, events, _handlers())
     srv.start()
     yield srv
     srv.stop()
 
 
 def _client(server, **kw):
-    c = KernelClient(server.port, KID, key=kw.pop("key", KEY), **kw)
+    c = KernelClient(server.address, KID, **kw)
     c.connect()
     return c
 
 
 def _raw_connect(server):
-    s = socket.create_connection(("127.0.0.1", server.port), timeout=5)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    s.connect(server.address)
     hello = p.recv_frame(s)
     return s, hello
 
 
 def _raw_auth(server):
     s, hello = _raw_connect(server)
-    nonce = base64.b64decode(hello["nonce"])
-    s.sendall(p.encode({"op": "auth", "client": {"name": "raw", "kind": "test", "pid": 1},
-                        "mac": p.auth_mac(KEY, nonce, KID)}))
+    s.sendall(p.encode({"op": "auth", "client": {"name": "raw", "kind": "test", "pid": 1}}))
     welcome = p.recv_frame(s)
     assert welcome["op"] == "welcome"
     return s
@@ -80,28 +81,108 @@ def _wait_closed(s, timeout):
         return True
 
 
-def test_fr_a1_wrong_key_is_rejected(server):
-    with pytest.raises(p.DKPError) as e:
-        _client(server, key=b"x" * 32)
-    assert e.value.code == "auth_failed"
+def test_fr_a1_same_account_connects_without_a_key(server, dp_home):
     good = _client(server)
     assert good.welcome["op"] == "welcome"
     assert good.welcome["session"].startswith("s_")
     assert good.welcome["seq"] == 0
     good.close()
+    assert not os.path.exists(os.path.join(dp_home, "user.key"))
 
 
-def test_fr_a1_hello_carries_identity_and_nonce(server):
+def test_fr_a1_hello_carries_identity_and_no_secret(server):
     s, hello = _raw_connect(server)
     assert hello["op"] == "hello" and hello["dkp"] == 1
     assert hello["kernel_id"] == KID
     assert hello["kernel_version"] == p.KERNEL_VERSION
-    assert len(base64.b64decode(hello["nonce"])) == p.NONCE_BYTES
-    s.sendall(p.encode({"op": "auth", "mac": "00" * 32}))
+    assert "nonce" not in hello
+    s.sendall(p.encode({"op": "nonsense"}))
     err = p.recv_frame(s)
-    assert err["op"] == "error" and err["code"] == "auth_failed"
+    assert err["op"] == "error" and err["code"] == "bad_request"
     assert _wait_closed(s, 2)
     s.close()
+
+
+def test_fr_a1_no_tcp_port_is_opened(server):
+    assert server._listen.family == socket.AF_UNIX
+    assert not hasattr(server, "port")
+    st = os.stat(server.address)
+    assert stat.S_ISSOCK(st.st_mode) and st.st_mode & 0o777 == 0o600
+    assert os.path.basename(server.address) == KID + ".sock"
+    # Every socket this process listens on is a Unix socket: a TCP connect to any port the
+    # control channel could have used finds nothing of ours (the sockets dir holds no port file).
+    assert not any(n.endswith(".port") for n in os.listdir(os.path.dirname(server.address)))
+
+
+def test_fr_a1_other_account_is_refused_by_peer_identity(server, monkeypatch):
+    # The OS reports a different UID for the peer: the kernel closes without sending a frame.
+    monkeypatch.setattr(_peer, "peer_uid", lambda sock: os.geteuid() + 1)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    s.connect(server.address)
+    try:
+        assert s.recv(65536) == b""   # EOF, never a hello
+    except ConnectionError:
+        pass
+    s.close()
+    monkeypatch.undo()
+    assert _client(server).welcome["op"] == "welcome"  # the server went on serving
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() != 0,
+                    reason="needs root to run a process as a second OS account (CI)")
+def test_fr_a1_other_account_is_refused_by_peer_identity_real_uid(server):
+    os.chmod(server.address, 0o666)   # take the file mode out of the picture: only the peer check is left
+    pid = os.fork()
+    if pid == 0:
+        code = 2
+        try:
+            os.setgid(65534)
+            os.setuid(65534)
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(5)
+            s.connect(server.address)
+            code = 0 if s.recv(65536) == b"" else 1
+        except ConnectionError:
+            code = 0
+        finally:
+            os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    assert os.WEXITSTATUS(status) == 0
+
+
+def test_fr_a1_manager_refuses_a_kernel_of_another_account(server, monkeypatch):
+    # The client asks the OS who serves the socket and sends nothing if it is another account.
+    seen = []
+    monkeypatch.setattr(_peer, "same_account", lambda sock: seen.append(sock) or False)
+    c = KernelClient(server.address, KID)
+    with pytest.raises(p.DKPError) as e:
+        c.connect()
+    assert e.value.code == "kernel_unreachable" and seen
+    assert server.client_count() == 0
+
+
+def test_fr_a1_client_refuses_a_socket_of_another_kernel(server):
+    with pytest.raises(p.DKPError) as e:
+        KernelClient(server.address, "k_ffffffffffffffffffff").connect()
+    assert e.value.code == "kernel_unreachable"
+
+
+def test_fr_a1_user_tag_comes_from_the_os_account(dp_home):
+    import hashlib
+    from darkpyonix import _home
+    expect = hashlib.sha256(("uid:%d" % os.getuid()).encode()).hexdigest()[:16]
+    assert _home.user_tag() == expect
+    assert not os.path.exists(os.path.join(dp_home, "user.key"))
+
+
+def test_fr_a1_long_home_falls_back_to_a_short_private_socket_dir(dp_home, monkeypatch):
+    from darkpyonix import _home
+    long_home = os.path.join(dp_home, "x" * 120)
+    monkeypatch.setenv("DARKPYONIX_HOME", long_home)
+    path = _home.control_path(KID)
+    assert len(os.fsencode(path)) < 104 and path.endswith(KID + ".sock")
+    assert os.stat(os.path.dirname(path)).st_mode & 0o077 == 0
 
 
 def test_pr_2_handshake_times_out(server, monkeypatch):
@@ -191,7 +272,7 @@ def test_pr_3_subscribe_without_since_streams_only_live(server, events):
         assert c.next_event(2)["seq"] == 2
 
 
-def test_pr_3_replay_truncated_when_ring_overflows():
+def test_pr_3_replay_truncated_when_ring_overflows(dp_home):
     log = EventLog(max_events=10)
     for i in range(25):
         log.append("output", {"i": i})
@@ -200,7 +281,7 @@ def test_pr_3_replay_truncated_when_ring_overflows():
     assert log.since(20) == (log.since(20)[0], None)
     assert log.since(25) == ([], None)
 
-    srv = ControlServer(KID, KEY, log, {})
+    srv = ControlServer(KID, log, {})
     srv.start()
     try:
         with _client(srv) as c:
@@ -295,3 +376,11 @@ def test_client_close_ends_event_stream(server):
     c.subscribe()
     c.close()
     assert list(c.events()) == []
+
+
+def test_fr_d_announce_names_the_runtime_home(dp_home):
+    """The user_tag is shared by every home of an account, so the announce says which home it is."""
+    import importlib
+    main = importlib.import_module("darkpyonix.__main__")
+    k = main.Kernel(os.path.join(dp_home, "nb.py"))
+    assert k.info()["home"] == dp_home

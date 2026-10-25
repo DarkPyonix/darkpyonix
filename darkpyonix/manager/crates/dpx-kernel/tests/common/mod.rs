@@ -56,9 +56,8 @@ pub fn interpreters() -> Vec<PathBuf> {
     out
 }
 
-pub fn backend(home: &Path, multicast: bool) -> RealBackend {
+pub fn backend(home: &Path) -> RealBackend {
     let mut cfg = Config::with_home(home);
-    cfg.multicast = multicast;
     cfg.python = Some(venv_python().to_string_lossy().into_owned());
     RealBackend::new(cfg).unwrap()
 }
@@ -97,8 +96,9 @@ impl Drop for Reaper {
 pub struct FakeKernel {
     pub child: Child,
     pub announce: Value,
+    pub announce_path: String,
     pub kernel_id: String,
-    pub port: u16,
+    pub control: String,
     pub pid: u32,
 }
 
@@ -117,8 +117,9 @@ impl FakeKernel {
         let mut fake = FakeKernel {
             child,
             announce: Value::Null,
+            announce_path: out.to_string_lossy().into_owned(),
             kernel_id: String::new(),
-            port: 0,
+            control: String::new(),
             pid: 0,
         };
         let deadline = Instant::now() + Duration::from_secs(15);
@@ -126,7 +127,7 @@ impl FakeKernel {
             if let Ok(data) = std::fs::read(&out) {
                 if let Ok(v) = serde_json::from_slice::<Value>(&data) {
                     fake.kernel_id = v["kernel_id"].as_str().unwrap().to_string();
-                    fake.port = v["port"].as_u64().unwrap() as u16;
+                    fake.control = v["control"].as_str().unwrap().to_string();
                     fake.pid = v["pid"].as_u64().unwrap() as u32;
                     fake.announce = v;
                     return fake;
@@ -152,4 +153,15 @@ impl Drop for FakeKernel {
 pub fn percentile(sorted: &[Duration], p: f64) -> Duration {
     let i = ((sorted.len() as f64 - 1.0) * p).round() as usize;
     sorted[i]
+}
+
+impl FakeKernel {
+    /// Connections the fake currently holds open (it writes the count next to its announce file).
+    pub fn open_connections(&self) -> usize {
+        let path = format!("{}.conns", self.announce_path);
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
 }

@@ -85,7 +85,7 @@ tcl install darkpyonix                    <span class="c"># with toolchain-lite<
 
         <div class="note">
       <span class="label">Release status</span>
-      <p>Version 0.2.0 is not on PyPI yet <span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a></span>. PyPI still serves 0.1.0, the 2025 package under the MIT license, which is not the runtime API this guide describes. Version 0.2.0 is published under Apache-2.0 when a GitHub release is made after pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a> lands (issue <a href="https://github.com/DarkPyonix/darkpyonix/issues/45">#45</a>). The package is standard library only and has no dependencies.</p>
+      <p>Version 0.2.0 is on PyPI (release <code>v0.2.0</code>, issue <a href="https://github.com/DarkPyonix/darkpyonix/issues/45">#45</a>, pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/46">#46</a>). It is licensed Apache-2.0. Version 0.1.0, the 2025 package under the MIT license, is still listed there but is not the runtime API this guide describes, so pin <code>0.2.0</code> or newer. The package is standard library only and has no dependencies.</p>
     </div>
 
     <h2 id="interpreter">Choose the interpreter</h2>
@@ -118,10 +118,8 @@ darkpyonix run train.py --param lr=0.02   <span class="c"># second run: same ker
       <table>
         <thead><tr><th scope="col">Path</th><th scope="col">What</th></tr></thead>
         <tbody>
-          <tr><td><code>user.key</code></td><td>The key kernels and managers of the same OS user authenticate with. Mode 0600, created on first use. Being removed: the kernel will admit only the same OS account, checked by the peer identity the OS reports <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/55">#55</a></span></td></tr>
           <tr><td><code>locks/&lt;kernel_id&gt;.lock</code></td><td>The OS lock that keeps one kernel per file. The OS releases it when a kernel dies, so a stale file never blocks.</td></tr>
           <tr><td><code>runtime/</code></td><td>The kernel sources unpacked from the binary.</td></tr>
-          <tr><td><code>kernels/&lt;kernel_id&gt;.json</code>, <code>managers/&lt;pid&gt;.json</code></td><td>Registry files for discovery and for the CLI to find a manager. Being removed <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>.</td></tr>
           <tr><td><code>manager.db</code></td><td>Hashed share tokens of a dedicated manager.</td></tr>
         </tbody>
       </table>
