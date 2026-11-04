@@ -271,6 +271,11 @@ impl AttemptLimiter {
         Ok(())
     }
 
+    /// The check ended wrong: the lock runs from now, not from when the slow hash began.
+    pub fn failed(&self) {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).1 = Some(Instant::now());
+    }
+
     /// The password was right (or there is none): forget earlier failures.
     pub fn reset(&self) {
         *self.state.lock().unwrap_or_else(|p| p.into_inner()) = (0, None);

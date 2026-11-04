@@ -1028,7 +1028,10 @@ async fn check_pw(st: &Arc<AppState>, password: String) -> ApiResult<()> {
             st.auth.limiter.reset();
             Err(password_not_set())
         }
-        PasswordCheck::Wrong => Err(ApiError::unauthorized()),
+        PasswordCheck::Wrong => {
+            st.auth.limiter.failed();
+            Err(ApiError::unauthorized())
+        }
     }
 }
 
