@@ -40,7 +40,7 @@ WRITE_INTERVAL = 0.8
 # FR-R2: output older than 1 s must be in the log when the kernel is killed. A snapshot only becomes
 # visible once it is rendered and replaced, so the oldest missing output is WRITE_INTERVAL plus the
 # time that write took. The schedule shrinks the interval when writes are slow to stay inside this.
-STALENESS_BUDGET = 0.95
+STALENESS_BUDGET = 0.85
 MIN_WRITE_INTERVAL = 0.25
 DEFAULT_OUTPUT_LIMIT = 16 * 1024 * 1024  # FR-R5
 OUTPUT_LIMIT_ENV = "DARKPYONIX_RUN_OUTPUT_LIMIT"
