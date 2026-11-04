@@ -814,7 +814,7 @@ pub async fn get_run(
         check_run_ref(&run_ref)?;
         if st.backend.supports_handoff() {
             let plan = plan_handoff(&st, &p, HandoffKind::Wait, &kid, Some(run_ref.as_str()), &uri, &headers).await?;
-            return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers, None).await;
         }
         let summary = match query(&uri)?.get("format").map(String::as_str) {
             None | Some("ipynb") => false,
@@ -904,7 +904,7 @@ pub async fn stream_events(
         if st.backend.supports_handoff() {
             // FR-M6: the kernel answers; this connection (TLS, HTTP/2, tunnel) is pumped.
             let plan = plan_handoff(&st, &p, HandoffKind::Events, &kid, None, &uri, &headers).await?;
-            return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers, None).await;
         }
         let events = st.backend.subscribe(&kid, since).await?;
         let hide_outputs = !p.has(Capability::History);
@@ -926,22 +926,24 @@ pub async fn sync_ws(
     Path(kid): Path<String>,
     headers: HeaderMap,
     uri: Uri,
+    mut req: axum::extract::Request,
 ) -> Response {
+    let upgrade = req.extensions_mut().remove::<hyper::upgrade::OnUpgrade>();
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Capability::Read)?;
-        let upgrade = headers
+        let wants_ws = headers
             .get(axum::http::header::UPGRADE)
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
-        if !upgrade || !headers.contains_key("sec-websocket-key") {
+        if !wants_ws || !headers.contains_key("sec-websocket-key") {
             return Err(ApiError::invalid("a WebSocket upgrade request is required (Upgrade, Sec-WebSocket-Key)"));
         }
         if !st.backend.supports_handoff() {
             return Err(ApiError::internal("the WebSocket sync needs a backend that can hand off streams"));
         }
         let plan = plan_handoff(&st, &p, HandoffKind::Ws, &kid, None, &uri, &headers).await?;
-        crate::handoff::pump_response(&st, plan, &uri, &headers).await
+        crate::handoff::pump_response(&st, plan, &uri, &headers, upgrade).await
     };
     finish(r.await, OP_SYNC_WS)
 }

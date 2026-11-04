@@ -144,6 +144,7 @@ pub async fn pump_response(
     _plan: crate::api::HandoffPlan,
     _uri: &Uri,
     _headers: &HeaderMap,
+    _upgrade: Option<hyper::upgrade::OnUpgrade>,
 ) -> crate::error::ApiResult<axum::response::Response> {
     Err(crate::error::ApiError::internal("stream handoff needs Unix sockets"))
 }
@@ -159,7 +160,7 @@ mod unix {
     use axum::response::Response;
     use dpx_core::AdoptRequest;
     use serde_json::json;
-    use tokio::io::{AsyncRead, AsyncReadExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpStream, UnixStream};
 
     use super::{build_request, find, parse_head, token_of, Handoff, MAX_HEAD};
@@ -311,7 +312,15 @@ mod unix {
         plan: HandoffPlan,
         uri: &Uri,
         headers: &HeaderMap,
+        upgrade: Option<hyper::upgrade::OnUpgrade>,
     ) -> ApiResult<Response> {
+        // A WebSocket needs hyper's upgrade (HTTP/1.1). HTTP/2 would need RFC 8441 extended
+        // CONNECT, which is not implemented (SPEC FR-S9); refuse before the kernel is involved.
+        if plan.kind == HandoffKind::Ws && upgrade.is_none() {
+            return Err(ApiError::bad_request(
+                "WebSocket sync needs an HTTP/1.1 upgrade; HTTP/2 (RFC 8441) is not supported, use HTTP/1.1",
+            ));
+        }
         let (ours, theirs) =
             std::os::unix::net::UnixStream::pair().map_err(|e| ApiError::internal(format!("socket pair: {e}")))?;
         ours.set_nonblocking(true).map_err(|e| ApiError::internal(e.to_string()))?;
@@ -330,6 +339,36 @@ mod unix {
             .await
             .map_err(|_| ApiError::internal("the kernel did not answer the handed-off stream"))?
             .map_err(|e| ApiError::internal(format!("kernel answer: {e}")))?;
+        if head.status == 101 {
+            if let Some(on) = upgrade {
+                // Hand the upgraded connection to a task that copies both ways (hyper drops the
+                // stream otherwise); the response itself carries no body.
+                let mut shutdown = st.shutdown.clone();
+                let rest = head.rest;
+                tokio::spawn(async move {
+                    let Ok(up) = on.await else { return };
+                    let mut up = hyper_util::rt::TokioIo::new(up);
+                    if !rest.is_empty() && up.write_all(&rest).await.is_err() {
+                        return;
+                    }
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut up, &mut sock) => {}
+                        _ = shutdown.wait_for(|v| *v) => {}
+                    }
+                });
+                let mut resp = Response::new(Body::empty());
+                *resp.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+                for (k, v) in head.headers {
+                    if let (Ok(name), Ok(value)) =
+                        (HeaderName::from_bytes(k.to_ascii_lowercase().as_bytes()), HeaderValue::from_str(&v))
+                    {
+                        resp.headers_mut().append(name, value);
+                    }
+                }
+                resp.extensions_mut().insert(Handoff);
+                return Ok(resp);
+            }
+        }
         let state = PumpState { sock, first: Some(head.rest), shutdown: st.shutdown.clone() };
         let body = futures::stream::unfold(state, |mut s| async move {
             if let Some(first) = s.first.take() {
