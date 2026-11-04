@@ -51,27 +51,7 @@ def account() -> str:
 
 
 def _windows_sid() -> str:  # pragma: no cover - needs Windows
-    import ctypes
-    from ctypes import wintypes
-    k32, adv = ctypes.WinDLL("kernel32", use_last_error=True), ctypes.WinDLL("advapi32", use_last_error=True)
-    k32.GetCurrentProcess.restype = wintypes.HANDLE
-    token = wintypes.HANDLE()
-    TOKEN_QUERY = 0x0008
-    if not adv.OpenProcessToken(k32.GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(token)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        size = wintypes.DWORD()
-        adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # 1 = TokenUser
-        buf = ctypes.create_string_buffer(size.value)
-        if not adv.GetTokenInformation(token, 1, buf, size, ctypes.byref(size)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        sid_ptr = ctypes.c_void_p.from_buffer(buf).value  # TOKEN_USER starts with the SID pointer
-        text = wintypes.LPWSTR()
-        if not adv.ConvertSidToStringSidW(ctypes.c_void_p(sid_ptr), ctypes.byref(text)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            return text.value
-        finally:
-            k32.LocalFree(text)
-    finally:
-        k32.CloseHandle(token)
+    # One place declares argtypes/restype for every Win32 call, so 64-bit handles are never
+    # truncated to c_int.
+    from . import _winpipe
+    return _winpipe.own_sid()
