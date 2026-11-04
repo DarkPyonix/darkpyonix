@@ -74,6 +74,11 @@ info:
     retyped or removed. Clients ignore fields they do not know. A replaced field or path stays,
     marked `deprecated: true`.
 
+    **Planned paths.** A path item with `x-planned: true` is agreed in the SPEC but not yet
+    served by the Worker (hosted notebooks, FR-H14..H19); the OpenAPI test skips it until the
+    flag is removed. `/link`, `/s/{share_id}`, `/ash/` and the Flathub file are still served by
+    the Worker and stay as `deprecated: true` until the front (FR-H12) replaces them.
+
     **Errors.** Error bodies are `Error` objects. Every 401 carries a `code`:
     `device_removed` when the device token belongs to a removed device (stop retrying, drop
     the token), `invalid_credentials` for anything else (missing, unknown or expired).
@@ -153,6 +158,26 @@ paths:
                     description: Base URL for iroh's PkarrPublisher and PkarrResolver (append `?token=<resolve token>` to resolve).
                     example: "https://api.darkpyonix.dev/pkarr"
                   link_url: {type: string, example: "https://darkpyonix.dev/link", description: The device approval page on the front.}
+
+  /.well-known/org.flathub.VerifiedApps.txt:
+    get:
+      deprecated: true
+      tags: [System]
+      operationId: getFlathubVerifiedApps
+      summary: Flathub website verification (FR-H7)
+      description: |
+        The token Flathub issues to verify app ids under this domain (`dev.darkpyonix.Ember`),
+        as plain text. Its content is the Worker's `FLATHUB_VERIFICATION_TOKEN` var or secret;
+        when that is unset or empty the file does not exist.
+      security: []
+      responses:
+        "200":
+          description: The verification token.
+          content:
+            text/plain:
+              schema: {type: string}
+        "404":
+          description: No token configured.
 
   # ------------------------------------------------------------------ accounts (FR-H6)
 
@@ -270,6 +295,23 @@ paths:
               schema: {$ref: "#/components/schemas/Error"}
 
   # ------------------------------------------------------------------ devices (FR-H1)
+
+  /link:
+    get:
+      deprecated: true
+      tags: [Devices]
+      operationId: openLinkPage
+      summary: The page where a signed-in person approves a device's user code
+      security: []
+      parameters:
+        - {name: code, in: query, required: false, schema: {type: string, example: BCDF-GHJK}}
+      responses:
+        "200":
+          description: HTML (signed in).
+          content:
+            text/html: {}
+        "302":
+          description: Not signed in; to `/auth/login?return_to=/link?code=...`.
 
   /device-links:
     post:
@@ -987,6 +1029,7 @@ paths:
   # ------------------------------------------------------------------ notebooks (FR-H14..H19)
 
   /notebooks:
+    x-planned: true
     get:
       tags: [Notebooks]
       operationId: listMyNotebooks
@@ -1045,6 +1088,7 @@ paths:
           description: Too many notebooks created this minute (FR-H19).
 
   /users/{github_login}/notebooks:
+    x-planned: true
     parameters:
       - name: github_login
         in: path
@@ -1073,6 +1117,7 @@ paths:
           description: Too many anonymous reads (FR-H19).
 
   /notebooks/{notebook_id}:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     get:
@@ -1156,6 +1201,7 @@ paths:
           description: Unknown notebook in the caller's reach.
 
   /notebooks/{notebook_id}/versions:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1205,6 +1251,7 @@ paths:
           description: Too many uploads this minute (FR-H19).
 
   /notebooks/{notebook_id}/versions/{version}:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1238,6 +1285,7 @@ paths:
           description: Unknown version in the caller's reach.
 
   /notebooks/{notebook_id}/versions/{version}/source:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1264,6 +1312,7 @@ paths:
           description: Too many anonymous reads (FR-H19).
 
   /notebooks/{notebook_id}/versions/{version}/run:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1287,6 +1336,7 @@ paths:
           description: Too many anonymous reads (FR-H19).
 
   /notebooks/{notebook_id}/report:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1315,6 +1365,7 @@ paths:
           description: Too many reports from this address.
 
   /admin/notebooks/{notebook_id}/takedown:
+    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1344,6 +1395,41 @@ paths:
           description: Operator secret missing or wrong.
         "404":
           description: Unknown notebook.
+
+  /s/{share_id}:
+    parameters:
+      - $ref: "#/components/parameters/ShareId"
+    get:
+      deprecated: true
+      tags: [Shares]
+      operationId: openShareLink
+      summary: The page a share link opens (ash viewer; a placeholder until ash ships)
+      description: The token in the URL fragment stays in the browser.
+      security: []
+      responses:
+        "200":
+          description: HTML.
+          content:
+            text/html: {}
+        "404":
+          description: Unknown or unpublished share.
+
+  /ash/:
+    get:
+      deprecated: true
+      tags: [Shares]
+      operationId: getAshViewer
+      summary: The official ash viewer (Workers static assets; a placeholder until ash ships)
+      description: |
+        The built ash viewer is deployed as static assets under `/ash/` (its other files are
+        outside this contract, like the manager's `/docs/` pages), and `/s/{share_id}`
+        serves its `index.html`.
+      security: []
+      responses:
+        "200":
+          description: HTML.
+          content:
+            text/html: {}
 
   # ------------------------------------------------------------------ names (FR-H5)
 
