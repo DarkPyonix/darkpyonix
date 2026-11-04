@@ -34,7 +34,7 @@ also runs outside a kernel, for example with `uv run python train.py` in CI.
 
 ```
 uv add darkpyonix                         # into a uv project
-ppp core add "darkpyonix==0.2.0"          # with pypackpack
+ppp core add "darkpyonix==0.3.0"          # with pypackpack
 tcl install darkpyonix                    # with toolchain-lite
 ```
 
@@ -56,7 +56,7 @@ manager from a checkout.
 
 ## Status
 
-Version 0.2.0 is alpha. What works today and what is planned:
+Version 0.3.0 is alpha. What works today and what is planned:
 
 | Part | Status |
 |---|---|
