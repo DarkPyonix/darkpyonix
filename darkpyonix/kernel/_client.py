@@ -14,7 +14,7 @@ import socket
 import threading
 from typing import Any, Dict, Iterator, Optional
 
-from . import _peer
+from . import _peer, _winpipe
 from ._protocol import DKPError, encode, recv_frame
 
 _CLOSED = object()
@@ -35,7 +35,7 @@ class KernelClient:
         self.name = name
         self.kind = kind
         self.welcome = None  # type: Optional[Dict[str, Any]]
-        self._sock = None  # type: Optional[socket.socket]
+        self._sock = None  # type: Any  # a socket, or a _winpipe.PipeSocket on Windows
         self._send_lock = threading.Lock()
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
@@ -49,15 +49,28 @@ class KernelClient:
     # ------------------------------------------------------------ connection
 
     def connect(self, timeout: float = 5.0) -> "KernelClient":
-        if not hasattr(socket, "AF_UNIX"):
+        if _winpipe.is_pipe_name(self.control):
+            if os.name != "nt":
+                raise DKPError("kernel_unreachable", "%s is a Windows named pipe" % self.control)
+            sock = None  # type: Any
+        elif not hasattr(socket, "AF_UNIX"):
             raise DKPError("kernel_unreachable", "no Unix sockets on this platform")
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        else:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
+            if sock is None:
+                pipe = _winpipe.connect_client(self.control, timeout)
+                sock = _winpipe.PipeSocket(pipe)
+                # FR-A1: the process serving the pipe must run as this account, or nothing is sent.
+                if not _winpipe.same_server_account(pipe):
+                    raise DKPError("kernel_unreachable", "%s is served by another OS account" % self.control)
+            else:
+                sock.settimeout(timeout)
+                sock.connect(self.control)
+                # FR-A1: the kernel must run as this account too, or nothing is sent to it.
+                if not _peer.same_account(sock):
+                    raise DKPError("kernel_unreachable", "%s is served by another OS account" % self.control)
             sock.settimeout(timeout)
-            sock.connect(self.control)
-            # FR-A1: the kernel must run as this account too, or nothing is sent to it.
-            if not _peer.same_account(sock):
-                raise DKPError("kernel_unreachable", "%s is served by another OS account" % self.control)
             hello = recv_frame(sock)
             if hello.get("op") != "hello":
                 raise DKPError("bad_request", "expected hello, got %r" % (hello.get("op"),))
@@ -72,10 +85,12 @@ class KernelClient:
             if reply.get("op") != "welcome":
                 raise DKPError(reply.get("code") or "bad_request", reply.get("message") or "")
         except OSError as e:
-            sock.close()
+            if sock is not None:
+                sock.close()
             raise DKPError("kernel_unreachable", "cannot connect to %s: %s" % (self.control, e))
         except BaseException:
-            sock.close()
+            if sock is not None:
+                sock.close()
             raise
         sock.settimeout(None)
         self.welcome = reply

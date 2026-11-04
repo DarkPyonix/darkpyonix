@@ -296,10 +296,6 @@ def test_pr_5_adopt_with_an_unparsable_request_is_bad_request(server):
     client.close()
 
 
-def test_pr_5_adopt_over_a_windows_pipe_is_bad_request():
-    pytest.skip("Windows named-pipe control channel is not served yet (#55 follow-up)")
-
-
 def test_pr_6_streams_close_by_share_id(server):
     srv, _ = server
     mine, mine_srv = h.tcp_pair()

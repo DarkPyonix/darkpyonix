@@ -4,7 +4,7 @@ The control channel lets only the same OS account through, judged by what the OS
 peer process, not by a secret. Standard library only; Python 3.8+.
 
 POSIX: ``SO_PEERCRED`` (Linux), ``LOCAL_PEERCRED`` (macOS), ``getpeereid`` through ``ctypes``
-(other BSDs). Windows named pipes are not served yet (#55 follow-up); ``account`` has the SID path.
+(other BSDs). Windows named pipes are in ``_winpipe`` (#80); ``account`` has the SID path.
 """
 from __future__ import annotations
 
