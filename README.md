@@ -38,10 +38,21 @@ ppp core add "darkpyonix==0.2.0"          # with pypackpack
 tcl install darkpyonix                    # with toolchain-lite
 ```
 
-The `darkpyonix` CLI and the manager are a separate Rust binary. It is not in this package yet,
-because prebuilt binaries are not published (planned). The
-[install guide](https://darkpyonix.dev/darkpyonix/en/getting-started.html) shows how to build it
-from a checkout.
+From 0.3.0 the wheel for these platforms also installs the `darkpyonix` command (the CLI and the
+kernel manager, one Rust binary): macOS arm64 and x86_64, Linux x86_64 and aarch64 (glibc,
+manylinux_2_28), Windows x64.
+
+```
+pip install darkpyonix
+darkpyonix --version
+```
+
+**Unsupported platforms.** musl Linux (Alpine) has no prebuilt manager in 0.3.0. There, and on any
+other platform without a binary wheel (32-bit, Windows arm64, ...), `pip install darkpyonix` still
+succeeds and installs only the kernel and the runtime API; the `darkpyonix` command then says the
+manager is not available on this platform. The
+[install guide](https://darkpyonix.dev/darkpyonix/en/getting-started.html) shows how to build the
+manager from a checkout.
 
 ## Status
 

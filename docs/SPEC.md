@@ -408,7 +408,7 @@ PyPI의 `darkpyonix`는 플랫폼마다 `darkpyonix` 명령(Rust 바이너리, �
   4. 같은 가상환경에서 `import darkpyonix`와 `python -m darkpyonix --help`가 동작합니다.
   5. `py3-none-any` 휠을 설치한 환경에서 `darkpyonix`가 위 안내와 종료 코드 1로 끝나고 `import darkpyonix`는 동작합니다.
   6. 릴리스 워크플로는 태그가 `v` + 버전과 다르거나 바이너리 `--version`이 패키지 버전과 다르면 올리지 않고, 업로드는 GitHub Release `published`일 때 신뢰 게시(OIDC)로만 합니다. 수동 실행(`workflow_dispatch`)은 빌드와 스모크 시험까지만 하고 올리지 않습니다.
-- 테스트: 위 1~5는 `publish-pypi.yml`의 플랫폼별 스모크 단계가 증명합니다. 휠 구성(태그, 스크립트 포함, 대체 휠)은 `tests/test_fr_c3_packaging.py`가 가짜 바이너리로 확인합니다. 각 플랫폼에서 통과한 실행 기록을 여기에 붙인 뒤 `Done`으로 바꿉니다.
+- 테스트: 위 1~5는 `publish-pypi.yml`의 플랫폼별 스모크 단계(`packaging/smoke.py`)가 증명합니다. 휠 구성(태그, 스크립트 포함, 대체 휠)은 `tests/test_fr_c3_packaging.py`가 가짜 바이너리로 확인합니다. 각 플랫폼에서 통과한 실행 기록을 여기에 붙인 뒤 `Done`으로 바꿉니다.
 - 상태 메모: 현재 Rust 작업 공간 버전(`Cargo.toml`)은 0.1.0이라 릴리스 전에 패키지 버전과 맞춰야 합니다(수용 기준 1이 막습니다).
 
 ## 9. 인증과 공유 (A)
