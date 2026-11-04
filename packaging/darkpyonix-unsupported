@@ -1,0 +1,33 @@
+#!python
+"""The ``darkpyonix`` command of the manager-less wheel (SPEC FR-C3).
+
+Installed only by the ``py3-none-any`` wheel and the sdist, that is on platforms for which
+no ``darkpyonix`` binary wheel is published. Standard library only.
+"""
+import platform
+import sys
+
+
+def main():
+    try:
+        import darkpyonix
+
+        version = " " + str(darkpyonix.__version__)
+    except Exception:
+        version = ""
+    sys.stderr.write(
+        "darkpyonix%s: the kernel manager and the `darkpyonix` command are not available on "
+        "this platform (%s %s, Python %s).\n"
+        "Only the kernel and the runtime API (`import darkpyonix`, `python -m darkpyonix`) "
+        "were installed.\n"
+        "Prebuilt managers exist for macOS (arm64, x86_64), Linux (x86_64, aarch64; glibc, "
+        "not musl) and Windows x64.\n"
+        "See https://darkpyonix.dev/darkpyonix/ or build the manager from source.\n"
+        % (version, platform.system() or "unknown", platform.machine() or "unknown",
+           platform.python_version())
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

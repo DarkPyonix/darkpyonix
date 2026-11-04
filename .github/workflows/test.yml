@@ -41,7 +41,7 @@ jobs:
           uv venv --no-project -p 3.13 .scratch/venv
           # The package is not installed: tests/conftest.py links darkpyonix/kernel as `darkpyonix`
           # under .scratch/src (hatchling cannot do an editable install of a renamed folder).
-          uv pip install -p .scratch/venv/bin/python "pytest>=8" "pyyaml>=6" "nbformat>=5" "jsonschema>=4"
+          uv pip install -p .scratch/venv/bin/python "pytest>=8" "pyyaml>=6" "nbformat>=5" "jsonschema>=4" "hatchling>=1.27"
       - name: Run the suite
         run: |
           # Kernel tests run against the bare interpreter, where darkpyonix is not installed
