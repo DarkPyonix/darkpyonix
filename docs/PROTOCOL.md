@@ -51,7 +51,7 @@ Windows 커널의 제어 채널은 이름 있는 파이프 `\\.\pipe\darkpyonix-
 }
 ```
 
-`control`은 제어 채널의 주소입니다(§3). POSIX는 유닉스 도메인 소켓 경로, Windows는 파이프 이름입니다. 2026-10-04까지 있던 TCP `port`와 넘김용 `handoff`는 이 하나로 합쳤습니다(INTENT D5). POSIX는 구현됨(#55), Windows 파이프는 구현 대기.
+`control`은 제어 채널의 주소입니다(§3). POSIX는 유닉스 도메인 소켓 경로, Windows는 파이프 이름입니다. 2026-10-04까지 있던 TCP `port`와 넘김용 `handoff`는 이 하나로 합쳤습니다(INTENT D5). POSIX는 구현됨(#55), Windows 파이프는 코드가 있고(#80) Windows 실행 확인 대기.
 
 `home`은 커널의 런타임 홈 경로입니다. `user_tag`는 같은 OS 계정이면 홈이 달라도 같으므로, 매니저는 `home`이 자기 홈과 다른 announce를 무시합니다(홈마다 따로 보는 격리를 유지합니다). 경로는 심볼릭 링크를 풀어(canonical) 비교하고, `home`을 제대로 가진 announce만 받습니다(홈을 지정한 매니저는 `home`이 없는 announce도 버립니다).
 
@@ -91,7 +91,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 - `length`는 payload 바이트 수이고 최대 64 MiB입니다. 넘으면 받는 쪽이 `error {code: "frame_too_large"}`를 보내고 연결을 닫습니다.
 - 커널은 TCP 포트를 열지 않습니다. POSIX는 `sockets/<kernel_id>.sock`(0600, §1), Windows는 파이프 `\\.\pipe\darkpyonix-<user_tag>-<kernel_id>`에서만 받습니다. 주소는 announce의 `control`입니다. 같은 채널로 요청, 이벤트, 스트림 넘김(§3.7)을 모두 나릅니다.
-- Windows 파이프는 `selectors`에 넣을 수 없어서, Windows 커널은 파이프 연결마다 스레드 하나를 둡니다.
+- Windows 파이프는 `selectors`에 넣을 수 없어서, Windows 커널은 파이프 연결마다 스레드 하나를 둡니다(#80). 그 스레드는 `ConnectNamedPipe`로 기다려 상대 SID를 확인한 뒤(§3.2) 파이프와 `socket.socketpair()`의 한쪽 사이에서 바이트를 퍼 나르고, 서버의 나머지 코드는 다른 쪽을 일반 소켓처럼 씁니다. 연결 하나를 받으면 곧바로 새 파이프 인스턴스를 만들어 다음 연결을 받습니다. 파이프는 바이트 모드(`PIPE_TYPE_BYTE`)이고 프레임 경계는 §3.1의 길이 접두사가 정합니다. 파이프에는 `SCM_RIGHTS`가 없어서 `adopt`의 `fd` 전달은 안 됩니다(§3.7).
 
 ### 3.2 핸드셰이크
 
