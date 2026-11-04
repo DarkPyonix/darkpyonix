@@ -17,6 +17,7 @@ import json
 import struct
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from . import _document
 from ._protocol import DKPError
 
 PING_INTERVAL = 30.0     # PROTOCOL §5.1 (leader proposal; the 2025 spec has no value)
@@ -137,6 +138,38 @@ def _dp(cell: Dict[str, Any]) -> Dict[str, Any]:
     md = cell.get("metadata") if isinstance(cell, dict) else None
     dp = md.get("darkpyonix") if isinstance(md, dict) else None
     return dp if isinstance(dp, dict) else {}
+
+
+class _Doc(object):
+    """A snapshot cell with the attributes ``_document._map_run`` reads."""
+
+    def __init__(self, c: Dict[str, Any], pos: int) -> None:
+        self.id = c.get("cell_id")
+        self.source_sha256 = c.get("source_sha256")
+        self.index = c.get("index", pos)
+
+
+def match_run_cells(snap_cells: List[Dict[str, Any]],
+                    log: Dict[str, Any]) -> List[Tuple[Optional[Dict[str, Any]], Dict[str, Any], bool]]:
+    """Match the records of run ``log`` to the cells of a snapshot (SPEC FR-S9, K2).
+
+    Uses the FR-R4 rule (``_document._map_run``: id, then source hash, then index, each
+    record once). Returns ``(snapshot_cell, record, stale)`` per record; the cell is None
+    and ``stale`` true when no rule holds, and ``stale`` is true when the hashes differ.
+    """
+    cells = [_Doc(c, i) for i, c in enumerate(snap_cells)]
+    records = _document._records(log)
+    found = _document._map_run(cells, list(range(len(cells))), records)
+    by_rec = dict((id(rec), pos) for pos, rec in found.items())
+    out = []
+    for rec in records:
+        pos = by_rec.get(id(rec))
+        if pos is None:
+            out.append((None, rec, True))
+        else:
+            out.append((snap_cells[pos], rec,
+                        rec.get("source_sha256") != cells[pos].source_sha256))
+    return out
 
 
 def _blank_sources(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -351,14 +384,17 @@ class WsSync(object):
     def _code_data(self, read: bool) -> Dict[str, Any]:
         snap = self._snapshot() or {}
         counts = {}  # type: Dict[Any, Any]
+        snap_cells = snap.get("cells") or []
         try:
-            for c in self._call("runs.get", {"run_id": "latest"}).get("cells") or []:
-                counts[_dp(c).get("index")] = c.get("execution_count")
+            log = self._call("runs.get", {"run_id": "latest"})
+            for cell, rec, _stale in match_run_cells(snap_cells, log):
+                if cell is not None:
+                    counts[cell["cell_id"]] = rec.get("execution_count")
         except DKPError:
             pass
         cells = [{"cell_id": c["cell_id"], "cell_type": c.get("type"),
                   "source": c.get("source", "") if read else "",
-                  "execution_count": counts.get(c.get("index"))} for c in snap.get("cells") or []]
+                  "execution_count": counts.get(c["cell_id"])} for c in snap_cells]
         return self._stamp({"type": "code_data", "cells": cells,
                             "doc_version": snap.get("doc_version")}, snap.get("seq"))
 
@@ -366,17 +402,16 @@ class WsSync(object):
         history = []  # type: List[Dict[str, Any]]
         if "history" in self.caps:
             snap = self._snapshot() or {}
-            ids = dict((c.get("index"), c["cell_id"]) for c in snap.get("cells") or [])
             try:
                 log = self._call("runs.get", {"run_id": "latest"})
             except DKPError:
                 log = {}
-            for c in log.get("cells") or []:
-                dp = _dp(c)
-                history.append({"cell_id": ids.get(dp.get("index")),
-                                "execution_count": c.get("execution_count"),
-                                "outputs": list(c.get("outputs") or []),
-                                "executed_at": dp.get("ended_at")})
+            for cell, rec, stale in match_run_cells(snap.get("cells") or [], log):
+                history.append({"cell_id": cell["cell_id"] if cell else None,
+                                "execution_count": rec.get("execution_count"),
+                                "outputs": list(rec.get("outputs") or []),
+                                "executed_at": rec.get("ended_at"),
+                                "stale": stale})
         return {"type": "history_data", "history": history}
 
     def _locks_data(self, read: bool) -> Dict[str, Any]:
