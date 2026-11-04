@@ -13,6 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  versions:
+    name: One version (kernel, Cargo, binary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: darkpyonix/kernel/__init__.py is the source; Cargo.toml must follow
+        run: python3 packaging/check_versions.py
+
   python:
     name: Python (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}

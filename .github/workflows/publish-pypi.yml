@@ -16,6 +16,15 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  # Dry run from a branch: workflow_dispatch only exists for workflows on the default branch.
+  # A pull request that touches packaging builds and smoke-tests everything; the publish job
+  # below is release-only, so a pull request never uploads.
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/publish-pypi.yml"
+      - "pyproject.toml"
+      - "darkpyonix/manager/**"
 
 permissions:
   contents: read
@@ -40,27 +49,10 @@ jobs:
           EVENT: ${{ github.event_name }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          # The version is declared once, in darkpyonix/kernel/__init__.py; pyproject.toml
-          # reads it from there ([tool.hatch.version]).
-          version="$(python3 - <<'PY'
-          import re
-          src = open("darkpyonix/kernel/__init__.py").read()
-          print(re.search(r'^__version__ = "([^"]+)"', src, re.M).group(1))
-          PY
-          )"
-          cargo="$(python3 - <<'PY'
-          import re
-          src = open("darkpyonix/manager/Cargo.toml").read()
-          ws = src.split("[workspace.package]", 1)[1]
-          print(re.search(r'^version = "([^"]+)"', ws, re.M).group(1))
-          PY
-          )"
-          echo "package=$version cargo-workspace=$cargo tag=${TAG:-<none>}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "$cargo" != "$version" ]; then
-            echo "::error::Cargo workspace version '$cargo' (darkpyonix/manager/Cargo.toml) differs from the package version '$version'; the binary would report the wrong --version"
-            exit 1
-          fi
+          # kernel/__init__.py is the single source; Cargo.toml must follow it.
+          python3 packaging/check_versions.py
+          version="$(grep -m1 '^__version__' darkpyonix/kernel/__init__.py | cut -d'"' -f2)"
+          echo "tag=${TAG:-<none>}"
           if [ "$EVENT" = "release" ] && [ "$TAG" != "v$version" ]; then
             echo "::error::release tag '$TAG' does not match package version 'v$version'"
             exit 1
@@ -131,6 +123,11 @@ jobs:
         working-directory: darkpyonix/manager
         run: cargo build --release --locked -p darkpyonix --target ${{ matrix.target }}
 
+      - name: Binary reports the package version
+        # The x86_64 macOS binary is cross-compiled; the Rosetta smoke test covers it.
+        if: matrix.name != 'macos-x86_64'
+        run: python packaging/check_versions.py --binary "darkpyonix/manager/target/${{ matrix.target }}/release/darkpyonix${{ runner.os == 'Windows' && '.exe' || '' }}"
+
       - name: Binary must not need a newer glibc than manylinux_2_28
         if: matrix.container
         run: |
@@ -186,11 +183,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: macos-arm64,  runner: macos-latest}
-          - {name: macos-x86_64, runner: macos-15-intel}
-          - {name: linux-x86_64, runner: ubuntu-latest}
-          - {name: linux-aarch64, runner: ubuntu-24.04-arm}
-          - {name: windows-x64,  runner: windows-latest}
+          - {name: macos-arm64,   runner: macos-latest,     pyspec: "3.8"}
+          # arm64 runner, x86_64 Python and wheel: the binary runs under Rosetta.
+          - {name: macos-x86_64,  runner: macos-latest,     pyspec: "cpython-3.8-macos-x86_64"}
+          - {name: linux-x86_64,  runner: ubuntu-latest,    pyspec: "3.8"}
+          - {name: linux-aarch64, runner: ubuntu-24.04-arm, pyspec: "3.8"}
+          - {name: windows-x64,   runner: windows-latest,   pyspec: "3.8"}
     defaults:
       run:
         shell: bash
@@ -205,10 +203,15 @@ jobs:
         with:
           name: dist-${{ matrix.name }}
           path: dist
+      - name: Rosetta
+        if: matrix.name == 'macos-x86_64'
+        run: |
+          softwareupdate --install-rosetta --agree-to-license || true
+          arch -x86_64 /usr/bin/true && echo "Rosetta works"
       - name: Install the wheel into a fresh venv (oldest supported Python)
         working-directory: ${{ runner.temp }}
         run: |
-          uv venv --no-project -p 3.8 smoke-venv
+          uv venv --no-project -p "${{ matrix.pyspec }}" smoke-venv
           vpy=smoke-venv/bin/python
           [ -x "$vpy" ] || vpy=smoke-venv/Scripts/python.exe
           uv pip install --no-cache -p "$vpy" "$GITHUB_WORKSPACE"/dist/*.whl
