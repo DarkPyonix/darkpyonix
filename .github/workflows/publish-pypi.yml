@@ -145,7 +145,7 @@ jobs:
           python -m hatchling build -t wheel -d dist
           ls -l dist
           # exactly one wheel, with the expected tag and version
-          test "$(ls dist | wc -l)" = 1
+          test "$(ls dist | wc -l | tr -d " ")" = 1
           test -f "dist/darkpyonix-${{ needs.version.outputs.version }}-py3-none-${{ matrix.tag }}.whl"
 
       - uses: actions/upload-artifact@v4
