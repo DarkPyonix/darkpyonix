@@ -40,6 +40,12 @@ impl ApiError {
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, "not_found", message)
     }
+    /// FR-A4 attempt limit; `wait` rounds up to whole seconds for `Retry-After`.
+    pub fn too_many_attempts(wait: std::time::Duration) -> Self {
+        let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+        Self::new(StatusCode::TOO_MANY_REQUESTS, "too_many_attempts", "too many wrong passwords; try again later")
+            .with_data(json!({ "retry_after": secs.max(1) }))
+    }
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", message)
     }
@@ -111,6 +117,11 @@ impl IntoResponse for ApiError {
         let mut resp = (self.status, axum::Json(body)).into_response();
         if self.status == StatusCode::UNAUTHORIZED {
             resp.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        }
+        if self.status == StatusCode::TOO_MANY_REQUESTS {
+            if let Some(secs) = self.data.as_ref().and_then(|d| d["retry_after"].as_u64()) {
+                resp.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(secs));
+            }
         }
         resp
     }

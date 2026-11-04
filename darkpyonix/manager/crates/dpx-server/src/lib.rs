@@ -100,6 +100,10 @@ pub struct ServerConfig {
     pub sse_keepalive: Duration,
     /// Interval of `presence.update` heartbeats for event streams opened with a client id (10 s).
     pub presence_heartbeat: Duration,
+    /// Wrong passwords tolerated in a row before the lock starts (FR-A4, 3).
+    pub password_free_attempts: u32,
+    /// First lock length; it doubles with every further wrong password, up to 5 minutes (FR-A4, 1 s).
+    pub password_delay_base: Duration,
 }
 
 impl ServerConfig {
@@ -116,6 +120,8 @@ impl ServerConfig {
             master_token: None,
             sse_keepalive: SSE_KEEPALIVE,
             presence_heartbeat: PRESENCE_HEARTBEAT,
+            password_free_attempts: auth::DEFAULT_FREE_ATTEMPTS,
+            password_delay_base: auth::DEFAULT_DELAY_BASE,
         }
     }
 
@@ -489,7 +495,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
     let activity = Activity::new();
     let state = Arc::new(AppState {
         backend,
-        auth: Auth::new(&token, shares),
+        auth: Auth::new(&token, shares, config.password_free_attempts, config.password_delay_base),
         mode,
         pid,
         started_at: started_at.clone(),

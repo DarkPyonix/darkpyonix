@@ -192,6 +192,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyAttempts'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/auth/password:
@@ -275,6 +277,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyAttempts'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/auth/tokens/shared/{token_type}:
@@ -1501,6 +1505,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyAttempts'
         '500':
           $ref: '#/components/responses/InternalError'
         '502':
@@ -1782,6 +1788,20 @@ components:
             $ref: '#/components/schemas/Error'
     Unauthorized:
       description: Missing or invalid token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyAttempts:
+      description: 'Too many wrong passwords in a row (SPEC FR-A4). The manager is locked for `Retry-After`
+        seconds, exponentially longer with every further failure up to 5 minutes; the right password is refused
+        too while it lasts. `too_many_attempts`, with `data.retry_after` in seconds.'
+      headers:
+        Retry-After:
+          description: Seconds until a password is checked again.
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:
