@@ -162,6 +162,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"   # pinned: resolving "latest" calls the GitHub API (rate limit)
       - name: Build
         run: |
           uv build --sdist --wheel -o dist
@@ -196,6 +198,8 @@ jobs:
       # The checkout supplies only packaging/smoke.py; the package under test comes from the wheel.
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"   # pinned: resolving "latest" calls the GitHub API (rate limit)
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"   # runs packaging/smoke.py only; the venv under test is 3.8
@@ -228,6 +232,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"   # pinned: resolving "latest" calls the GitHub API (rate limit)
       - uses: actions/download-artifact@v4
         with:
           name: dist-fallback

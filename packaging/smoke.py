@@ -93,13 +93,13 @@ def run(cmd, env, cwd, expect=0):
 
 def diagnose_launcher(exe, py, menv, cwd):
     """Failure-only probes: is the venv python a launcher stub whose pid is not the kernel's?"""
-    probe = "import os, sys; print(os.getpid(), os.getppid(), sys.executable, sys.base_executable)"
+    probe = "import os, sys; print(os.getpid(), os.getppid(), sys.executable, getattr(sys, \"base_executable\", None))"
     child = subprocess.Popen([py, "-I", "-c", probe], env=menv, cwd=cwd,
                              stdout=subprocess.PIPE, universal_newlines=True)
     out = child.communicate()[0]
     say("probe: Popen pid %s; interpreter reports (pid ppid exe base_exe): %s"
         % (child.pid, out.strip()))
-    base = subprocess.run([py, "-I", "-c", "import sys; print(sys.base_executable)"], env=menv,
+    base = subprocess.run([py, "-I", "-c", "import sys; print(getattr(sys, \"base_executable\", sys.executable))"], env=menv,
                           stdout=subprocess.PIPE, universal_newlines=True).stdout.strip()
     nb2 = os.path.join(cwd, "hello2.py")
     with open(nb2, "w") as f:
