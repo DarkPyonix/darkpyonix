@@ -484,7 +484,27 @@ class ControlServer:
     def _begin_adopt(self, c: _Conn, rid: Any, params: Dict[str, Any]) -> None:
         """PROTOCOL §3.7.1: the frame is read; the descriptor follows in one byte ``F``."""
         transport = params.get("transport")
-        if os.name == "nt" or transport not in ("fd", "pump"):  # Windows `share` comes later (PR-5)
+        if os.name == "nt" and transport in ("share", "pump"):
+            sock = None
+            try:
+                try:
+                    shared = base64.b64decode(params.get("share") or "", validate=True)
+                    raw = base64.b64decode(params.get("request") or "", validate=True)
+                    sock = socket.fromshare(shared)
+                except (binascii.Error, ValueError, TypeError, OSError):
+                    raise DKPError("bad_request", "invalid shared socket or request")
+                stream_id = self.streams.adopt(sock, params.get("kind"), raw, params.get("label"))
+                sock = None
+                self._send(c, _response(rid, {"stream_id": stream_id}))
+            except DKPError as e:
+                self._send(c, _response(rid, error=e))
+            except Exception as e:
+                self._send(c, _response(rid, error=DKPError("internal", repr(e))))
+            finally:
+                if sock is not None:
+                    sock.close()
+            return
+        if os.name == "nt" or transport not in ("fd", "pump"):
             self._send(c, _response(rid, error=DKPError(
                 "bad_request", "transport %r is not available on this control channel" % (transport,))))
             return
