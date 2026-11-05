@@ -91,6 +91,23 @@ def run(cmd, env, cwd, expect=0):
     return proc
 
 
+def diagnose_launcher(exe, py, menv, cwd):
+    """Failure-only probes: is the venv python a launcher stub whose pid is not the kernel's?"""
+    probe = "import os, sys; print(os.getpid(), os.getppid(), sys.executable, sys.base_executable)"
+    child = subprocess.Popen([py, "-I", "-c", probe], env=menv, cwd=cwd,
+                             stdout=subprocess.PIPE, universal_newlines=True)
+    out = child.communicate()[0]
+    say("probe: Popen pid %s; interpreter reports (pid ppid exe base_exe): %s"
+        % (child.pid, out.strip()))
+    base = subprocess.run([py, "-I", "-c", "import sys; print(sys.base_executable)"], env=menv,
+                          stdout=subprocess.PIPE, universal_newlines=True).stdout.strip()
+    nb2 = os.path.join(cwd, "hello2.py")
+    with open(nb2, "w") as f:
+        f.write('# %%\nprint("smoke2-ok")\n')
+    say("experiment: the same run with the BASE interpreter %s" % base)
+    run([exe, "run", nb2, "--python", base], menv, cwd, expect=None)
+
+
 def api_get(url, token):
     req = urllib.request.Request(url)
     if token:
@@ -179,7 +196,11 @@ def main():
             f.write('# %%\nimport darkpyonix\nprint("smoke-ok", 6 * 7)\n')
         menv = dict(env, DARKPYONIX_MANAGER_URL=url, DARKPYONIX_TOKEN=token)
         try:
-            proc = run([exe, "run", nb, "--python", py], menv, cwd)
+            proc = run([exe, "run", nb, "--python", py], menv, cwd, expect=None)
+            if proc.returncode != 0:
+                diagnose_launcher(exe, py, menv, cwd)
+                fail("`darkpyonix run` exited %s\n--- stdout ---\n%s\n--- stderr ---\n%s"
+                     % (proc.returncode, proc.stdout, proc.stderr))
             if "smoke-ok 42" not in proc.stdout:
                 fail("the run did not print the expected output")
             proc = run([exe, "ps"], menv, cwd)
