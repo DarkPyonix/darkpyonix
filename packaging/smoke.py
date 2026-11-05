@@ -26,8 +26,52 @@ def say(msg):
     print("smoke: " + msg, flush=True)
 
 
+STATE = {"home": None, "mgr": None}
+
+
+def dump_diagnostics():
+    """On failure: the manager's own output and every file under the smoke home (logs)."""
+    mgr = STATE["mgr"]
+    if mgr is not None:
+        mgr.terminate()
+        try:
+            out, err = mgr.communicate(timeout=15)
+        except Exception:
+            mgr.kill()
+            out, err = "", ""
+        print("smoke: ---- manager stdout (rest) ----\n%s" % out, flush=True)
+        print("smoke: ---- manager stderr ----\n%s" % err, flush=True)
+    home = STATE["home"]
+    if not home or not os.path.isdir(home):
+        print("smoke: no home directory at %r" % home, flush=True)
+        return
+    for root, _dirs, files in os.walk(home):
+        print("smoke: ---- listing %s ----" % root, flush=True)
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = -1
+            print("smoke:   %s (%s bytes)" % (name, size), flush=True)
+    for root, _dirs, files in os.walk(home):
+        for name in sorted(files):
+            if name.endswith((".log", ".txt", ".json", ".err", ".out")):
+                path = os.path.join(root, name)
+                try:
+                    with open(path, "r", errors="replace") as f:
+                        text = f.read()[-20000:]
+                except OSError as e:
+                    text = "<unreadable: %s>" % e
+                print("smoke: ---- %s ----\n%s" % (path, text), flush=True)
+
+
 def fail(msg):
     print("smoke: FAIL: " + msg, file=sys.stderr, flush=True)
+    try:
+        dump_diagnostics()
+    except Exception as e:  # diagnostics must never hide the failure
+        print("smoke: diagnostics failed: %r" % (e,), flush=True)
     sys.exit(1)
 
 
@@ -42,7 +86,8 @@ def run(cmd, env, cwd, expect=0):
     if proc.stderr.strip():
         print(proc.stderr.rstrip(), file=sys.stderr, flush=True)
     if expect is not None and proc.returncode != expect:
-        fail("expected exit code %s, got %s: %s" % (expect, proc.returncode, " ".join(cmd)))
+        fail("expected exit code %s, got %s: %s\n--- stdout ---\n%s\n--- stderr ---\n%s"
+             % (expect, proc.returncode, " ".join(cmd), proc.stdout, proc.stderr))
     return proc
 
 
@@ -68,6 +113,7 @@ def main():
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("DARKPYONIX_") and k not in ("PYTHONPATH", "PYTHONHOME")}
     env["DARKPYONIX_HOME"] = os.path.join(work, "home")
+    STATE["home"] = env["DARKPYONIX_HOME"]
     cwd = os.path.join(work, "cwd")
     os.makedirs(cwd)
     if not os.path.isfile(exe):
@@ -104,6 +150,7 @@ def main():
     mgr = subprocess.Popen([exe, "manager", "--ephemeral", "--idle-timeout", "120"],
                            env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            universal_newlines=True)
+    STATE["mgr"] = mgr
     try:
         line = mgr.stdout.readline()
         if not line:
