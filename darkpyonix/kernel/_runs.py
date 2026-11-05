@@ -37,6 +37,11 @@ INDEX_NAME = "index.json"
 # the start of the next. Below 1 s so that output reaches the disk within 1 s even after the
 # capture router's poll delay and the write itself.
 WRITE_INTERVAL = 0.8
+# FR-R2: output older than 1 s must be in the log when the kernel is killed. A snapshot only becomes
+# visible once it is rendered and replaced, so the oldest missing output is WRITE_INTERVAL plus the
+# time that write took. The schedule shrinks the interval when writes are slow to stay inside this.
+STALENESS_BUDGET = 0.85
+MIN_WRITE_INTERVAL = 0.25
 DEFAULT_OUTPUT_LIMIT = 16 * 1024 * 1024  # FR-R5
 OUTPUT_LIMIT_ENV = "DARKPYONIX_RUN_OUTPUT_LIMIT"
 UNFINISHED = ("queued", "running")
@@ -275,6 +280,7 @@ class RunStore(object):
         self._dirty = {}                      # type: Dict[str, Run]
         self._spilled = {}                    # type: Dict[Tuple[str, int], int]  chars on disk
         self._last_write = 0.0
+        self._write_took = 0.0
         self._writer = None                   # type: Optional[threading.Thread]
 
     # ---- paths
@@ -333,7 +339,8 @@ class RunStore(object):
                     if not self._cond.wait(timeout=30.0) and not self._dirty:
                         self._writer = None
                         return
-                wait = self._last_write + WRITE_INTERVAL - time.monotonic()
+                interval = min(WRITE_INTERVAL, max(MIN_WRITE_INTERVAL, STALENESS_BUDGET - self._write_took))
+                wait = self._last_write + interval - time.monotonic()
                 if wait > 0:
                     self._cond.wait(timeout=wait)
                     continue
@@ -365,6 +372,7 @@ class RunStore(object):
                     f.write(rest[done:])
                 self._spilled[key] = len(rest)
         _write_atomic(self.path_of(run.run_id), _dumps(nb))
+        self._write_took = time.monotonic() - self._last_write
 
     # ---- index.json
 

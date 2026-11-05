@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use rand::RngCore;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -235,6 +236,50 @@ pub enum Lookup {
     /// A manager shared token that was reset (`401 token_revoked`).
     Revoked,
     Unknown,
+}
+
+pub const DEFAULT_FREE_ATTEMPTS: u32 = 3;
+pub const DEFAULT_DELAY_BASE: Duration = Duration::from_secs(1);
+const MAX_LOCK: Duration = Duration::from_secs(300);
+
+/// Exponential delay on repeated wrong passwords (SPEC FR-A4, #87). One counter per manager,
+/// because the manager has one password. An attempt is charged when it begins, under the lock,
+/// so parallel guesses cannot all slip in before the first failure is recorded.
+pub struct AttemptLimiter {
+    free: u32,
+    base: Duration,
+    state: Mutex<(u32, Option<Instant>)>,
+}
+
+impl AttemptLimiter {
+    pub fn new(free: u32, base: Duration) -> Self {
+        Self { free, base, state: Mutex::new((0, None)) }
+    }
+
+    /// `Err(wait)` while locked; otherwise the attempt is counted and may be checked.
+    pub fn begin(&self) -> Result<(), Duration> {
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let (n, Some(last)) = *st {
+            if n >= self.free {
+                let delay = self.base.saturating_mul(1u32 << (n - self.free).min(20)).min(MAX_LOCK);
+                if let Some(wait) = delay.checked_sub(last.elapsed()).filter(|w| !w.is_zero()) {
+                    return Err(wait);
+                }
+            }
+        }
+        *st = (st.0.saturating_add(1), Some(Instant::now()));
+        Ok(())
+    }
+
+    /// The check ended wrong: the lock runs from now, not from when the slow hash began.
+    pub fn failed(&self) {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).1 = Some(Instant::now());
+    }
+
+    /// The password was right (or there is none): forget earlier failures.
+    pub fn reset(&self) {
+        *self.state.lock().unwrap_or_else(|p| p.into_inner()) = (0, None);
+    }
 }
 
 /// Result of checking a password against the manager's.
@@ -476,12 +521,13 @@ struct Master {
 pub struct Auth {
     master: Mutex<Master>,
     pub shares: Option<ShareStore>,
+    pub limiter: AttemptLimiter,
 }
 
 impl Auth {
     /// A master token reset through the API is kept as a hash in `manager.db` and wins over
     /// `master_token` after a restart (its value is then unknown until the next reset).
-    pub fn new(master_token: &str, shares: Option<ShareStore>) -> Self {
+    pub fn new(master_token: &str, shares: Option<ShareStore>, free_attempts: u32, delay_base: Duration) -> Self {
         let stored = shares
             .as_ref()
             .and_then(|s| s.auth_get("master_sha256"))
@@ -491,7 +537,7 @@ impl Auth {
             Some(sha256) => Master { sha256, plain: None },
             None => Master { sha256: Sha256::digest(master_token.as_bytes()).into(), plain: Some(master_token.to_string()) },
         };
-        Self { master: Mutex::new(master), shares }
+        Self { master: Mutex::new(master), shares, limiter: AttemptLimiter::new(free_attempts, delay_base) }
     }
 
     fn master(&self) -> std::sync::MutexGuard<'_, Master> {

@@ -814,7 +814,7 @@ pub async fn get_run(
         check_run_ref(&run_ref)?;
         if st.backend.supports_handoff() {
             let plan = plan_handoff(&st, &p, HandoffKind::Wait, &kid, Some(run_ref.as_str()), &uri, &headers).await?;
-            return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers, None).await;
         }
         let summary = match query(&uri)?.get("format").map(String::as_str) {
             None | Some("ipynb") => false,
@@ -904,7 +904,7 @@ pub async fn stream_events(
         if st.backend.supports_handoff() {
             // FR-M6: the kernel answers; this connection (TLS, HTTP/2, tunnel) is pumped.
             let plan = plan_handoff(&st, &p, HandoffKind::Events, &kid, None, &uri, &headers).await?;
-            return crate::handoff::pump_response(&st, plan, &uri, &headers).await;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers, None).await;
         }
         let events = st.backend.subscribe(&kid, since).await?;
         let hide_outputs = !p.has(Capability::History);
@@ -926,22 +926,24 @@ pub async fn sync_ws(
     Path(kid): Path<String>,
     headers: HeaderMap,
     uri: Uri,
+    mut req: axum::extract::Request,
 ) -> Response {
+    let upgrade = req.extensions_mut().remove::<hyper::upgrade::OnUpgrade>();
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Capability::Read)?;
-        let upgrade = headers
+        let wants_ws = headers
             .get(axum::http::header::UPGRADE)
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
-        if !upgrade || !headers.contains_key("sec-websocket-key") {
+        if !wants_ws || !headers.contains_key("sec-websocket-key") {
             return Err(ApiError::invalid("a WebSocket upgrade request is required (Upgrade, Sec-WebSocket-Key)"));
         }
         if !st.backend.supports_handoff() {
             return Err(ApiError::internal("the WebSocket sync needs a backend that can hand off streams"));
         }
         let plan = plan_handoff(&st, &p, HandoffKind::Ws, &kid, None, &uri, &headers).await?;
-        crate::handoff::pump_response(&st, plan, &uri, &headers).await
+        crate::handoff::pump_response(&st, plan, &uri, &headers, upgrade).await
     };
     finish(r.await, OP_SYNC_WS)
 }
@@ -961,12 +963,12 @@ async fn presence_heartbeat(st: Arc<AppState>, p: Principal, kid: String, client
 
 // ------------------------------------------------------------------ Manager password and tokens (FR-A4, FR-A6)
 
-const OP_LOGIN: &[u16] = &[200, 400, 401, 403, 500];
+const OP_LOGIN: &[u16] = &[200, 400, 401, 403, 429, 500];
 const OP_SET_PASSWORD: &[u16] = &[200, 400, 401, 403, 500];
-const OP_RESET_MASTER: &[u16] = &[200, 400, 401, 403, 500];
+const OP_RESET_MASTER: &[u16] = &[200, 400, 401, 403, 429, 500];
 const OP_RESET_SHARED: &[u16] = &[200, 400, 401, 403, 500];
 const OP_INITIAL_TOKEN: &[u16] = &[201, 400, 404, 500, 502, 504];
-const OP_KERNEL_LOGIN: &[u16] = &[200, 400, 401, 403, 404, 500, 502, 504];
+const OP_KERNEL_LOGIN: &[u16] = &[200, 400, 401, 403, 404, 429, 500, 502, 504];
 const OP_VERIFY_TOKEN: &[u16] = &[200, 401, 403, 404, 500, 502, 504];
 
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
@@ -1012,15 +1014,26 @@ fn password_not_set() -> ApiError {
 }
 
 /// Checks `password` against the manager's. PBKDF2 is slow, so it runs off the async threads.
+/// Wrong passwords are delayed exponentially (FR-A4): while locked the answer is `429` and no hash runs.
 async fn check_pw(st: &Arc<AppState>, password: String) -> ApiResult<()> {
+    st.auth.limiter.begin().map_err(ApiError::too_many_attempts)?;
     let st2 = st.clone();
     let check = tokio::task::spawn_blocking(move || st2.auth.check_password(&password))
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     match check {
-        PasswordCheck::Ok => Ok(()),
-        PasswordCheck::NotSet => Err(password_not_set()),
-        PasswordCheck::Wrong => Err(ApiError::unauthorized()),
+        PasswordCheck::Ok => {
+            st.auth.limiter.reset();
+            Ok(())
+        }
+        PasswordCheck::NotSet => {
+            st.auth.limiter.reset();
+            Err(password_not_set())
+        }
+        PasswordCheck::Wrong => {
+            st.auth.limiter.failed();
+            Err(ApiError::unauthorized())
+        }
     }
 }
 

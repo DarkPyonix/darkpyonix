@@ -7,6 +7,7 @@ mod common;
 use common::*;
 use dpx_server::{Mode, ServerConfig};
 use serde_json::{json, Value};
+use std::time::Duration;
 
 const ALL: [&str; 5] = ["read", "history", "execute", "edit", "manage"];
 
@@ -235,4 +236,61 @@ async fn test_fr_a6_verify_reports_validity_and_revocation() {
     s.backend.request_for_test(&kid, "tokens.revoke", json!({"share_id": share_id})).await;
     s.with_token(&share_tok).get(&format!("/api/kernels/{kid}")).await.error(401, "token_revoked");
     s.admin().get(&format!("/api/kernels/{kid}/tokens/{share_tok}/verify")).await.error(401, "token_revoked");
+}
+
+// ------------------------------------------------------------------ attempt limit (FR-A4, #87)
+
+/// Two free attempts, then a 300 ms lock that doubles with every further failure.
+async fn limited() -> TestServer {
+    TestServer::start_with(Mode::Dedicated, |c| {
+        c.password_free_attempts = 2;
+        c.password_delay_base = Duration::from_millis(300);
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_fr_a4_repeated_wrong_passwords_are_delayed_with_429() {
+    let s = limited().await;
+    let (kid, _) = s.kernel("a.py");
+    set_first_password(&s, &kid, "right").await;
+    basic(&s, "GET", "/api/auth", "wrong 1").await.error(401, "unauthorized");
+    basic(&s, "GET", "/api/auth", "wrong 2").await.error(401, "unauthorized");
+    let r = basic(&s, "GET", "/api/auth", "wrong 3").await;
+    let e = r.error(429, "too_many_attempts");
+    assert!(e["data"]["retry_after"].as_u64().unwrap() >= 1, "{}", r.text);
+    let header = r.headers.get("retry-after").expect("Retry-After header");
+    assert_eq!(header.to_str().unwrap(), e["data"]["retry_after"].as_u64().unwrap().to_string());
+}
+
+#[tokio::test]
+async fn test_fr_a4_locked_manager_refuses_the_correct_password_until_it_expires() {
+    let s = limited().await;
+    let (kid, _) = s.kernel("a.py");
+    set_first_password(&s, &kid, "right").await;
+    basic(&s, "GET", "/api/auth", "wrong 1").await.error(401, "unauthorized");
+    basic(&s, "GET", "/api/auth", "wrong 2").await.error(401, "unauthorized");
+    // Locked: even the right password is refused, without a PBKDF2 round.
+    basic(&s, "GET", "/api/auth", "right").await.error(429, "too_many_attempts");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let r = basic(&s, "GET", "/api/auth", "right").await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    // A success clears the counter: two more wrong tries are plain 401 again.
+    basic(&s, "GET", "/api/auth", "wrong 1").await.error(401, "unauthorized");
+    basic(&s, "GET", "/api/auth", "wrong 2").await.error(401, "unauthorized");
+}
+
+#[tokio::test]
+async fn test_fr_a4_login_paths_share_one_attempt_counter() {
+    let s = limited().await;
+    let (kid, _) = s.kernel("a.py");
+    set_first_password(&s, &kid, "right").await;
+    basic(&s, "GET", "/api/auth", "wrong").await.error(401, "unauthorized");
+    basic(&s, "PUT", "/api/auth/tokens/master", "wrong").await.error(401, "unauthorized");
+    // The kernel login sees the lock the other two paths built.
+    let path = format!("/api/kernels/{kid}/tokens/auth");
+    s.anon().post(&path, json!({"password": "right"})).await.error(429, "too_many_attempts");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let r = s.anon().post(&path, json!({"password": "right"})).await;
+    assert_eq!(r.status, 200, "{}", r.text);
 }
