@@ -21,6 +21,7 @@ import type { Deps, Env } from "./env";
 import { callback, login, logout } from "./github";
 import { ApiError, SESSION_COOKIE, corsOrigin, getCookie, html, json, redirect } from "./http";
 import { clearAcmeChallenge, listNames, releaseName, reserveName, setAcmeChallenge } from "./names";
+import { createNotebook, listMine, listPublic, getNotebook, updateNotebook, deleteNotebook, pushVersion, readVersion, deleteVersion, readSource, readRun, purgeOrphans } from "./notebooks";
 import { linkPage } from "./pages";
 import { admit, presence } from "./relay";
 import { ashPage, publishShare, resolveShare, sharePage, unpublishShare } from "./shares";
@@ -131,6 +132,13 @@ export const ROUTES: Route[] = [
   route("/shares/{share_id}", { GET: resolveShare, DELETE: unpublishShare }),
   route("/s/{share_id}", { GET: sharePage }),
   route("/ash/", { GET: (r, e) => ashPage(r, e) }),
+  route("/notebooks", { GET: listMine, POST: createNotebook }),
+  route("/users/{github_login}/notebooks", { GET: listPublic }),
+  route("/notebooks/{notebook_id}", { GET: getNotebook, PATCH: updateNotebook, DELETE: deleteNotebook }),
+  route("/notebooks/{notebook_id}/versions", { POST: pushVersion }),
+  route("/notebooks/{notebook_id}/versions/{version}", { GET: readVersion, DELETE: deleteVersion }),
+  route("/notebooks/{notebook_id}/versions/{version}/source", { GET: readSource }),
+  route("/notebooks/{notebook_id}/versions/{version}/run", { GET: readRun }),
   // FR-H5 names
   route("/names", { GET: listNames }),
   route("/names/{name}", { PUT: reserveName, DELETE: releaseName }),
@@ -182,6 +190,7 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
 /** Hourly: drop expired single-use rows. */
 export async function cleanup(env: Env, nowMs: number): Promise<void> {
   const now = nowSecs(nowMs);
+  await purgeOrphans(env, nowMs);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM oauth_transactions WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM device_links WHERE expires_at < ?").bind(now),

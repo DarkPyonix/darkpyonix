@@ -109,6 +109,7 @@ tags:
 
 paths:
   /health:
+    x-relay-served: true
     get:
       tags: [System]
       operationId: getHubHealth
@@ -1029,7 +1030,6 @@ paths:
   # ------------------------------------------------------------------ notebooks (FR-H14..H19)
 
   /notebooks:
-    x-planned: true
     get:
       tags: [Notebooks]
       operationId: listMyNotebooks
@@ -1088,7 +1088,6 @@ paths:
           description: Too many notebooks created this minute (FR-H19).
 
   /users/{github_login}/notebooks:
-    x-planned: true
     parameters:
       - name: github_login
         in: path
@@ -1117,7 +1116,6 @@ paths:
           description: Too many anonymous reads (FR-H19).
 
   /notebooks/{notebook_id}:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     get:
@@ -1201,7 +1199,6 @@ paths:
           description: Unknown notebook in the caller's reach.
 
   /notebooks/{notebook_id}/versions:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1251,7 +1248,6 @@ paths:
           description: Too many uploads this minute (FR-H19).
 
   /notebooks/{notebook_id}/versions/{version}:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1285,7 +1281,6 @@ paths:
           description: Unknown version in the caller's reach.
 
   /notebooks/{notebook_id}/versions/{version}/source:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"
@@ -1312,7 +1307,6 @@ paths:
           description: Too many anonymous reads (FR-H19).
 
   /notebooks/{notebook_id}/versions/{version}/run:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
       - $ref: "#/components/parameters/NotebookVersionRef"

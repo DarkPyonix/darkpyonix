@@ -183,7 +183,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 - 수용 기준: 실행 중에 커널을 `SIGKILL`로 죽여도 기록 파일은 유효한 JSON이고, 죽기 1초 전까지의 출력이 들어 있습니다. 상태는 `running`으로 남고, 다음 커널이 그 파일을 열면 `crashed`로 바꿉니다.
 - 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`, `test_fr_r2_slow_writes_shrink_the_interval_to_keep_the_one_second_bound`, `test_fr_r2_real_kernel_killed_mid_run_is_recovered_as_crashed`(실제 커널을 다음 다시 쓰기 직전, 즉 가장 불리한 순간에 `SIGKILL`하고, 셀이 찍은 모든 출력 중 죽기 1초 전보다 오래된 것이 기록에 다 있는지 확인한 뒤, 같은 파일로 새 커널을 띄워 기록이 `crashed`가 되는지 봅니다)
 - 구현 메모: 다시 쓰기 주기는 스냅숏 시작부터 다음 스냅숏 시작까지 0.8초(`runs.WRITE_INTERVAL`)입니다. 1초 주기로는 캡처 라우터의 폴링 지연(최대 20 ms)과 쓰기 시간이 더해져 가장 불리한 순간에 1.01–1.04초 전 출력이 빠졌습니다(2026-10-03 측정).
-- 느린 쓰기(#77): 스냅숏은 렌더링과 교체가 끝나야 보이므로, 가장 불리한 순간에 빠지는 가장 오래된 출력은 `WRITE_INTERVAL`에 직전 쓰기 소요 시간을 더한 만큼 오래됩니다. 부하가 큰 macOS 러너에서 쓰기가 0.3초 가까이 걸려 1.094초가 측정되었습니다. 그래서 다음 간격은 `min(0.8, max(0.25, 0.85 - 직전 쓰기 소요))`로 줄입니다(`runs.STALENESS_BUDGET`, `runs.MIN_WRITE_INTERVAL`). 쓰기가 빠르면 0.8초 그대로입니다.
+- 느린 쓰기(#77): 스냅숏은 렌더링과 교체가 끝나야 보이므로, 가장 불리한 순간에 빠지는 가장 오래된 출력은 `WRITE_INTERVAL`에 직전 쓰기 소요 시간을 더한 만큼 오래됩니다. 부하가 큰 macOS 러너에서 쓰기가 0.3초 가까이 걸려 1.094초가 측정되었습니다. 그래서 다음 간격은 `min(0.8, max(0.25, 0.85 - 직전 쓰기 소요))`로 줄입니다(`runs.STALENESS_BUDGET`, `runs.MIN_WRITE_INTERVAL`). 쓰기가 빠르면 0.8초 그대로입니다. 이 경계는 실제 경과 시간이 아니라 스케줄에서 검증합니다.
 - 측정(2026-10-03, Mac mini 8코어, 가장 불리한 순간에 죽임): 기록에 없는 가장 오래된 출력이 죽기 0.79–0.86초 전. CPU를 16개 바쁜 루프로 2배 초과 점유한 상태에서도 0.77–0.86초.
 
 ### FR-R3 매직 변수 `__runs__` — `Done`
@@ -237,7 +237,7 @@ PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모�
   - `user_tag`는 OS 계정에서 만들어 홈이 달라도 같으므로(FR-A1), 홈을 지정한 매니저는 announce의 `home`이 자기 홈(심볼릭 링크를 푼 경로)과 다르거나 없으면 버립니다. 응답 수에도 세지 않습니다(PROTOCOL §2.2).
 - 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-D2 등록 파일 없음 — `Agreed` (사용자 지시 2026-10-03, 2026-10-05 구현, Rust 테스트는 CI 확인 대기)
+### FR-D2 등록 파일 없음 — `Done` (사용자 지시 2026-10-03, 2026-10-05 구현, develop CI 실행 41936239905에서 Rust 테스트와 파이썬 테스트 통과 확인)
 커널 등록 파일(`kernels/<kernel_id>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 없습니다. 리더가 사용자 승인 없이 더했던 보조 발견이라 지웠습니다. 사용자(2026-10-03): "커널 등록 파일 써도 된다고 내가 말한 적이 절대 없고요"(INTENT D4, §5).
 - 코드: 커널은 등록 파일을 쓰지 않고 `DARKPYONIX_DISCOVERY`를 읽지 않습니다. 매니저는 등록 파일을 읽지 않고 `managers/<pid>.json`도 쓰지 않습니다. 죽은 커널은 `bye`가 없어도 다음 질의에 답하지 않으므로 목록에서 빠집니다(파일을 치울 일이 없습니다).
 - 수용 기준: 커널을 띄우고 끈 뒤에도 `DARKPYONIX_HOME/kernels/` 아래에 `.json`이 생기지 않습니다(진단 로그 `.log`만 있음). `DARKPYONIX_DISCOVERY=registry`를 줘도 동작이 같습니다. 다른 홈에 심은 항목은 읽지 않습니다.
@@ -340,7 +340,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
 - 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현됨 #47, CI 확인 대기)
+### FR-M3 임시 모드 수명 — `Done` (유휴 판정이 바뀜, 구현됨 #47, develop CI 실행 41936239905에서 Rust 테스트 통과 확인)
 임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, FR-D2). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6). TLS·HTTP/2·터널로 퍼 나르는 스트림도 세지 않습니다(커널이 소유하고 `Handoff` 표시를 단 응답). 끝날 때 커널은 건드리지 않습니다.
 - 테스트: `test_fr_m3_idle_counts_http_requests_only_not_handed_off_streams`(Rust `darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), Rust `test_fr_m3_writes_no_registry_file`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m3_url_and_token_are_printed_on_stdout`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`와 `src/manager.rs`)
 
@@ -369,7 +369,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ## 8. CLI (C)
 
-### FR-C1 매니저 찾기 — `Agreed` (사용자 지시, 2026-10-05 구현, Rust 테스트는 CI 확인 대기)
+### FR-C1 매니저 찾기 — `Done` (사용자 지시, 2026-10-05 구현, develop CI 실행 41936239905에서 Rust 테스트 통과 확인)
 매니저의 주소와 토큰을 파일로 나누지 않습니다(INTENT D4). `darkpyonix` CLI는 `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN`이 있으면 그 매니저를 씁니다. 에이전트가 이미 아는 토큰입니다. 없으면 자기 임시 매니저를 자식 프로세스로 띄우고, 그 매니저가 표준 출력 첫 줄에 쓴 `{url, token, pid}`를 파이프로 읽어 씁니다. 토큰을 모르는 에이전트는 이렇게 자기 매니저를 씁니다. 커널은 모든 매니저가 멀티캐스트로 찾으므로 어느 매니저로 붙어도 같은 커널입니다(FR-M5).
 - `darkpyonix manager`를 직접 실행해도 같은 한 줄을 표준 출력에 씁니다. 에이전트는 그 값을 환경 변수로 두고 다음 호출에 쓸 수 있습니다. 두지 않으면 호출마다 새 임시 매니저가 뜨고, 각자 `idle_timeout` 뒤에 끝납니다.
 - 수용 기준: 환경 변수 없이 `darkpyonix run a.py`가 매니저를 띄워 동작하고, `DARKPYONIX_HOME/managers/`가 생기지 않습니다. 환경 변수를 주면 새 매니저를 띄우지 않습니다.
@@ -399,7 +399,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ## 9. 인증과 공유 (A)
 
-### FR-A1 커널 인증 — `Agreed` (사용자 결정 2026-10-04, POSIX 구현됨 #55, Windows 이름 있는 파이프 구현 대기)
+### FR-A1 커널 인증 — `Agreed` (사용자 결정 2026-10-04, POSIX 구현됨 #55, Windows 이름 있는 파이프 코드 있음 #80, Windows 실행 확인 대기)
 INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 통과시켜야 해." 방법은 사용자가 고른 "OS가 알려 주는 상대 계정 확인"입니다. 커널의 제어 채널은 POSIX 유닉스 도메인 소켓과 Windows 이름 있는 파이프이고, 커널은 연결마다 상대 UID(POSIX)나 SID(Windows)가 자기 계정과 같은지 OS에 묻습니다. 매니저도 커널 쪽 계정을 같은 방법으로 확인합니다. 키 파일과 HMAC은 없습니다. 클라이언트의 인증과 권한 검사는 매니저가 하고, 커널은 매니저를 믿습니다.
 - 수용 기준(사용 가능한 모든 인터프리터, POSIX와 Windows):
   - 다른 OS 계정의 프로세스가 커널의 소켓이나 파이프에 붙으면 커널은 프레임을 하나도 보내지 않고 닫습니다.
@@ -408,8 +408,8 @@ INTENT D5, PROTOCOL §3.2. 사용자 결정(2026-10-04): "같은 컴퓨터의 �
   - 매니저는 소켓이나 파이프 건너편이 다른 계정이면 요청을 보내지 않고 그 커널을 `kernel_unreachable`로 둡니다.
   - 런타임 홈에 `user.key`가 생기지 않습니다.
   - 다른 계정 시험은 두 번째 OS 계정을 만들 수 있는 CI에서 돕니다.
-- 상태 (#55): 유닉스 도메인 소켓, 상대 UID 확인(Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`, 그 밖의 BSD `getpeereid`), `user.key`와 HMAC 삭제, `user_tag`를 OS 계정에서 만들기까지 코드와 시험이 있습니다. Windows 파이프와 SID 확인은 아직 없어서 Windows 커널은 시작하지 못하고 `Done`이 아닙니다(후속 이슈). 실제로 다른 OS 계정을 쓰는 시험(`..._real_uid`)은 root로 도는 CI에서만 돕니다. 이 저장소의 로컬 실행에서는 건너뜁니다.
-- 테스트: Python `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_other_account_is_refused_by_peer_identity_real_uid`(root 필요), `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`, `test_fr_a1_client_refuses_a_socket_of_another_kernel`, `test_fr_a1_user_tag_comes_from_the_os_account`, `test_fr_a1_long_home_falls_back_to_a_short_private_socket_dir`; Rust `test_fr_a1_manager_refuses_a_kernel_of_another_account`, `test_fr_a1_same_account_socket_passes_the_peer_check`(`dkp.rs`), `pr_2_socket_of_another_kernel_id_is_refused`. 지웠습니다(#55): `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`, `test_fr_a1_mac_verification`.
+- 상태 (#55): 유닉스 도메인 소켓, 상대 UID 확인(Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`, 그 밖의 BSD `getpeereid`), `user.key`와 HMAC 삭제, `user_tag`를 OS 계정에서 만들기까지 코드와 시험이 있습니다. Windows 파이프와 SID 확인은 코드와 시험이 있지만(#80) 아직 Windows에서 돌려 보지 못해서 `Done`이 아닙니다. Windows CI 잡(`python-windows`, `rust-windows`)이 통과해야 `Done`입니다. 파이프 DACL은 자기 SID 하나만 허용하고 `PIPE_REJECT_REMOTE_CLIENTS`를 겁니다. 실제로 다른 OS 계정을 쓰는 시험(`..._real_uid`)은 root로 도는 CI에서만 돕니다. 이 저장소의 로컬 실행에서는 건너뜁니다.
+- 테스트: Python `test_fr_a1_other_account_is_refused_by_peer_identity`, `test_fr_a1_other_account_is_refused_by_peer_identity_real_uid`(root 필요), `test_fr_a1_same_account_connects_without_a_key`, `test_fr_a1_no_tcp_port_is_opened`, `test_fr_a1_manager_refuses_a_kernel_of_another_account`, `test_fr_a1_client_refuses_a_socket_of_another_kernel`, `test_fr_a1_user_tag_comes_from_the_os_account`, `test_fr_a1_long_home_falls_back_to_a_short_private_socket_dir`; Rust `test_fr_a1_manager_refuses_a_kernel_of_another_account`, `test_fr_a1_same_account_socket_passes_the_peer_check`(`dkp.rs`), `pr_2_socket_of_another_kernel_id_is_refused`. Windows(#80): Python `test_fr_a1_windows_pipe_name_uses_user_tag_and_kernel_id`, `test_fr_a1_windows_pipe_dacl_allows_only_own_sid`, `test_fr_a1_pipe_socket_adapts_a_stream_to_the_socket_calls`, `test_fr_a1_refused_pipe_peer_gets_no_byte`, `test_fr_a1_failing_account_check_counts_as_a_refusal`, `test_fr_a1_accepted_pipe_peer_is_bridged_both_ways`, `test_fr_a1_client_refuses_a_pipe_name_off_windows`(비 Windows), `test_fr_a1_failed_overlapped_allocation_releases_pipe`(플랫폼 무관), `test_fr_a1_windows_pipe_same_account_reaches_welcome`, `test_fr_a1_windows_pipe_serves_many_connections_in_turn`, `test_fr_a1_windows_pipe_peers_report_our_own_sid`, `test_fr_a1_windows_second_kernel_cannot_take_the_pipe_name`(Windows 전용); Rust `test_fr_a1_windows_pipe_server_sid_must_equal_ours`(플랫폼 무관 비교 함수), `test_fr_a1_windows_pipe_same_account_passes_the_server_check`, `test_fr_a1_windows_account_is_a_sid_string`(`home.rs`)(Windows 전용). 지웠습니다(#55): `test_fr_a1_wrong_key_is_rejected`, `test_fr_a1_hello_carries_identity_and_nonce`, `test_fr_a1_user_key_is_created_once_with_0600`, `test_fr_a1_mac_verification`.
 
 ### FR-A2 매니저 토큰 — `Agreed` (인증 예외와 WebSocket 토큰이 더해짐, 구현됨 #48, #49)
 모든 HTTP 요청은 `Authorization: Bearer <token>`이 필요합니다. 헤더를 붙일 수 없는 SSE(`EventSource`), 2025 WebSocket 동기화(`/api/ws/kernels/{kernel_id}?token=`, FR-S9)와 공유 링크만 `?token=`을 받습니다. `/health`와 2025 인증 계열의 넷만 `Authorization: Bearer` 없이 열립니다. 초기 토큰 발급(FR-A6)은 인증이 없고, 매니저 로그인 `GET /api/auth`와 마스터 토큰 재설정 `PUT /api/auth/tokens/master`(FR-A4)는 `Authorization: Basic`의 비밀번호로, 커널 로그인 `POST /api/kernels/{kernel_id}/tokens/auth`(FR-A6)는 본문의 비밀번호로 인증합니다.
@@ -631,9 +631,9 @@ iroh-relay는 Workers에서 온전히 돌 수 없습니다. 릴레이 자체는 
   - (C) **둘 다(Container 릴레이 + QAD 전용 VPS)**: iroh에서 QAD는 릴레이 목록(`RelayMap`)의 항목마다 붙고(`RelayConfig::quic`), 그 호스트는 릴레이 URL의 호스트입니다. 그래서 "QAD만 하는 VPS"도 릴레이 항목으로 올라가야 하고, 기기가 그것을 홈 릴레이로 고를 수 있으니 결국 릴레이도 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 되므로 이득이 없습니다.
 - **권장: (A)로 시작하고, ember NFR-N1 측정으로 (B)로 옮길지 정합니다.** ember NFR-N1의 기준은 대칭 NAT를 뺀 조합에서 직접 경로 성공률 85% 이상입니다. iroh가 말하는 약 90% 직접 연결은 QAD를 전제로 한 수치라, QAD 없이 이 기준을 맞춘다는 근거가 아직 없습니다. 측정은 (A) 위에서 두 번 합니다. 클라이언트 `RelayMap`에 QAD를 켠 경우(`quic: Some(7842)`)와 끈 경우(`quic: None`, (B)와 같은 조건)입니다. QAD를 끈 경우도 85%를 넘으면 릴레이를 Container로 옮기고 VPS를 없앱니다(`darkpyonix/hub/worker/wrangler.toml`에 주석으로 둔 컨테이너 바인딩). 못 넘으면 (A)를 유지합니다. 사용자 확인 전이라 `Draft`입니다.
 - 입장 정책: 릴레이 핸드셰이크가 증명한 엔드포인트 ID와 클라이언트가 낸 인증 토큰(있으면)을 릴레이 호스트가 `POST https://api.darkpyonix.dev/internal/relay/admit`(D15 개정 전에는 apex)로 묻습니다(공유 비밀 `RELAY_SHARED_SECRET`). 폐기되지 않은 등록 기기면 허용(`cache_secs` 60초 동안 새 연결에 재사용 가능), 유효한 손님 통행권(FR-H4가 발급, 그 공유가 아직 게시 중)이 있으면 허용(캐시 안 함), 그 밖에는 거절입니다. 릴레이 호스트는 엔드포인트의 첫 연결이 열리고 마지막 연결이 닫힐 때 `POST /internal/relay/presence`로 알려 기기 목록의 `online`을 갱신합니다. 기기를 지우면 Worker가 `POST https://relay.darkpyonix.dev/admin/disconnect`로 끊습니다.
-- 릴레이 호스트 상태: `darkpyonix/hub/server`는 지금 D15 이전 구현(API·SQLite 포함)이고, 릴레이 전용으로 줄이는 작업(위 입장 API 사용, `/admin/disconnect` 추가, API·DB 제거)은 빌드가 필요한 별도 변경입니다(`darkpyonix/hub/server/src/lib.rs` 머리 주석).
+- 릴레이 호스트는 Worker 입장 API와 presence API를 사용하고 `/admin/disconnect`를 받습니다. SQLite 데이터베이스는 열지 않습니다.
 - 수용 기준: 두 등록 기기가 IP 전송을 끈 릴레이 전용 모드로 우리 릴레이를 거쳐 연결하고 데이터를 주고받습니다(선택된 경로가 릴레이). 같은 두 기기가 루프백에서 직접 경로로도 연결합니다. 등록되지 않은 엔드포인트는 릴레이가 거절해 연결하지 못하고, 지운 기기의 연결은 끊깁니다. Worker 쪽: 등록 기기는 허용, 지운 기기와 통행권 없는 엔드포인트는 거절, 비밀이 틀리면 401, presence가 `online`을 바꿉니다. 루프백 처리량과 왕복 지연, NFR-N1의 QAD 켬/끔 직접 연결 비율을 측정해 여기에 적습니다.
-- 테스트: Worker `test_fr_h3_relay_admits_registered_and_refuses_removed_devices`, `test_fr_h3_relay_callbacks_need_the_shared_secret`, `test_fr_h3_presence_marks_devices_online`(`darkpyonix/hub/worker/test/shares.test.ts`). 릴레이 호스트 `test_fr_h3_relay_only_connection_through_hub`, `test_fr_h3_direct_connection_on_loopback`, `test_fr_h3_relay_rejects_unregistered_endpoint`, `test_fr_h3_relay_throughput_and_latency`(지금은 D15 이전 구현 기준, 릴레이 축소 때 스텁 입장 API로 바꿈)
+- 테스트: Worker `test_fr_h3_relay_admits_registered_and_refuses_removed_devices`, `test_fr_h3_relay_callbacks_need_the_shared_secret`, `test_fr_h3_presence_marks_devices_online`(`darkpyonix/hub/worker/test/shares.test.ts`). 릴레이 호스트 `test_fr_h3_relay_admits_via_the_worker`, `test_fr_h3_relay_caches_admission_for_cache_secs`, `test_fr_h4_guest_pass_admits_through_the_worker`, `test_fr_h3_admin_disconnect_drops_the_endpoint_and_needs_the_secret`(스텁 입장 API 사용). 릴레이 경유 데이터 전송과 직접 연결, 성능 측정은 별도 연동 검증이 필요합니다
 - 측정 기록: (구현 후 기입)
 
 ### FR-H4 ash 호스팅과 공유 링크 — `Agreed`
@@ -859,9 +859,9 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 PROTOCOL §3.1. 64 MiB를 넘는 프레임은 거절합니다.
 - 테스트: `test_pr_1_oversized_frame_is_refused`, `test_pr_1_frame_too_large_closes_connection`
 
-### PR-2 핸드셰이크 — `Agreed` (유닉스 소켓 채널에서 통과, Windows 파이프 채널 대기 #55)
+### PR-2 핸드셰이크 — `Agreed` (유닉스 소켓 채널에서 통과, Windows 파이프 채널 코드 있음 #80, Windows 실행 확인 대기)
 PROTOCOL §3.2. 상대 계정 확인(FR-A1)이 먼저이고, 그다음 `hello`/`auth`/`welcome`입니다. 5초 제한. 비밀값이 없으므로 상수 시간 비교도 없습니다.
-- 테스트: `test_pr_2_handshake_times_out`(유닉스 소켓 채널에서 통과. Windows 파이프에서도 통과해야 `Done`)
+- 테스트: `test_pr_2_handshake_times_out`(유닉스 소켓 채널에서 통과. Windows 파이프에서도 통과해야 `Done`), `test_pr_2_handshake_times_out_on_a_windows_pipe`(Windows 전용, #80)
 
 ### PR-3 이벤트 재전송 — `Done`
 PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있어도 이벤트를 내는 쪽은 막히지 않습니다(클라이언트별 송신 버퍼, 64 MiB를 넘으면 그 클라이언트를 끊음).
@@ -875,7 +875,7 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 ### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, POSIX 구현됨 #47, Windows 구현 대기)
 PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
 - 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
-- 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. 계획 `test_pr_5_adopt_over_a_windows_pipe_is_bad_request`(파이프가 아직 없어 건너뜀)
+- 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. `test_pr_5_adopt_over_a_windows_pipe_is_bad_request`(Windows 전용, #80. `share`는 아직 없어서 Windows 파이프의 `adopt`는 모두 `bad_request`)
 
 ### PR-6 공유 철회 `streams.close` — `Done`
 PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.
