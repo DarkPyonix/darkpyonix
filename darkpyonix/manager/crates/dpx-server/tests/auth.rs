@@ -429,8 +429,8 @@ fn test_fr_a6_two_stores_can_revoke_at_the_same_time() {
     let ids: Vec<String> = (0..40).map(|_| a.create(kid, caps, None, None).unwrap().0.share_id).collect();
     let (left, right) = ids.split_at(20);
     let (left, right) = (left.to_vec(), right.to_vec());
-    let t1 = { let a = a.clone(); std::thread::spawn(move || left.iter().map(|id| a.revoke(kid, id).unwrap()).all(|x| x)) };
-    let t2 = { let b = b.clone(); std::thread::spawn(move || right.iter().map(|id| b.revoke(kid, id).unwrap()).all(|x| x)) };
+    let t1 = { let a = a.clone(); std::thread::spawn(move || left.iter().all(|id| a.revoke(kid, id).unwrap())) };
+    let t2 = { let b = b.clone(); std::thread::spawn(move || right.iter().all(|id| b.revoke(kid, id).unwrap())) };
     assert!(t1.join().unwrap() && t2.join().unwrap(), "no revoke may fail or be lost");
     assert!(a.list(kid).unwrap().is_empty());
 }
