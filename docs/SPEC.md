@@ -814,6 +814,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 커널과 런타임 API는 CPython 3.8 이상 모든 마이너 버전에서 동작합니다. 테스트는 그 기계에 있는 모든 인터프리터(`DARKPYONIX_TEST_PYTHONS`, 기본은 PATH에서 찾은 `python3.*`)로 커널 테스트를 돌립니다.
 - 테스트: `python` 픽스처로 매개변수화된 커널·런타임 테스트 39개(`tests/conftest.py`)
 - 측정 기록 (2026-10-03, macOS arm64): `DARKPYONIX_TEST_PYTHONS`에 CPython 3.8.20, 3.9.6, 3.10.20, 3.11.10, 3.12.13, 3.13.0(intel64), 3.14.7, 3.15.0rc1을 넣어 39개 × 8개 인터프리터 = 312개 중 304개 통과, 8개는 `DARKPYONIX_SKIP_PERF=1`로 뺀 NFR-K3 측정입니다(NFR-K3는 따로 돌려 통과). 3.8·3.10·3.12는 `uv python install`로 `.scratch/` 아래에 받은 인터프리터입니다.
+- 측정 기록 (2026-11-05, 맥미니 M 시리즈, 부하 평균 약 2.8, 디버그 빌드, `cargo test -p darkpyonix --test manager_latency`): 같은 시험(10 ms 간격 200줄)에서 p50 29 ms, p99 59 ms, 최대 60 ms입니다. 시험의 매니저는 실제 파이썬 커널 앞에서 평문 TCP로 SSE를 받으므로 넘김 대상(FR-M6)입니다. 다만 시험이 이 연결이 실제로 넘겨졌다는 것을 따로 단언하지는 않으므로, 넘김 경로 단언을 더한 뒤에 `Done`으로 올립니다(#47).
 
 ### NFR-K2 표준 라이브러리 전용 — `Done`
 `darkpyonix/kernel/*.py`(런타임 API와 커널 프로세스 모듈), `darkpyonix/kernel/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `darkpyonix/kernel/_mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
