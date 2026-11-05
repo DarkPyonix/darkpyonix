@@ -109,6 +109,7 @@ tags:
 
 paths:
   /health:
+    x-relay-served: true
     get:
       tags: [System]
       operationId: getHubHealth

@@ -3,13 +3,12 @@
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use clap::Parser;
-use darkpyonix_hub::{HubConfig, MemoryDns, TlsCert};
+use darkpyonix_hub::{HubConfig, TlsCert};
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
@@ -35,18 +34,12 @@ struct Args {
     /// Public URL, e.g. https://darkpyonix.dev
     #[arg(long, env = "HUB_PUBLIC_URL")]
     public_url: Option<Url>,
-    /// DNS zone for `<name>.<zone>`.
-    #[arg(long, env = "HUB_ZONE", default_value = "darkpyonix.dev")]
-    zone: String,
-    /// Directory for the SQLite database.
-    #[arg(long, env = "HUB_DATA_DIR", default_value = "hub-data")]
-    data_dir: PathBuf,
-    /// Require this secret to create accounts.
-    #[arg(long, env = "HUB_SIGNUP_SECRET")]
-    signup_secret: Option<String>,
-    /// Built ash viewer to serve under /ash/.
-    #[arg(long, env = "HUB_ASH_DIR")]
-    ash_dir: Option<PathBuf>,
+    /// Worker API base URL.
+    #[arg(long, env = "API_URL", default_value = "https://api.darkpyonix.dev")]
+    api_url: Url,
+    /// Shared secret used for relay admission and administration.
+    #[arg(long, env = "RELAY_SHARED_SECRET")]
+    relay_shared_secret: String,
 }
 
 fn load_tls(cert: &Path, key: &Path) -> Result<TlsCert, Box<dyn std::error::Error>> {
@@ -68,20 +61,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (Some(cert), Some(key)) => Some(load_tls(cert, key)?),
         _ => None,
     };
-    // The DNS provider for darkpyonix.dev is not chosen yet (SPEC FR-H5, Draft).
-    warn!("ACME challenge records are kept in memory only; no DNS provider is configured");
-
     let hub = darkpyonix_hub::start(HubConfig {
-        db_path: args.data_dir.join("hub.db"),
         listen: args.listen,
         tls,
         http_listen: args.http_listen,
         qad_listen: args.qad_listen,
         public_url: args.public_url,
-        zone: args.zone,
-        signup_secret: args.signup_secret,
-        ash_dir: args.ash_dir,
-        dns: Arc::new(MemoryDns::default()),
+        api_url: args.api_url,
+        relay_shared_secret: args.relay_shared_secret,
     })
     .await?;
     info!(
