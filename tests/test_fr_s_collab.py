@@ -843,7 +843,8 @@ def test_fr_s8_client_is_required_and_checked(nb):
     _, c1, _, _ = ids(ds)
     expect_error("bad_request", ds.lock, {"cell_id": c1})
     expect_error("bad_request", ds.presence_update, {"client": {"permission": "admin"}})
-    assert {"conflict", "locked", "forbidden"} <= set(p.ERROR_CODES)
+    assert {"conflict", "locked"} <= set(p.ERROR_CODES)
+    assert "forbidden" not in p.ERROR_CODES
 
 
 # ------------------------------------------------------------------ over DKP

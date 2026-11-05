@@ -66,7 +66,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 상태 메모 (2026-10-05): 등록 파일이 없으므로(FR-D2) "종료 뒤 등록 파일 없음"은 "`kernels/` 아래에 `.json`이 없음"으로 바뀌었고, 테스트는 그것만 확인합니다.
 - 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, `kernels/` 아래에 `.json` 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
 
-### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, POSIX 커널 구현됨 #47, Windows 구현 대기)
+### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`)
 커널은 매니저가 `adopt`로 넘긴 연결(PROTOCOL §3.7)에 직접 응답합니다. `events`는 SSE, `ws`는 2025 WebSocket 동기화(PROTOCOL §5), `wait`는 실행 대기 응답입니다. 커널은 넘겨받은 요청 바이트를 소켓에서 읽은 것처럼 다루고, 인증하거나 토큰을 검사하지 않습니다. 능력 집합(`label.capabilities`, FR-A3)은 보낼 내용을 거르는 데만 씁니다. `history`가 없으면 출력과 실행 기록을 보내지 않습니다. `read`가 없으면 셀 소스를 비워 보냅니다. `edit`이 없으면 WebSocket 편집 메시지(`start_typing`)를 받지 않습니다. `streams.close {share_id}`가 오면 그 공유로 넘겨받은 스트림을 모두 닫습니다.
 - 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
   - POSIX에서 `SCM_RIGHTS`로 넘긴 SSE 연결에 커널이 `200 text/event-stream`과 이벤트를 쓰고, 넘긴 매니저를 `SIGKILL`로 죽인 뒤에도 같은 연결로 이벤트가 계속 옵니다.
@@ -74,7 +74,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
   - 넘겨받은 요청에 틀린 토큰이 들어 있어도 커널은 라벨대로 응답합니다(토큰을 보지 않음).
   - `history`가 없는 라벨(`["read"]`)의 SSE에는 `output` 이벤트가 없습니다.
   - `streams.close`가 그 `share_id`의 스트림만 닫고, 다른 스트림은 그대로입니다.
-- 테스트: `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`, `test_fr_k9_wait_is_answered_by_the_kernel`, `test_fr_k9_ws_upgrade_is_answered_with_101`(`tests/test_fr_k9_handoff.py`, 사용 가능한 모든 인터프리터). 계획 `test_fr_k9_adopted_socket_on_windows`(Windows 실행기가 필요해서 건너뜀)
+- 테스트: `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`, `test_fr_k9_wait_is_answered_by_the_kernel`, `test_fr_k9_ws_upgrade_is_answered_with_101`(`tests/test_fr_k9_handoff.py`, 사용 가능한 모든 인터프리터). `test_fr_k9_adopted_socket_on_windows`(`tests/test_fr_k9_windows_handoff.py`, Windows에서만 실행하고 다른 곳에서는 건너뜀)
 - 상태 메모(#49): `ws`는 `101`, 제어 프레임, 2025 동기화 메시지(PROTOCOL §5)와 `read`·`history` 걸러내기까지 구현됐습니다(`darkpyonix/kernel/_streams.py`, `_wsync.py`). 테스트: `test_fr_k9_ws_streams_close_closes_the_socket`, `test_fr_k9_ws_presence_carries_capabilities`(`tests/test_fr_s9_ws.py`).
 
 ### FR-K10 커널 접근 토큰 보관 — `Agreed` (사용자 결정 2026-10-04, 커널 쪽 구현됨 #48)
@@ -353,7 +353,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 같은 사용자의 매니저 여러 개가 같은 커널에 동시에 붙을 수 있고, 각자 같은 이벤트를 받습니다.
 - 테스트: `test_fr_m5_two_managers_share_one_kernel`, Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
 
-### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, POSIX 구현됨 #47, CI 확인 대기, Windows 구현 대기)
+### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, CI 확인 대기)
 INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는 이벤트 스트림(`GET /api/kernels/{kernel_id}/events`), WebSocket 동기화(`GET /api/ws/kernels/{kernel_id}`), 실행 대기(`GET /api/kernels/{kernel_id}/runs/{run_ref}/wait`)를 인증하고 권한을 검사한 뒤 연결을 커널에 넘깁니다. 이미 읽은 요청 바이트와 `{capabilities, client_id, user, nickname, share_id}`를 함께 보냅니다(FR-A3). 나머지 REST 호출은 매니저가 DKP/1 요청으로 처리합니다.
 - POSIX 날 소켓: 커널의 제어 채널인 유닉스 도메인 소켓(announce의 `control`, FR-A1)으로 `SCM_RIGHTS`. 넘긴 뒤 매니저는 자기 FD를 닫습니다.
 - Windows 날 소켓: `WSADuplicateSocketW`로 만든 `WSAPROTOCOL_INFOW`를 제어 파이프 위 `adopt`의 `share`로 보냅니다.
@@ -449,7 +449,7 @@ INTENT D18. 사용자 결정(2026-10-04): "권한 이름 저따위 아니거든?
 - 커널 시작·재시작·종료를 `execute`에, 네임스페이스 조회를 `history`에 둔 것은 임시이고 사용자 재검토 예정입니다(2026-10-04, "일단 그렇게 해둬 나중에 내가 다시 볼게", PROJECT Q17).
 - 수용 기준: 작업마다 그 능력이 있는 토큰은 통과하고, 없는 토큰은 `403`입니다. `["read", "edit"]` 토큰은 잠그고 고칠 수 있지만 실행은 `403`입니다. `["read", "execute"]` 토큰은 실행할 수 있지만 잠금과 수정은 `403`입니다. `["manage"]` 토큰은 공유를 만들 수 있지만 문서 조회는 `403`입니다. `["read"]` 토큰의 이벤트 스트림에는 `output`이 없습니다. `viewer2`나 `editor`로 공유를 만들면 `400`입니다. 실행 요청에 `user_permission: "edit"`을 실으면 `400`입니다.
 - 철회 감지(리더 결정 2026-11-06, 추가): `read` 능력이 없는 공유는 실시간 폐기 감지를 하지 않는다. 폐기는 그 토큰의 다음 REST 호출이 받는 `401 token_revoked`로 알려진다. 근거: 출력을 받지 않는 공유라 실시간 감지의 이득이 작고, 이를 위한 폴링은 서버 부하를 만든다. 기존 수용 기준은 바꾸지 않는다.
-- 테스트(Rust, `darkpyonix/manager/crates/dpx-server/tests/api.rs`·`collab.rs`·`sse.rs`): `test_fr_a3_each_operation_needs_its_capability`, `test_fr_a3_execute_and_edit_are_independent`, `test_fr_a3_capabilities_have_no_order`, `test_fr_a3_tier_names_are_refused`, `test_fr_a3_user_permission_names_the_needed_capability`, `test_fr_a3_read_only_events_omit_outputs`(옛 `test_fr_a3_viewer1_events_omit_outputs`), `test_fr_a3_token_share_is_issued_by_the_kernel`, `test_fr_a3_ephemeral_manager_refuses_token_share`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_permission`, `test_fr_a3_ephemeral_manager_refuses_share_creation`. 옛 `test_fr_a3_permission_matrix`는 능력 표로 바꿨습니다(#49).
+- 테스트(Rust, `darkpyonix/manager/crates/dpx-server/tests/api.rs`·`collab.rs`·`sse.rs`): `test_fr_a3_each_operation_needs_its_capability`, `test_fr_s8_execute_does_not_grant_edit`, `test_fr_a3_capabilities_have_no_order`, `test_fr_a3_tier_names_are_refused`, `test_fr_a3_user_permission_names_the_needed_capability`, `test_fr_a3_read_only_events_omit_outputs`, `test_fr_a3_token_share_is_issued_by_the_kernel`, `test_fr_a3_ephemeral_manager_refuses_token_share`, `test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_capabilities`, `test_fr_a3_ephemeral_manager_refuses_share_creation`. 옛 `test_fr_a3_permission_matrix`는 능력 표로 바꿨습니다(#49).
 - 상태 메모(#49): 매니저는 `tier_for` 다리를 지우고 작업마다 능력 하나를 검사합니다(`darkpyonix/manager/crates/dpx-server/src/auth.rs`, `api.rs`). `POST /api/kernels/{kernel_id}/tokens/share`는 커널의 `tokens.issue`로 공유 토큰을 발급합니다. 커널 접근 토큰에 묶인 `POST /api/kernels`와 `GET /api/documents`는 다른 커널에 닿으므로 `403`입니다. 오너 결정(2026-10-25, "K1/K2 -- 우리 웹 소켓으로 하나?, K5 -- 실제 구현까지 보류 | 외 전부 추천대로"): 이 `403`을 유지합니다(K4). `404`는 특정 커널을 지목했을 때 존재를 숨기려는 규칙이고, 커널을 지목하지 않는 이 두 경로에는 해당하지 않습니다. 커널 쪽 `forbidden`은 지웠습니다. Rust는 이 환경에서 컴파일하지 않았고 CI가 검증합니다.
 
 ### FR-A4 매니저 비밀번호와 마스터 토큰 (2025 복구) — `Done` (사용자 결정 2026-10-03·2026-10-04, 구현됨 #48, 로컬 `cargo test -p dpx-server --test auth` 10건 통과 2026-11-05)
@@ -502,7 +502,8 @@ INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 �
 - 어느 매니저로 들어와도 통합니다. 토큰은 커널이 들고 있고, 매니저는 발급·확인·철회를 제어 채널로 커널에 요청합니다(FR-A5, FR-K10, PROTOCOL §6). 커널이 떠 있지 않으면 매니저가 먼저 띄웁니다(FR-M2). 초기 토큰과 확인은 임시 매니저에서도 됩니다. 공유 링크는 전용 매니저 설정(`share_base`)이 필요해서 공유 토큰 발급만 전용 매니저가 합니다(FR-A3).
 - 저장소 위치는 [provisional]이고 #48에서 정합니다. 원칙은 커널만 접근하고, 노트북 파일과 수명을 같이 한다는 것입니다(PROJECT Q16).
 - 수용 기준: 초기 토큰을 두 번 받으면 두 토큰이 모두 통합니다. 로그인으로 받은 토큰은 그 커널에 통하고, 다른 커널에는 `404`입니다. 전용 매니저에서 받은 토큰이 같은 커널의 임시 매니저에서도 통합니다. `POST /api/kernels/{kernel_id}/tokens/share`의 응답이 2025 필드(`share_token`, `share_url`)와 `capabilities`를 담습니다. 거둔 토큰의 확인은 `401 token_revoked`입니다.
-- 테스트: `test_fr_a6_initial_token_has_no_limit_and_works_through_any_manager`, `test_fr_a6_verify_reports_validity_and_revocation`, `test_fr_a4_one_password_per_manager`(`darkpyonix/manager/crates/dpx-server/tests/auth.rs`), 커널 쪽 `test_pr_7_*`, `test_fr_a5_*`(`tests/test_pr_7_tokens.py`). 공유 토큰 발급(`POST .../tokens/share`)과 능력 집합 검사는 #49입니다.
+- 매니저 DB 공유(`POST /shares`)도 커널이 발급한 공유 토큰과 같은 토큰이라 `verify`가 받는다(#113). 그 커널의 토큰이면 `200`과 공유의 능력, 다른 커널의 토큰이나 모르는 토큰은 구별 없이 `401 unauthorized`다. 철회한 공유는 행을 지우지 않고 철회 시각을 남겨(`shares.revoked_at`, 토큰은 해시로만 저장) `verify`와 사용이 모두 `401 token_revoked`가 된다.
+- 테스트: `test_fr_a6_initial_token_has_no_limit_and_works_through_any_manager`, `test_fr_a6_verify_reports_validity_and_revocation`, `test_fr_a4_one_password_per_manager`(`darkpyonix/manager/crates/dpx-server/tests/auth.rs`), 커널 쪽 `test_pr_7_*`, `test_fr_a5_*`(`tests/test_pr_7_tokens.py`). 공유 토큰 발급(`POST .../tokens/share`)과 능력 집합 검사는 #49입니다., `test_fr_a6_verify_accepts_manager_db_shares`(`darkpyonix/manager/crates/dpx-server/tests/auth.rs`)
 - 구현 메모(#48): 다른 커널에 낸 커널 접근 토큰은 그 커널이 모르는 토큰이라 `404`가 아니라 `401`입니다(어느 커널의 토큰인지 매니저가 모르기 때문, 사용자 확인 대기). 떠 있지 않은 커널은 id만으로 띄울 수 없어서 초기 토큰 발급과 확인이 `404`입니다. 능력 집합은 #49에서 작업마다 능력 하나를 검사하는 것으로 바뀌었습니다(`tier_for`는 지웠습니다).
 
 ## 10a. 협업 문서 (S)
@@ -847,6 +848,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
 - 수용 기준: 릴레이 전용 연결로 알려진 평문 표식을 보낼 때, 클라이언트와 허브 사이의 바이트(허브까지 TLS 없이 평문 HTTP 릴레이로 둔 경우에도)에 그 표식이 나타나지 않고, 상대 끝단에서는 그대로 받습니다.
 - 테스트: `test_nfr_h1_relay_sees_only_ciphertext`
+  - 검증 범위: 릴레이(평문 HTTP) 앞에 바이트를 기록하는 TCP 프록시를 두고, 직접 경로를 끈(`clear_ip_transports`) iroh 엔드포인트 둘이 그 릴레이로만 통신합니다. 상대 끝단이 표식을 그대로 받고, 기록된 양방향 바이트에 표식이 없음을 확인합니다. 클라이언트→릴레이 방향의 WebSocket 프레임은 마스킹되므로 그 방향의 부재만으로는 증거가 되지 않고, 릴레이→클라이언트 방향(마스킹 없음)과 QUIC 암호화가 실질적 증거입니다. 허브 앞단 Cloudflare 프록시 구성은 이 테스트가 다루지 않습니다.
 
 ### NFR-H2 토큰 노출 최소화 — `Agreed`
 iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{key}`의 자격 증명이 URL 쿼리(`?token=`)로 갑니다. URL은 로그·프록시·크래시 보고에 남기 쉬우므로 그 자리에 계정 권한이 있는 토큰을 두지 않습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
@@ -889,7 +891,7 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
 - 테스트: `test_pr_4_unknown_fields_are_ignored`
 
-### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, POSIX 구현됨 #47, Windows 구현 대기)
+### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, CI 확인 대기)
 PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
 - 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
 - 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. `test_pr_5_adopt_over_a_windows_pipe_is_bad_request`(Windows 전용, #80. `share`는 아직 없어서 Windows 파이프의 `adopt`는 모두 `bad_request`)

@@ -238,6 +238,44 @@ async fn test_fr_a6_verify_reports_validity_and_revocation() {
     s.admin().get(&format!("/api/kernels/{kid}/tokens/{share_tok}/verify")).await.error(401, "token_revoked");
 }
 
+/// A share made with `POST /shares` lives in the manager database. FR-A6 (INTENT D17) says it is the
+/// same thing as a kernel-issued share token, so `verify` must accept it (#113).
+#[tokio::test]
+async fn test_fr_a6_verify_accepts_manager_db_shares() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("a.py");
+    let (other, _) = s.kernel("b.py");
+    let a = s.admin();
+    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read", "history"]})).await;
+    assert_eq!(c.status, 201, "{}", c.text);
+    let tok = c.body["token"].as_str().unwrap().to_string();
+    let sid = c.body["share_id"].as_str().unwrap().to_string();
+    let verify = format!("/api/kernels/{kid}/tokens/{tok}/verify");
+
+    // The share's own token and the master token both read it back, with the share's capabilities.
+    for api in [s.with_token(&tok), s.admin()] {
+        let r = api.get(&verify).await;
+        assert_eq!(r.status, 200, "{}", r.text);
+        assert_eq!(r.body["valid"], true);
+        assert_eq!(r.body["kernel_id"], kid.as_str());
+        assert_eq!(r.body["capabilities"], json!(["read", "history"]));
+        assert_eq!(r.body["blacklisted"], false);
+    }
+    // A token of another kernel is refused, with the same answer as an unknown token.
+    s.admin().get(&format!("/api/kernels/{other}/tokens/{tok}/verify")).await.error(401, "unauthorized");
+    s.with_token(&tok).get(&format!("/api/kernels/{other}/tokens/{tok}/verify")).await.error(404, "not_found");
+    s.admin().get(&format!("/api/kernels/{kid}/tokens/nope/verify")).await.error(401, "unauthorized");
+
+    // Revoked: the share is gone from the list, and both verify and use say token_revoked.
+    assert_eq!(a.delete(&format!("/api/kernels/{kid}/shares/{sid}")).await.status, 204);
+    a.get(&verify).await.error(401, "token_revoked");
+    s.with_token(&tok).get(&format!("/api/kernels/{kid}")).await.error(401, "token_revoked");
+    let listed = a.get(&format!("/api/kernels/{kid}/shares")).await.body["shares"].clone();
+    assert!(listed.as_array().unwrap().iter().all(|x| x["share_id"] != sid.as_str()), "{listed}");
+    // A revoked token of another kernel does not tell that it ever existed.
+    a.get(&format!("/api/kernels/{other}/tokens/{tok}/verify")).await.error(401, "unauthorized");
+}
+
 // ------------------------------------------------------------------ attempt limit (FR-A4, #87)
 
 /// Two free attempts, then a 300 ms lock that doubles with every further failure.
