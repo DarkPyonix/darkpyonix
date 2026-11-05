@@ -29,6 +29,10 @@ database_name = "darkpyonix-hub"
 database_id = "00000000-0000-0000-0000-000000000000" # replace with `wrangler d1 create darkpyonix-hub`
 migrations_dir = "migrations"
 
+[[r2_buckets]]
+binding = "NOTEBOOKS"
+bucket_name = "darkpyonix-notebooks"
+
 # The ash viewer, built by darkpyonix-ash and copied to public/ash/ before deploy.
 # Assets answer first; requests with no matching file reach the Worker.
 [assets]

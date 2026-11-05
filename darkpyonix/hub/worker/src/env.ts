@@ -5,6 +5,7 @@ import type { DnsProvider } from "./dns";
 export interface Env {
   /** Accounts, sessions, device links, devices, address records, shares, names (migrations/). */
   DB: D1Database;
+  NOTEBOOKS: R2Bucket;
   /** Static assets from ./public: the ash viewer under /ash/. */
   ASSETS: Fetcher;
 
