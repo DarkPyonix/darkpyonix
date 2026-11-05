@@ -551,7 +551,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
             let svc = TowerToHyperService::new(svc);
             let watcher = graceful.watcher();
             let acceptor = acceptor.clone();
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             let (hand_state, hand_activity) = (state.clone(), activity.clone());
             tokio::spawn(async move {
                 let builder = auto::Builder::new(TokioExecutor::new());
@@ -565,7 +565,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
                     }
                     None => {
                         // FR-M6: stream requests on plain TCP go to the kernel by descriptor.
-                        #[cfg(unix)]
+                        #[cfg(any(unix, windows))]
                         let Some(stream) = handoff::intercept(stream, &hand_state, &hand_activity).await else {
                             return;
                         };

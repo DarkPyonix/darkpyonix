@@ -104,10 +104,13 @@ jobs:
         shell: pwsh
         run: |
           # The real-pipe tests must run on Windows; a skip there is a failure.
-          python -m pytest -rs -p no:cacheprovider tests/test_fr_a1_windows_pipe.py tests/test_nfr_k2_stdlib_only.py 2>&1 | Tee-Object -FilePath pytest-win.log
+          python -m pytest -rs -p no:cacheprovider tests/test_fr_a1_windows_pipe.py tests/test_fr_k9_windows_handoff.py tests/test_nfr_k2_stdlib_only.py 2>&1 | Tee-Object -FilePath pytest-win.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (Select-String -Path pytest-win.log -Pattern "needs a Windows named pipe") {
             Write-Error "real Windows pipe tests were skipped"; exit 1
+          }
+          if (Select-String -Path pytest-win.log -Pattern "SKIPPED.*k9") {
+            Write-Error "the Windows handoff test was skipped"; exit 1
           }
 
   rust-windows:
@@ -124,6 +127,8 @@ jobs:
           workspaces: darkpyonix/manager
       - name: Named-pipe client (FR-A1; #80)
         run: cargo test -p dpx-kernel test_fr_a1
+      - name: Socket handoff builds on Windows (FR-K9; #47)
+        run: cargo test -p dpx-kernel -p dpx-server --no-run
 
   hub-worker:
     name: Hub worker

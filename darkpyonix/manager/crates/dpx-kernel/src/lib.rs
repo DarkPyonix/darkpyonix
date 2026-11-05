@@ -450,22 +450,19 @@ impl KernelBackend for RealBackend {
     }
 
     fn supports_handoff(&self) -> bool {
-        cfg!(unix)
+        cfg!(any(unix, windows))
     }
 
     #[allow(unused_variables)]
     async fn adopt(&self, kernel_id: &str, req: AdoptRequest) -> Result<String> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            let entry = self
-                .discovery
-                .find(kernel_id)
-                .await
-                .ok_or_else(|| not_found(kernel_id))?;
-            return dkp::adopt(&kernel_info(&entry).control, kernel_id, req).await;
+            let entry = self.discovery.find(kernel_id).await.ok_or_else(|| not_found(kernel_id))?;
+            let info = kernel_info(&entry);
+            return dkp::adopt(&info.control, kernel_id, req, info.pid).await;
         }
-        #[cfg(not(unix))]
-        Err(DpxError::new("internal", "stream handoff needs a Unix socket (Windows is a follow-up of #47)"))
+        #[cfg(not(any(unix, windows)))]
+        Err(DpxError::new("internal", "stream handoff needs a Unix socket or a Windows shared socket"))
     }
 
     async fn kill(&self, kernel_id: &str) -> Result<()> {
