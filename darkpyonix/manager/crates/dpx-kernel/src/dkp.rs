@@ -743,7 +743,7 @@ fn sendmsg_fd(sock: std::os::fd::RawFd, fd: std::os::fd::RawFd) -> std::io::Resu
 /// other frame can come between the `adopt` frame and its descriptor (PROTOCOL §3.7.2). The
 /// descriptor in `req` is closed when this returns; the kernel holds its own copy by then.
 #[cfg(unix)]
-pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest) -> Result<String> {
+pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest, _pid: u32) -> Result<String> {
     use std::os::fd::AsRawFd;
     let mut stream = open_stream(control).await?;
     let work = async {
@@ -800,6 +800,55 @@ pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest) 
     tokio::time::timeout(HANDSHAKE_TIMEOUT, work)
         .await
         .map_err(|_| unreachable("adopt timed out"))?
+}
+
+#[cfg(windows)]
+pub async fn adopt(control: &str, kernel_id: &str, req: dpx_core::AdoptRequest, pid: u32) -> Result<String> {
+    use std::os::windows::io::{AsRawHandle, AsRawSocket};
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Networking::WinSock::{WSADuplicateSocketW, WSAPROTOCOL_INFOW};
+    use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+    let mut stream = open_stream(control).await?;
+    let work = async {
+        let err = |what: &str, e: std::io::Error| unreachable(format!("{what}: {e}"));
+        let mut actual_pid = 0;
+        if unsafe { GetNamedPipeServerProcessId(stream.as_raw_handle() as HANDLE, &mut actual_pid) } == 0 {
+            return Err(err("pipe server pid", std::io::Error::last_os_error()));
+        }
+        if actual_pid != pid {
+            return Err(unreachable("pipe server pid differs from kernel announcement"));
+        }
+        let (hello, _) = read_frame(&mut stream).await.map_err(|e| err("handshake", e))?;
+        if hello.get("op").and_then(Value::as_str) != Some("hello")
+            || hello.get("kernel_id").and_then(Value::as_str) != Some(kernel_id) {
+            return Err(unreachable(format!("{control} is not kernel {kernel_id}")));
+        }
+        let auth = json!({"dkp": 1, "op": "auth", "client": {"name": "darkpyonix-manager", "kind": "manager", "pid": std::process::id()}});
+        stream.write_all(&encode(&auth)?).await.map_err(|e| err("handshake", e))?;
+        let (welcome, _) = read_frame(&mut stream).await.map_err(|e| err("handshake", e))?;
+        if welcome.get("op").and_then(Value::as_str) != Some("welcome") {
+            return Err(unreachable("expected welcome"));
+        }
+        let mut info: WSAPROTOCOL_INFOW = unsafe { std::mem::zeroed() };
+        if unsafe { WSADuplicateSocketW(req.socket.as_raw_socket() as usize, pid, &mut info) } != 0 {
+            return Err(err("duplicate socket", std::io::Error::last_os_error()));
+        }
+        let bytes = unsafe { std::slice::from_raw_parts((&info as *const WSAPROTOCOL_INFOW).cast::<u8>(), std::mem::size_of::<WSAPROTOCOL_INFOW>()) };
+        let params = json!({"kind": req.kind, "transport": req.transport, "share": base64_encode(bytes), "request": base64_encode(&req.request), "label": req.label});
+        let frame = json!({"dkp": 1, "op": "request", "id": 1, "method": "adopt", "params": params});
+        stream.write_all(&encode(&frame)?).await.map_err(|e| err("adopt", e))?;
+        loop {
+            let (frame, _) = read_frame(&mut stream).await.map_err(|e| err("adopt", e))?;
+            if frame.get("op").and_then(Value::as_str) != Some("response") { continue; }
+            if frame.get("ok").and_then(Value::as_bool) == Some(true) {
+                return Ok(frame["result"]["stream_id"].as_str().unwrap_or_default().to_string());
+            }
+            let e = &frame["error"];
+            let code = e["code"].as_str().unwrap_or("internal");
+            return Err(DpxError::new(code, e["message"].as_str().unwrap_or(code)));
+        }
+    };
+    tokio::time::timeout(HANDSHAKE_TIMEOUT, work).await.map_err(|_| unreachable("adopt timed out"))?
 }
 
 #[cfg(test)]
@@ -890,7 +939,7 @@ mod tests {
             label: json!({"capabilities": ["read"]}),
             fd: theirs.into(),
         };
-        let id = adopt(path.to_str().unwrap(), "k_x", req).await.unwrap();
+        let id = adopt(path.to_str().unwrap(), "k_x", req, 0).await.unwrap();
         assert_eq!(id, "st_1");
         kernel.join().unwrap();
         let mut got = String::new();
