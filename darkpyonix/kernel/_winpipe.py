@@ -133,6 +133,7 @@ _ERROR_PIPE_NOT_CONNECTED = 233
 _ERROR_OPERATION_ABORTED = 995
 _ERROR_ACCESS_DENIED = 5
 _WAIT_TIMEOUT = 0x102
+_WAIT_FAILED = 0xFFFFFFFF
 _INFINITE = 0xFFFFFFFF
 _EOF_ERRORS = (_ERROR_BROKEN_PIPE, _ERROR_NO_DATA, _ERROR_PIPE_NOT_CONNECTED)
 
@@ -270,10 +271,10 @@ class OverlappedPipe:  # pragma: no cover - needs Windows
             idle = self._busy == 0 and not self._closed
             if idle:
                 self._closed = True
+            elif not self._closed:
+                self._w.CancelIoEx(self.handle, None)
         if idle:
             self._w.CloseHandle(self.handle)
-        elif not self._closed:
-            self._w.CancelIoEx(self.handle, None)
 
     close = abort
 
@@ -287,10 +288,21 @@ class OverlappedPipe:  # pragma: no cover - needs Windows
             err = w.last_error()
             if err != _ERROR_IO_PENDING:
                 raise OSError(err, "pipe call failed (%d)" % err)
+            with self._lock:
+                if self._closing:
+                    w.CancelIoEx(self.handle, w.ct.byref(ov))
             ms = _INFINITE if timeout is None else max(0, int(timeout * 1000))
-            if w.WaitForSingleObject(ov.hEvent, ms) == _WAIT_TIMEOUT:
+            result = w.WaitForSingleObject(ov.hEvent, ms)
+            if result == _WAIT_FAILED:
+                err = w.last_error()
                 w.CancelIoEx(self.handle, w.ct.byref(ov))
                 w.GetOverlappedResult(self.handle, w.ct.byref(ov), w.ct.byref(n), True)
+                raise OSError(err, "pipe wait failed (%d)" % err)
+            if result == _WAIT_TIMEOUT:
+                w.CancelIoEx(self.handle, w.ct.byref(ov))
+                w.GetOverlappedResult(self.handle, w.ct.byref(ov), w.ct.byref(n), True)
+                if n.value:
+                    return n.value
                 raise socket.timeout("timed out")
         if not w.GetOverlappedResult(self.handle, w.ct.byref(ov), w.ct.byref(n), True):
             err = w.last_error()
@@ -308,8 +320,9 @@ class OverlappedPipe:  # pragma: no cover - needs Windows
     def read(self, n: int, timeout: Optional[float]) -> bytes:
         w = self._w
         self._enter()
-        ov = self._new_overlapped()
+        ov = None
         try:
+            ov = self._new_overlapped()
             buf = w.ct.create_string_buffer(n)
             started = bool(w.ReadFile(self.handle, buf, n, None, w.ct.byref(ov)))
             try:
@@ -322,7 +335,8 @@ class OverlappedPipe:  # pragma: no cover - needs Windows
                 raise
             return buf.raw[:got]
         finally:
-            w.CloseHandle(ov.hEvent)
+            if ov is not None:
+                w.CloseHandle(ov.hEvent)
             self._leave()
 
     def write(self, data: bytes) -> None:
@@ -330,13 +344,15 @@ class OverlappedPipe:  # pragma: no cover - needs Windows
         view = memoryview(data)
         while len(view):
             self._enter()
-            ov = self._new_overlapped()
+            ov = None
             try:
+                ov = self._new_overlapped()
                 chunk = bytes(view[:BUFFER])
                 started = bool(w.WriteFile(self.handle, chunk, len(chunk), None, w.ct.byref(ov)))
                 sent = self._wait(ov, started, None)
             finally:
-                w.CloseHandle(ov.hEvent)
+                if ov is not None:
+                    w.CloseHandle(ov.hEvent)
                 self._leave()
             view = view[sent:]
 
@@ -398,6 +414,7 @@ class PipeListener:  # pragma: no cover - needs Windows
         self._w = _Win32.get()
         self._stop = threading.Event()
         self._current = None  # type: Optional[OverlappedPipe]
+        self._current_lock = threading.Lock()
         self._thread = None  # type: Optional[threading.Thread]
         self._first = self._new_instance(first=True)  # raises if another process owns the name
 
@@ -429,17 +446,21 @@ class PipeListener:  # pragma: no cover - needs Windows
         self._thread.start()
 
     def stop(self) -> None:
-        self._stop.set()
-        if self._current is not None:
-            self._current.abort()
+        with self._current_lock:
+            self._stop.set()
+            if self._current is not None:
+                self._current.abort()
         if self._thread is not None:
             self._thread.join(5)
 
     def _connect(self, pipe: OverlappedPipe) -> bool:
         w = self._w
-        pipe._enter()
-        ov = pipe._new_overlapped()
+        entered = False
+        ov = None
         try:
+            pipe._enter()
+            entered = True
+            ov = pipe._new_overlapped()
             if w.ConnectNamedPipe(pipe.handle, w.ct.byref(ov)):
                 return True
             err = w.last_error()
@@ -447,32 +468,37 @@ class PipeListener:  # pragma: no cover - needs Windows
                 return True
             if err != _ERROR_IO_PENDING:
                 return False
-            pipe._wait(ov, True, None)
+            pipe._wait(ov, False, None)
             return True
         except OSError:
             return False
         finally:
-            w.CloseHandle(ov.hEvent)
-            pipe._leave()
+            if ov is not None:
+                w.CloseHandle(ov.hEvent)
+            if entered:
+                pipe._leave()
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            pipe = self._current
-            if not self._connect(pipe):
+            with self._current_lock:
+                pipe = self._current
+            if pipe is None:
+                return
+            connected = self._connect(pipe)
+            if not connected:
                 pipe.close()
-                if self._stop.is_set():
-                    return
-                try:
-                    self._current = self._new_instance()
-                except OSError:
-                    return
-                continue
             try:
-                self._current = self._new_instance()
+                next_pipe = self._new_instance() if not self._stop.is_set() else None
             except OSError:
-                self._current = None
-            serve_connection(pipe, self._deliver, self._same_account)
-            if self._current is None:
+                next_pipe = None
+            with self._current_lock:
+                if self._stop.is_set() and next_pipe is not None:
+                    next_pipe.close()
+                    next_pipe = None
+                self._current = next_pipe
+            if connected:
+                serve_connection(pipe, self._deliver, self._same_account)
+            if next_pipe is None:
                 return
 
     def _same_account(self, pipe: OverlappedPipe) -> bool:

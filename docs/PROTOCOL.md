@@ -91,7 +91,7 @@ kernel_id = "k_" + hex(SHA-256(canonical as UTF-8))[:20]
 
 - `length`는 payload 바이트 수이고 최대 64 MiB입니다. 넘으면 받는 쪽이 `error {code: "frame_too_large"}`를 보내고 연결을 닫습니다.
 - 커널은 TCP 포트를 열지 않습니다. POSIX는 `sockets/<kernel_id>.sock`(0600, §1), Windows는 파이프 `\\.\pipe\darkpyonix-<user_tag>-<kernel_id>`에서만 받습니다. 주소는 announce의 `control`입니다. 같은 채널로 요청, 이벤트, 스트림 넘김(§3.7)을 모두 나릅니다.
-- Windows 파이프는 `selectors`에 넣을 수 없어서, Windows 커널은 파이프 연결마다 스레드 하나를 둡니다(#80). 그 스레드는 `ConnectNamedPipe`로 기다려 상대 SID를 확인한 뒤(§3.2) 파이프와 `socket.socketpair()`의 한쪽 사이에서 바이트를 퍼 나르고, 서버의 나머지 코드는 다른 쪽을 일반 소켓처럼 씁니다. 연결 하나를 받으면 곧바로 새 파이프 인스턴스를 만들어 다음 연결을 받습니다. 파이프는 바이트 모드(`PIPE_TYPE_BYTE`)이고 프레임 경계는 §3.1의 길이 접두사가 정합니다. 파이프에는 `SCM_RIGHTS`가 없어서 `adopt`의 `fd` 전달은 안 됩니다(§3.7).
+- Windows 파이프는 `selectors`에 넣을 수 없어서, Windows 커널은 수락 스레드 하나와 연결마다 양방향 브리지 스레드 두 개를 둡니다(#80). 수락 스레드는 `ConnectNamedPipe`로 기다려 상대 SID를 확인하고(§3.2), 브리지 스레드는 파이프와 `socket.socketpair()`의 한쪽 사이에서 바이트를 퍼 나르며, 서버의 나머지 코드는 다른 쪽을 일반 소켓처럼 씁니다. 연결 하나를 받으면 곧바로 새 파이프 인스턴스를 만들어 다음 연결을 받습니다. 파이프는 바이트 모드(`PIPE_TYPE_BYTE`)이고 프레임 경계는 §3.1의 길이 접두사가 정합니다. 파이프에는 `SCM_RIGHTS`가 없어서 `adopt`의 `fd` 전달은 안 됩니다(§3.7).
 
 ### 3.2 핸드셰이크
 

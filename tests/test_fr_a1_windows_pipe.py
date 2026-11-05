@@ -148,6 +148,37 @@ def test_fr_a1_client_refuses_a_pipe_name_off_windows():
     assert e.value.code == "kernel_unreachable"
 
 
+@pytest.mark.parametrize("operation", ["read", "write", "connect"])
+def test_fr_a1_failed_overlapped_allocation_releases_pipe(operation, monkeypatch):
+    class FakeWin32:
+        def __init__(self):
+            self.closed = []
+
+        def CloseHandle(self, handle):
+            self.closed.append(handle)
+
+    win = FakeWin32()
+    monkeypatch.setattr(_winpipe._Win32, "get", lambda: win)
+    pipe = _winpipe.OverlappedPipe(42)
+
+    def fail():
+        raise OSError("event creation failed")
+
+    monkeypatch.setattr(pipe, "_new_overlapped", fail)
+    if operation == "connect":
+        listener = _winpipe.PipeListener.__new__(_winpipe.PipeListener)
+        listener._w = win
+        assert not listener._connect(pipe)
+    else:
+        with pytest.raises(OSError):
+            if operation == "read":
+                pipe.read(1, None)
+            else:
+                pipe.write(b"x")
+    pipe.close()
+    assert win.closed == [42]
+
+
 # ------------------------------------------------------------------ real pipes (Windows CI)
 
 @pytest.fixture
