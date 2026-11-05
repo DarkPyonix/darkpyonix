@@ -241,8 +241,9 @@ pub enum DbShare {
 /// How a token looked up against this manager's own records.
 pub enum Lookup {
     Found(Principal),
-    /// A manager shared token that was reset (`401 token_revoked`).
-    Revoked,
+    /// A revoked token (`401 token_revoked`): a manager shared token that was reset (no kernel), or
+    /// a database share and the kernel it belonged to.
+    Revoked(Option<String>),
     Unknown,
 }
 
@@ -320,6 +321,8 @@ pub struct ShareStore {
 impl ShareStore {
     pub fn open(path: &Path) -> std::io::Result<Self> {
         let conn = Connection::open(path).map_err(std::io::Error::other)?;
+        // Two managers may share one file: wait for the other writer instead of failing.
+        conn.busy_timeout(Duration::from_secs(5)).map_err(std::io::Error::other)?;
         util::chmod_private(path);
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -356,6 +359,25 @@ impl ShareStore {
              );",
         )
         .map_err(std::io::Error::other)?;
+        // Development builds between the first and second take on revoked shares kept them in
+        // `shares` with a `revoked_at` column, which this build ignores: move them over once, or a
+        // revoked token would be valid again. Released databases never had the column.
+        let has_revoked_at: bool = conn
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('shares') WHERE name = 'revoked_at'", [], |r| r.get::<_, i64>(0))
+            .map(|n| n > 0)
+            .map_err(std::io::Error::other)?;
+        if has_revoked_at {
+            conn.execute_batch(
+                "BEGIN IMMEDIATE;
+                 INSERT OR REPLACE INTO shares_revoked (share_id, kernel_id, token_sha256, revoked_unix)
+                     SELECT share_id, kernel_id, token_sha256,
+                            COALESCE(CAST(strftime('%s', revoked_at) AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER))
+                     FROM shares WHERE revoked_at IS NOT NULL;
+                 DELETE FROM shares WHERE revoked_at IS NOT NULL;
+                 COMMIT;",
+            )
+            .map_err(std::io::Error::other)?;
+        }
         // Revoked records are only worth keeping long enough to answer `token_revoked`.
         conn.execute(
             "DELETE FROM shares_revoked WHERE revoked_unix < ?1",
@@ -443,7 +465,7 @@ impl ShareStore {
             .flatten();
         let Some((share_id, caps, revoked)) = row else { return Lookup::Unknown };
         if revoked.is_some() {
-            return Lookup::Revoked;
+            return Lookup::Revoked(None);
         }
         let Some(caps) = parse_caps(&caps) else { return Lookup::Unknown };
         Lookup::Found(Principal {
@@ -541,7 +563,9 @@ impl ShareStore {
 
     pub fn revoke(&self, kernel_id: &str, share_id: &str) -> rusqlite::Result<bool> {
         let mut conn = self.lock();
-        let tx = conn.transaction()?;
+        // IMMEDIATE takes the write lock up front: a read followed by a write must not fail with
+        // SQLITE_BUSY when another manager revokes at the same time.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let digest: Option<String> = tx
             .query_row(
                 "SELECT token_sha256 FROM shares WHERE share_id = ?1 AND kernel_id = ?2",
@@ -605,7 +629,7 @@ impl Auth {
         match shares.shared_lookup(token) {
             Lookup::Unknown => match shares.db_row(token) {
                 DbShare::Live(p) => Lookup::Found(p),
-                DbShare::Revoked { .. } => Lookup::Revoked,
+                DbShare::Revoked { kernel_id } => Lookup::Revoked(Some(kernel_id)),
                 DbShare::Unknown => Lookup::Unknown,
             },
             other => other,
