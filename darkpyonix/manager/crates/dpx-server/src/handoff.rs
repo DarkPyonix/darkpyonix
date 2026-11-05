@@ -223,7 +223,7 @@ mod platform {
                 },
                 None => return Some(stream),
             },
-            Lookup::Revoked => return Some(stream),
+            Lookup::Revoked(_) => return Some(stream),
         };
         let plan = match plan_handoff(
             st,
