@@ -109,7 +109,7 @@ export function call(deps: Deps, method: string, path: string, c: Call = {}): Pr
   }
   // Define (not assign) the overrides: assigning would go through `env`'s own setter and leak.
   const env = c.env ? (Object.create(hubEnv, Object.getOwnPropertyDescriptors(c.env)) as Env) : hubEnv;
-  return handle(new Request(`${ORIGIN}${path}`, { method, headers, body }), env, deps);
+  return handle(new Request(`https://api.darkpyonix.dev${path}`, { method, headers, body }), env, deps);
 }
 
 export function cookieValue(response: Response, name: string): string | null {

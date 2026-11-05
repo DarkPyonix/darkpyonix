@@ -130,5 +130,5 @@ export function normalizeUserCode(s: string): string | null {
 /** A same-origin path to return to after login: `/x`, never `//host` or `/\host`. */
 export function safeReturnTo(s: string | null | undefined): string {
   if (!s || !s.startsWith("/") || s.startsWith("//") || s.includes("\\")) return "/";
-  return s;
+  return s.split("#", 1)[0];
 }
