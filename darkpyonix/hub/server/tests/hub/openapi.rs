@@ -35,12 +35,7 @@ async fn test_hub_every_operation_answers_with_a_documented_status() {
     for (path, item) in paths {
         let path = path.as_str().unwrap();
         // Only the relay host's operations; the Worker serves the rest.
-        if item.get("servers").is_none() {
-            continue;
-        }
-        // Not served until the relay trim (SPEC FR-H3: the relay asks the Worker whom to admit
-        // and takes disconnects at /admin/disconnect).
-        if path.starts_with("/admin/") {
+        if item.get("servers").is_none() && item.get("x-relay-served").and_then(|v| v.as_bool()) != Some(true) {
             continue;
         }
         for method in ["get", "put", "post", "delete"] {
