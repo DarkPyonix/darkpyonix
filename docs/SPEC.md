@@ -786,7 +786,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 라이브 화면은 호스팅한 판이 아니라 주인 기기의 파일(매니저의 `GET /kernels/{id}/document`)을 보여 줍니다. 호스팅한 판의 소스 해시와 다르면 프런트가 그 사실을 표시합니다.
 - 토큰이 없거나, 공유가 내려갔거나, 기기에 닿지 못하면 프런트는 읽기 전용 보기(FR-H16)로 남고 이유를 보여 줍니다.
 - 수용 기준: 같은 계정의 공유는 걸리고, 다른 계정의 공유는 409, 없는 공유는 404입니다. 노트북 메타데이터에 `share_id`가 나옵니다. 공유가 내려가면(FR-H4) 노트북의 `share_id`는 `null`이 됩니다. 브라우저에서 토큰이 있는 노트북 링크가 기기의 매니저에 붙어 실행하는 것(`viewer3`)과 토큰 없이 읽기 전용으로 남는 것은 릴레이 호스트 연동 시험으로 확인합니다.
-- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h17_attach_a_share_of_the_same_account`, `test_fr_h17_unpublished_share_detaches`. 연동: `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`
+- 테스트(`darkpyonix/hub/worker/test/notebooks_live.test.ts`): `test_fr_h17_attach_a_share_of_the_same_account`, `test_fr_h17_other_accounts_and_unknown_shares_are_refused`, `test_fr_h17_unpublished_share_detaches`. 연동: `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`
 
 ### FR-H18 지우기 — `Agreed`
 - `DELETE /notebooks/{notebook_id}`는 노트북과 모든 판을 지웁니다(204). 그 뒤 모든 읽기는 404이고, R2 본문은 같은 요청에서 지우되 실패한 것은 Cron이 24시간 안에 지웁니다.
