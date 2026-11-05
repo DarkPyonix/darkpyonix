@@ -71,6 +71,8 @@ def _recv(c: "_Conn") -> bytes:
 
     ``socket.recvmsg`` exists on 3.8 (``recv_fds`` does not, PROTOCOL §3.7.2).
     """
+    if os.name == "nt":  # no recvmsg or SCM_RIGHTS on Windows; the pipe carries bytes only
+        return c.sock.recv(RECV_CHUNK)
     data, ancdata, flags, _ = c.sock.recvmsg(RECV_CHUNK, socket.CMSG_SPACE(4 * MAX_PENDING_FDS))
     for level, kind, payload in ancdata:
         if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
@@ -116,17 +118,27 @@ class ControlServer:
         self._pool = None  # type: Optional[ThreadPoolExecutor]
         self._thread = None  # type: Optional[threading.Thread]
         self._running = False
+        self._pipe = None  # type: Optional[Any]  # Windows: the named-pipe listener (_winpipe)
+        self._incoming = []  # type: List[socket.socket]  # bridged pipe connections to register
 
     # ------------------------------------------------------------ lifecycle
 
     @property
     def address(self) -> str:
-        """The Unix socket path; announced as ``control`` (PROTOCOL §3.1)."""
+        """The Unix socket path or the Windows pipe name; announced as ``control`` (PROTOCOL §3.1)."""
         return self._path or ""
 
     def start(self) -> None:
-        if not hasattr(socket, "AF_UNIX") or os.name == "nt":
-            raise OSError("the control channel needs a named pipe on Windows (not implemented yet)")
+        if os.name == "nt":
+            from . import _home, _winpipe
+            if self._path is None:
+                self._path = _winpipe.pipe_name(_home.user_tag(), self.kernel_id)
+            self._pipe = _winpipe.PipeListener(self._path, self._pipe_connected)
+            self._start_loop(None)
+            self._pipe.start()
+            return
+        if not hasattr(socket, "AF_UNIX"):
+            raise OSError("this platform has neither Unix sockets nor named pipes")
         if self._path is None:
             from . import _home
             self._path = _home.control_path(self.kernel_id)
@@ -143,12 +155,16 @@ class ControlServer:
         os.chmod(self._path, 0o600)
         listen.listen(64)
         listen.setblocking(False)
+        self._start_loop(listen)
+
+    def _start_loop(self, listen: Optional[socket.socket]) -> None:
         self._listen = listen
         self._wake_r, self._wake_w = socket.socketpair()
         self._wake_r.setblocking(False)
         self._wake_w.setblocking(False)
         self._sel = selectors.DefaultSelector()
-        self._sel.register(listen, selectors.EVENT_READ, None)
+        if listen is not None:
+            self._sel.register(listen, selectors.EVENT_READ, None)
         self._sel.register(self._wake_r, selectors.EVENT_READ, None)
         self._pool = ThreadPoolExecutor(max_workers=HANDLER_WORKERS,
                                         thread_name_prefix="dkp-handler")
@@ -163,10 +179,15 @@ class ControlServer:
         self._running = False
         self._events.remove_listener(self._on_event)
         self.streams.stop()
+        if self._pipe is not None:
+            self._pipe.stop()
         self._wake()
         if self._thread is not None:
             self._thread.join(5)
         with self._lock:
+            for sock in self._incoming:
+                sock.close()
+            self._incoming = []
             for c in self._conns:
                 self._close(c)
             self._conns = []
@@ -179,10 +200,17 @@ class ControlServer:
             self._sel.close()
         if self._pool is not None:
             self._pool.shutdown(wait=False)
-        try:
-            os.unlink(self._path)
-        except (OSError, TypeError):
-            pass
+        if self._pipe is None:
+            try:
+                os.unlink(self._path)
+            except (OSError, TypeError):
+                pass
+
+    def _pipe_connected(self, sock: socket.socket) -> None:
+        """Windows: the pipe thread hands over the socket end of an accepted, checked connection."""
+        with self._lock:
+            self._incoming.append(sock)
+        self._wake()
 
     def _streams_close(self, params: Dict[str, Any]) -> Dict[str, Any]:
         share_id = params.get("share_id")
@@ -276,7 +304,14 @@ class ControlServer:
                         self._flush(c)
                     if mask & selectors.EVENT_READ:
                         self._readable(c)
+            self._register_incoming()
             self._housekeeping()
+
+    def _register_incoming(self) -> None:
+        with self._lock:
+            socks, self._incoming = self._incoming, []
+        for sock in socks:
+            self._add_conn(sock)
 
     def _accept(self) -> None:
         while True:
@@ -289,15 +324,18 @@ class ControlServer:
             if not _peer.same_account(sock):
                 sock.close()  # FR-A1: another account gets no frame at all
                 continue
-            sock.setblocking(False)
-            c = _Conn(sock, time.monotonic() + _p.HANDSHAKE_TIMEOUT)
-            with self._lock:
-                self._conns.append(c)
-                self._sel.register(sock, selectors.EVENT_READ, c)
-                self._send_locked(c, encode({
-                    "op": "hello", "kernel_id": self.kernel_id,
-                    "kernel_version": _p.KERNEL_VERSION,
-                }))
+            self._add_conn(sock)
+
+    def _add_conn(self, sock: socket.socket) -> None:
+        sock.setblocking(False)
+        c = _Conn(sock, time.monotonic() + _p.HANDSHAKE_TIMEOUT)
+        with self._lock:
+            self._conns.append(c)
+            self._sel.register(sock, selectors.EVENT_READ, c)
+            self._send_locked(c, encode({
+                "op": "hello", "kernel_id": self.kernel_id,
+                "kernel_version": _p.KERNEL_VERSION,
+            }))
 
     def _flush(self, c: _Conn) -> None:
         with self._lock:
@@ -446,9 +484,9 @@ class ControlServer:
     def _begin_adopt(self, c: _Conn, rid: Any, params: Dict[str, Any]) -> None:
         """PROTOCOL §3.7.1: the frame is read; the descriptor follows in one byte ``F``."""
         transport = params.get("transport")
-        if transport not in ("fd", "pump"):
+        if os.name == "nt" or transport not in ("fd", "pump"):  # Windows `share` comes later (PR-5)
             self._send(c, _response(rid, error=DKPError(
-                "bad_request", "transport %r is not available on a Unix socket" % (transport,))))
+                "bad_request", "transport %r is not available on this control channel" % (transport,))))
             return
         c.await_fd = (rid, params)
 

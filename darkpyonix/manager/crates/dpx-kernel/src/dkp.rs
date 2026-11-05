@@ -113,12 +113,137 @@ fn require_same_account(control: &str, peer_uid: u32, my_uid: u32) -> Result<()>
     }
 }
 
-/// Windows would use a named pipe with a server SID check; not implemented yet (#55 follow-up).
-#[cfg(not(unix))]
-async fn open_stream(_control: &str) -> Result<tokio::io::DuplexStream> {
-    Err(unreachable(
-        "the Windows named-pipe control channel is not implemented yet",
-    ))
+/// Open the kernel's named pipe and ask the OS which account serves it (PROTOCOL §3.2, FR-A1, #80).
+/// A pipe served by another account is refused before a single byte is sent. The pipe is opened
+/// with `SECURITY_IDENTIFICATION`, so the server can learn who we are but cannot act as us.
+#[cfg(windows)]
+async fn open_stream(
+    control: &str,
+) -> Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    use std::os::windows::io::AsRawHandle;
+    use tokio::net::windows::named_pipe::ClientOptions;
+    const ERROR_PIPE_BUSY: i32 = 231;
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+    let open = async {
+        loop {
+            match ClientOptions::new()
+                .security_qos_flags(SECURITY_IDENTIFICATION)
+                .open(control)
+            {
+                Ok(client) => return Ok(client),
+                // All instances are busy for a moment: the kernel is about to make the next one.
+                Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
+    let client = tokio::time::timeout(HANDSHAKE_TIMEOUT, open)
+        .await
+        .map_err(|_| unreachable("connect timed out"))?
+        .map_err(|e| unreachable(format!("cannot connect to kernel: {e}")))?;
+    let theirs = win::server_sid(client.as_raw_handle())
+        .map_err(|e| unreachable(format!("cannot read the kernel's account: {e}")))?;
+    let ours = win::own_sid()
+        .map_err(|e| unreachable(format!("cannot read our own account: {e}")))?;
+    require_same_sid(control, &theirs, &ours)?;
+    Ok(client)
+}
+
+/// The kernel's account must be ours (compared as binary SIDs); otherwise nothing is sent to it
+/// (FR-A1).
+#[cfg(any(windows, test))]
+fn require_same_sid(control: &str, theirs: &[u8], ours: &[u8]) -> Result<()> {
+    if theirs == ours {
+        Ok(())
+    } else {
+        Err(unreachable(format!(
+            "{control} is served by another OS account (sid {} bytes differ from ours)",
+            theirs.len()
+        )))
+    }
+}
+
+/// Win32 calls for the account check. Compiled only on Windows; not yet built or run (#80).
+#[cfg(windows)]
+mod win {
+    use std::io;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{
+        GetLengthSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    /// Closes the handle on drop.
+    struct Owned(HANDLE);
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            // SAFETY: the handle was returned by the OS to us and is closed once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    /// The SID in the `TOKEN_USER` of `token`, copied out as bytes.
+    fn token_user_sid(token: HANDLE) -> io::Result<Vec<u8>> {
+        let mut len = 0u32;
+        // SAFETY: a null buffer of length 0 asks only for the needed size.
+        unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len) };
+        if len == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // u64 elements keep the buffer aligned for TOKEN_USER.
+        let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+        // SAFETY: `buf` is at least `len` bytes.
+        let ok = unsafe {
+            GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len)
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: on success the buffer starts with a TOKEN_USER whose SID points into the buffer.
+        unsafe {
+            let user = &*(buf.as_ptr() as *const TOKEN_USER);
+            let sid = user.User.Sid;
+            let n = GetLengthSid(sid) as usize;
+            Ok(std::slice::from_raw_parts(sid as *const u8, n).to_vec())
+        }
+    }
+
+    fn process_sid(process: HANDLE) -> io::Result<Vec<u8>> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: `token` is a valid out pointer.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let token = Owned(token);
+        token_user_sid(token.0)
+    }
+
+    /// The account this process runs as.
+    pub fn own_sid() -> io::Result<Vec<u8>> {
+        // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no closing.
+        process_sid(unsafe { GetCurrentProcess() })
+    }
+
+    /// The account of the process that serves the pipe behind `pipe`.
+    pub fn server_sid(pipe: std::os::windows::io::RawHandle) -> io::Result<Vec<u8>> {
+        let mut pid = 0u32;
+        // SAFETY: `pipe` is a live pipe handle and `pid` a valid out pointer.
+        if unsafe { GetNamedPipeServerProcessId(pipe as HANDLE, &mut pid) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: plain call; the result is checked for null.
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let process = Owned(process);
+        process_sid(process.0)
+    }
 }
 
 /// UTC now as `YYYY-MM-DDTHH:MM:SS.mmmZ`.
@@ -796,5 +921,26 @@ mod tests {
         assert!(stream.is_ok(), "{:?}", stream.err());
         let _ = accept.await;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fr_a1_windows_pipe_server_sid_must_equal_ours() {
+        let mine = [1u8, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0, 7];
+        let other = [1u8, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0, 8];
+        let err = require_same_sid(r"\\.\pipe\darkpyonix-x-k", &other, &mine).unwrap_err();
+        assert_eq!(err.code, "kernel_unreachable");
+        assert!(require_same_sid(r"\\.\pipe\darkpyonix-x-k", &mine, &mine).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn test_fr_a1_windows_pipe_same_account_passes_the_server_check() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let name = format!(r"\\.\pipe\dpx-peer-{}", std::process::id());
+        let server = ServerOptions::new().first_pipe_instance(true).create(&name).unwrap();
+        let accept = tokio::spawn(async move { server.connect().await });
+        let stream = open_stream(&name).await;
+        assert!(stream.is_ok(), "{:?}", stream.err());
+        let _ = accept.await;
     }
 }
