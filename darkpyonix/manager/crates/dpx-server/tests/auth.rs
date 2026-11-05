@@ -367,6 +367,74 @@ fn test_fr_a6_revoked_db_share_records_are_forgotten_after_ninety_days() {
     assert!(matches!(store.db_row("new-token"), DbShare::Revoked { .. }));
 }
 
+#[tokio::test]
+async fn test_fr_a6_a_revoked_db_share_of_another_kernel_is_unauthorized() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("a.py");
+    let (other, _) = s.kernel("b.py");
+    let a = s.admin();
+    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"]})).await;
+    let tok = c.body["token"].as_str().unwrap().to_string();
+    let sid = c.body["share_id"].as_str().unwrap().to_string();
+    assert_eq!(a.delete(&format!("/api/kernels/{kid}/shares/{sid}")).await.status, 204);
+    let v = s.with_token(&tok);
+    // On its own kernel, and on a route that names no kernel, it is known to be revoked.
+    v.get(&format!("/api/kernels/{kid}")).await.error(401, "token_revoked");
+    v.get("/api/manager").await.error(401, "token_revoked");
+    // On another kernel's route it looks like any token that kernel does not know.
+    v.get(&format!("/api/kernels/{other}")).await.error(401, "unauthorized");
+    v.get(&format!("/api/kernels/{other}/events")).await.error(401, "unauthorized");
+}
+
+#[test]
+fn test_fr_a6_db_share_store_moves_revoked_rows_of_a_development_database() {
+    use dpx_server::auth::{sha256_hex, DbShare};
+    let dir = scratch("shares");
+    let path = dir.join("manager.db");
+    {
+        // Development builds kept a revoked share in `shares` and marked it with `revoked_at`.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE shares (share_id TEXT PRIMARY KEY, kernel_id TEXT NOT NULL, permission TEXT NOT NULL,
+                 label TEXT, created_at TEXT NOT NULL, expires_at TEXT, expires_unix INTEGER,
+                 token_sha256 TEXT NOT NULL UNIQUE, revoked_at TEXT);",
+        )
+        .unwrap();
+        for (id, token, revoked) in [("s_live", "live-token", None), ("s_gone", "gone-token", Some("2026-11-04T00:00:00Z"))] {
+            c.execute(
+                "INSERT INTO shares VALUES (?1, 'k_00000000000000000004', 'read', NULL, '2026-11-01T00:00:00Z', NULL, NULL, ?2, ?3)",
+                rusqlite::params![id, sha256_hex(token), revoked],
+            )
+            .unwrap();
+        }
+    }
+    let store = dpx_server::auth::ShareStore::open(&path).unwrap();
+    assert!(matches!(store.db_row("live-token"), DbShare::Live(_)));
+    assert!(matches!(store.db_row("gone-token"), DbShare::Revoked { .. }), "a revoked share must not come back to life");
+    let listed = store.list("k_00000000000000000004").unwrap();
+    assert_eq!(listed.iter().map(|x| x.share_id.as_str()).collect::<Vec<_>>(), vec!["s_live"]);
+    // Opening again changes nothing.
+    let again = dpx_server::auth::ShareStore::open(&path).unwrap();
+    assert!(matches!(again.db_row("gone-token"), DbShare::Revoked { .. }));
+}
+
+#[test]
+fn test_fr_a6_two_stores_can_revoke_at_the_same_time() {
+    use dpx_server::auth::Caps;
+    let dir = scratch("shares");
+    let kid = "k_00000000000000000005";
+    let a = std::sync::Arc::new(store_in(&dir));
+    let b = std::sync::Arc::new(store_in(&dir));
+    let caps = Caps::from_names(&["read"]).unwrap();
+    let ids: Vec<String> = (0..40).map(|_| a.create(kid, caps, None, None).unwrap().0.share_id).collect();
+    let (left, right) = ids.split_at(20);
+    let (left, right) = (left.to_vec(), right.to_vec());
+    let t1 = { let a = a.clone(); std::thread::spawn(move || left.iter().map(|id| a.revoke(kid, id).unwrap()).all(|x| x)) };
+    let t2 = { let b = b.clone(); std::thread::spawn(move || right.iter().map(|id| b.revoke(kid, id).unwrap()).all(|x| x)) };
+    assert!(t1.join().unwrap() && t2.join().unwrap(), "no revoke may fail or be lost");
+    assert!(a.list(kid).unwrap().is_empty());
+}
+
 // ------------------------------------------------------------------ attempt limit (FR-A4, #87)
 
 /// Two free attempts, then a 300 ms lock that doubles with every further failure.
