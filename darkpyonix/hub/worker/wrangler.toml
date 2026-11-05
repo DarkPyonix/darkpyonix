@@ -28,6 +28,14 @@ database_name = "darkpyonix-hub"
 database_id = "00000000-0000-0000-0000-000000000000" # replace with `wrangler d1 create darkpyonix-hub`
 migrations_dir = "migrations"
 
+# FLATHUB_VERIFICATION_TOKEN: Flathub website verification token (FR-H7).
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"
+
 # Unauthenticated writes (PUT /pkarr/{key}, POST /device-links), per key per minute.
 [[ratelimits]]
 name = "WRITE_LIMITER"

@@ -2,7 +2,8 @@
 
 import { storedAddresses } from "./directory";
 import type { Deps, Env } from "./env";
-import { ApiError, json, noContent, principal, readJson, requireDevice } from "./http";
+import { ApiError, html, json, noContent, principal, readJson, requireDevice } from "./http";
+import { sharePlaceholderPage } from "./pages";
 import { SHARE_ID_RE, hashToken, newToken, nowSecs } from "./util";
 
 /** How long a guest relay pass is valid. */
@@ -82,4 +83,33 @@ export async function unpublishShare(request: Request, env: Env, deps: Deps, sha
   if (!allowed) throw ApiError.notFound();
   await env.DB.prepare("DELETE FROM shares WHERE share_id = ?").bind(shareId).run();
   return noContent();
+}
+
+async function ashIndex(env: Env, request: Request): Promise<string | null> {
+  try {
+    const response = await env.ASSETS.fetch(new URL("/ash/", request.url).toString());
+    return response.ok ? await response.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `GET /s/{share_id}`: the ash viewer page (the token after `#` never reaches us). */
+export async function sharePage(request: Request, env: Env, _deps: Deps, shareId: string): Promise<Response> {
+  if (!(await shareHost(env, shareId))) return html(404, "<!doctype html><p>Unknown share.</p>\n");
+  const index = await ashIndex(env, request);
+  // Until darkpyonix-ash is deployed, public/ash/ holds a marked placeholder.
+  const viewer = index && !index.includes('content="placeholder"') ? index : null;
+  if (viewer) {
+    // The viewer sets its own policy (it needs WebAssembly and the relay's WebSocket).
+    return new Response(viewer, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+  return html(200, sharePlaceholderPage(shareId));
+}
+
+/** `GET /ash/` when the request reaches the Worker (assets normally answer first). */
+export async function ashPage(request: Request, env: Env): Promise<Response> {
+  const index = await ashIndex(env, request);
+  const body = index ?? "<!doctype html><title>ash</title><p>The official ash viewer will be served here.</p>\n";
+  return new Response(body, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
 }

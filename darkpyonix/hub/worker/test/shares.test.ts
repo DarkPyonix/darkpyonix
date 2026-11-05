@@ -59,7 +59,22 @@ describe("shares", () => {
     expect((await call(deps, "GET", "/shares/s_00000000000000bb")).status).toBe(404);
   });
 
-
+  it("test_fr_h4_viewer_pages_are_served", async () => {
+    const deps = makeDeps();
+    const cookie = await signIn(deps, { id: 34, login: "owner" });
+    const token = await linkDevice(deps, { cookie }, await newDevice());
+    await call(deps, "POST", "/shares", { token, json: { share_id: "s_00000000000000cc" } });
+    const page = await call(deps, "GET", "/s/s_00000000000000cc");
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("s_00000000000000cc");
+    expect((await call(deps, "GET", "/s/s_00000000000000dd")).status).toBe(404);
+    const ash = await call(deps, "GET", "/ash/");
+    expect(ash.status).toBe(200);
+    expect(ash.headers.get("content-type")).toContain("text/html");
+    // Read through the ASSETS binding from public/ash/index.html, not the Worker's fallback text.
+    expect(await ash.text()).toContain('<meta name="darkpyonix-ash" content="placeholder">');
+  });
 });
 
 describe("relay admission", () => {

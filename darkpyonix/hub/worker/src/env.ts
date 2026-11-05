@@ -5,6 +5,9 @@ import type { DnsProvider } from "./dns";
 export interface Env {
   /** Accounts, sessions, device links, devices, address records, shares, names (migrations/). */
   DB: D1Database;
+  /** Static assets from ./public: the ash viewer under /ash/. */
+  ASSETS: Fetcher;
+  FLATHUB_VERIFICATION_TOKEN?: string;
   /** API and front origins, without trailing slashes. */
   API_URL: string;
   FRONT_URL: string;
