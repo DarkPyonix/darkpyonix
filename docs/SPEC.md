@@ -183,7 +183,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 - 수용 기준: 실행 중에 커널을 `SIGKILL`로 죽여도 기록 파일은 유효한 JSON이고, 죽기 1초 전까지의 출력이 들어 있습니다. 상태는 `running`으로 남고, 다음 커널이 그 파일을 열면 `crashed`로 바꿉니다.
 - 테스트: `test_fr_r2_log_survives_kernel_kill`, `test_fr_r2_update_is_throttled`, `test_fr_r2_recover_leaves_this_processes_current_run_alone`, `test_fr_r2_slow_writes_shrink_the_interval_to_keep_the_one_second_bound`, `test_fr_r2_real_kernel_killed_mid_run_is_recovered_as_crashed`(실제 커널을 다음 다시 쓰기 직전, 즉 가장 불리한 순간에 `SIGKILL`하고, 셀이 찍은 모든 출력 중 죽기 1초 전보다 오래된 것이 기록에 다 있는지 확인한 뒤, 같은 파일로 새 커널을 띄워 기록이 `crashed`가 되는지 봅니다)
 - 구현 메모: 다시 쓰기 주기는 스냅숏 시작부터 다음 스냅숏 시작까지 0.8초(`runs.WRITE_INTERVAL`)입니다. 1초 주기로는 캡처 라우터의 폴링 지연(최대 20 ms)과 쓰기 시간이 더해져 가장 불리한 순간에 1.01–1.04초 전 출력이 빠졌습니다(2026-10-03 측정).
-- 느린 쓰기(#77): 스냅숏은 렌더링과 교체가 끝나야 보이므로, 가장 불리한 순간에 빠지는 가장 오래된 출력은 `WRITE_INTERVAL`에 직전 쓰기 소요 시간을 더한 만큼 오래됩니다. 부하가 큰 macOS 러너에서 쓰기가 0.3초 가까이 걸려 1.094초가 측정되었습니다. 그래서 다음 간격은 `min(0.8, max(0.25, 0.85 - 직전 쓰기 소요))`로 줄입니다(`runs.STALENESS_BUDGET`, `runs.MIN_WRITE_INTERVAL`). 쓰기가 빠르면 0.8초 그대로입니다.
+- 느린 쓰기(#77): 스냅숏은 렌더링과 교체가 끝나야 보이므로, 가장 불리한 순간에 빠지는 가장 오래된 출력은 `WRITE_INTERVAL`에 직전 쓰기 소요 시간을 더한 만큼 오래됩니다. 부하가 큰 macOS 러너에서 쓰기가 0.3초 가까이 걸려 1.094초가 측정되었습니다. 그래서 다음 간격은 `min(0.8, max(0.25, 0.85 - 직전 쓰기 소요))`로 줄입니다(`runs.STALENESS_BUDGET`, `runs.MIN_WRITE_INTERVAL`). 쓰기가 빠르면 0.8초 그대로입니다. 이 경계는 실제 경과 시간이 아니라 스케줄에서 검증합니다.
 - 측정(2026-10-03, Mac mini 8코어, 가장 불리한 순간에 죽임): 기록에 없는 가장 오래된 출력이 죽기 0.79–0.86초 전. CPU를 16개 바쁜 루프로 2배 초과 점유한 상태에서도 0.77–0.86초.
 
 ### FR-R3 매직 변수 `__runs__` — `Done`
@@ -237,7 +237,7 @@ PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모�
   - `user_tag`는 OS 계정에서 만들어 홈이 달라도 같으므로(FR-A1), 홈을 지정한 매니저는 announce의 `home`이 자기 홈(심볼릭 링크를 푼 경로)과 다르거나 없으면 버립니다. 응답 수에도 세지 않습니다(PROTOCOL §2.2).
 - 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-D2 등록 파일 없음 — `Agreed` (사용자 지시 2026-10-03, 2026-10-05 구현, Rust 테스트는 CI 확인 대기)
+### FR-D2 등록 파일 없음 — `Done` (사용자 지시 2026-10-03, 2026-10-05 구현, develop CI 실행 41936239905에서 Rust 테스트와 파이썬 테스트 통과 확인)
 커널 등록 파일(`kernels/<kernel_id>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 없습니다. 리더가 사용자 승인 없이 더했던 보조 발견이라 지웠습니다. 사용자(2026-10-03): "커널 등록 파일 써도 된다고 내가 말한 적이 절대 없고요"(INTENT D4, §5).
 - 코드: 커널은 등록 파일을 쓰지 않고 `DARKPYONIX_DISCOVERY`를 읽지 않습니다. 매니저는 등록 파일을 읽지 않고 `managers/<pid>.json`도 쓰지 않습니다. 죽은 커널은 `bye`가 없어도 다음 질의에 답하지 않으므로 목록에서 빠집니다(파일을 치울 일이 없습니다).
 - 수용 기준: 커널을 띄우고 끈 뒤에도 `DARKPYONIX_HOME/kernels/` 아래에 `.json`이 생기지 않습니다(진단 로그 `.log`만 있음). `DARKPYONIX_DISCOVERY=registry`를 줘도 동작이 같습니다. 다른 홈에 심은 항목은 읽지 않습니다.
@@ -340,7 +340,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
 - 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
-### FR-M3 임시 모드 수명 — `Agreed` (유휴 판정이 바뀜, 구현됨 #47, CI 확인 대기)
+### FR-M3 임시 모드 수명 — `Done` (유휴 판정이 바뀜, 구현됨 #47, develop CI 실행 41936239905에서 Rust 테스트 통과 확인)
 임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, FR-D2). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6). TLS·HTTP/2·터널로 퍼 나르는 스트림도 세지 않습니다(커널이 소유하고 `Handoff` 표시를 단 응답). 끝날 때 커널은 건드리지 않습니다.
 - 테스트: `test_fr_m3_idle_counts_http_requests_only_not_handed_off_streams`(Rust `darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `test_fr_m3_ephemeral_manager_exits_when_idle_and_kernels_remain`(Rust `darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), Rust `test_fr_m3_writes_no_registry_file`(`darkpyonix/manager/crates/dpx-server/tests/lifecycle.rs`), `test_fr_m3_url_and_token_are_printed_on_stdout`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`와 `src/manager.rs`)
 
@@ -369,7 +369,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ## 8. CLI (C)
 
-### FR-C1 매니저 찾기 — `Agreed` (사용자 지시, 2026-10-05 구현, Rust 테스트는 CI 확인 대기)
+### FR-C1 매니저 찾기 — `Done` (사용자 지시, 2026-10-05 구현, develop CI 실행 41936239905에서 Rust 테스트 통과 확인)
 매니저의 주소와 토큰을 파일로 나누지 않습니다(INTENT D4). `darkpyonix` CLI는 `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN`이 있으면 그 매니저를 씁니다. 에이전트가 이미 아는 토큰입니다. 없으면 자기 임시 매니저를 자식 프로세스로 띄우고, 그 매니저가 표준 출력 첫 줄에 쓴 `{url, token, pid}`를 파이프로 읽어 씁니다. 토큰을 모르는 에이전트는 이렇게 자기 매니저를 씁니다. 커널은 모든 매니저가 멀티캐스트로 찾으므로 어느 매니저로 붙어도 같은 커널입니다(FR-M5).
 - `darkpyonix manager`를 직접 실행해도 같은 한 줄을 표준 출력에 씁니다. 에이전트는 그 값을 환경 변수로 두고 다음 호출에 쓸 수 있습니다. 두지 않으면 호출마다 새 임시 매니저가 뜨고, 각자 `idle_timeout` 뒤에 끝납니다.
 - 수용 기준: 환경 변수 없이 `darkpyonix run a.py`가 매니저를 띄워 동작하고, `DARKPYONIX_HOME/managers/`가 생기지 않습니다. 환경 변수를 주면 새 매니저를 띄우지 않습니다.
