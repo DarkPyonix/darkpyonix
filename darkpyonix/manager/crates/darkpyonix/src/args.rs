@@ -118,8 +118,14 @@ pub struct KernelArgs {
 #[derive(Debug, Args)]
 pub struct ShareArgs {
     pub file: PathBuf,
-    #[arg(long, value_parser = ["viewer1", "viewer2", "viewer3", "editor"])]
-    pub permission: String,
+    /// Capabilities of the share token, comma separated (e.g. `read,history`).
+    #[arg(
+        long,
+        required = true,
+        value_delimiter = ',',
+        value_parser = ["read", "history", "execute", "edit", "manage"]
+    )]
+    pub capabilities: Vec<String>,
     #[arg(long)]
     pub label: Option<String>,
 }
@@ -240,7 +246,7 @@ mod tests {
             &["restart", "a.py", "--hard"],
             &["shutdown", "a.py", "--force"],
             &["kernel", "a.py", "--python", "python3.8"],
-            &["share", "a.py", "--permission", "viewer2"],
+            &["share", "a.py", "--capabilities", "read,history"],
             &["manager", "--dedicated", "--host", "0.0.0.0", "--port", "8443"],
             &["manager", "--ephemeral", "--idle-timeout", "30"],
         ] {
@@ -250,7 +256,9 @@ mod tests {
 
     #[test]
     fn test_fr_c2_invalid_usage_is_rejected() {
-        assert!(parse(&["share", "a.py", "--permission", "admin"]).is_err());
+        assert!(parse(&["share", "a.py", "--capabilities", "viewer2"]).is_err());
+        assert!(parse(&["share", "a.py", "--permission", "viewer2"]).is_err());
+        assert!(parse(&["share", "a.py"]).is_err());
         assert!(parse(&["manager", "--dedicated", "--ephemeral"]).is_err());
         assert!(parse(&["run"]).is_err());
         assert!(parse(&["run", "a.py", "--param", "x"]).is_err());

@@ -53,23 +53,6 @@ def test_frame_decoder_handles_partial_reads():
     assert [f["seq"] for f in frames] == [3, 4]
 
 
-def test_fr_a1_user_key_is_created_once_with_0600(dp_home):
-    k1 = _home.user_key()
-    k2 = _home.user_key()
-    assert k1 == k2 and len(k1) == 32
-    mode = os.stat(os.path.join(dp_home, "user.key")).st_mode & 0o777
-    assert mode == 0o600
-    assert len(_home.user_tag()) == 16
-
-
-def test_fr_a1_mac_verification():
-    key, nonce = os.urandom(32), p.new_nonce()
-    mac = p.auth_mac(key, nonce, "k_0123456789abcdef0123")
-    assert p.verify_mac(key, nonce, "k_0123456789abcdef0123", mac)
-    assert not p.verify_mac(os.urandom(32), nonce, "k_0123456789abcdef0123", mac)
-    assert not p.verify_mac(key, nonce, "k_ffffffffffffffffffff", mac)
-
-
 def test_run_id_format():
     import re
     assert re.match(r"^\d{8}-\d{6}-[0-9a-f]{4}$", p.new_run_id())

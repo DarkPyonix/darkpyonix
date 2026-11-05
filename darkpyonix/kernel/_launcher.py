@@ -83,13 +83,57 @@ def _reap(pid: int) -> None:
         _children.pop(pid, None)
 
 
+def pid_alive(pid: int) -> bool:
+    """Whether a process with ``pid`` exists on this machine (zombies count as dead)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        return _pid_alive_windows(pid)
+    # Reap our own exited children (kernels this process launched) so they read as dead.
+    _reap(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except OSError:
+        return False
+    return True
+
+
+def _pid_alive_windows(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # ERROR_ACCESS_DENIED means the process exists but belongs to someone else.
+        return ctypes.get_last_error() == 5
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def wait_for_announce(kernel_id: str, pid: Optional[int] = None,
                       timeout: float = 10.0) -> Optional[Dict[str, Any]]:
     """Poll discovery until ``kernel_id`` reports ``idle`` or ``busy``; None on timeout.
 
     With ``pid``, only an entry from that process counts, and the wait ends early if it dies.
     """
-    from darkpyonix import _discovery as discovery, _registry as registry
+    from darkpyonix import _discovery as discovery
 
     deadline = time.monotonic() + timeout
     while True:
@@ -99,7 +143,7 @@ def wait_for_announce(kernel_id: str, pid: Optional[int] = None,
             if pid is not None and entry.get("pid") != pid:
                 continue
             return entry
-        if pid is not None and not registry.pid_alive(pid):
+        if pid is not None and not pid_alive(pid):
             return None
         if time.monotonic() >= deadline:
             return None

@@ -37,7 +37,7 @@ docs/guide/
   - `<span class="pill works">implemented</span>` / `구현`
   - `<span class="pill planned">planned #N</span>` / `계획 #N`
   - `<span class="pill partial">changing #N</span>` / `변경 중 #N`: 지금 동작하지만 재설계로 바뀌는 부분
-- 재설계 중인 부분(#47 스트림 넘김, #48 비밀번호 인증, #49 권한·WebSocket 동기화, #50 등록 파일 제거)이
+- 재설계 중인 부분(#47 스트림 넘김, #48 비밀번호 인증, #49 권한·WebSocket 동기화)이
   `develop`에 들어오면 해당 페이지의 "변경 중" 표시와 설명을 고칩니다.
 - em-dash(U+2014)를 쓰지 않습니다. 파이썬 설치·실행 예시는 uv, ppp, tcl만 씁니다.
 - 코드 예시는 SPEC, FORMAT, OpenAPI, CLI 인자 정의(`darkpyonix/manager/crates/darkpyonix/src/args.rs`)와

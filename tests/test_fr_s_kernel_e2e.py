@@ -39,9 +39,9 @@ NB = textwrap.dedent('''\
     ''')
 
 
-def who(cid, permission="editor"):
+def who(cid, capabilities=("read", "history", "execute", "edit", "manage")):
     return {"client_id": cid, "user": "user-" + cid, "nickname": "dev-" + cid,
-            "permission": permission}
+            "capabilities": list(capabilities)}
 
 
 def by(cid):
@@ -63,10 +63,10 @@ def kernel(scratch, dp_home):
         pid = launcher.launch(path, python=sys.executable)
         state["pid"] = pid
         info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=15.0)
-        assert info is not None and info["port"] > 0, "kernel did not announce"
+        assert info is not None and info["control"], "kernel did not announce"
 
         def connect():
-            c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+            c = KernelClient(info["control"], info["kernel_id"], name="test", kind="cli")
             c.connect()
             state["clients"].append(c)
             return c
@@ -138,10 +138,6 @@ def test_fr_s1_s2_s3_s5_s8_two_clients_edit_converge_save_and_run(kernel):
     c1 = cells[1]
     assert "@id" not in original and c1["cell_id"] not in original  # ids are never written
 
-    # FR-S8: a viewer cannot edit or lock.
-    viewer = who("V", "viewer3")
-    expect_error("forbidden", b.request, "doc.lock", {"client": viewer, "cell_id": c1["cell_id"]})
-
     # FR-S3: B locks; A can neither lock nor edit that cell.
     b.request("doc.lock", {"client": B, "cell_id": c1["cell_id"]}, timeout=5)
     err = expect_error("locked", a.request, "doc.lock", {"client": A, "cell_id": c1["cell_id"]})
@@ -178,6 +174,11 @@ def test_fr_s1_s2_s3_s5_s8_two_clients_edit_converge_save_and_run(kernel):
     assert ra.state() == rb.state() == state_of(a.request("doc.snapshot", {}, timeout=5))
     assert ra.state()["cells"][1][1:3] == (new_source, 2)
 
+    # FR-S8: the kernel does not check capabilities (the manager did); a read-only label locks.
+    viewer = who("V", ["read"])
+    b.request("doc.lock", {"client": viewer, "cell_id": c1["cell_id"]}, timeout=5)
+    b.request("doc.unlock", {"client": viewer, "cell_id": c1["cell_id"]}, timeout=5)
+
     # FR-S5: the edit is on disk; every other byte is unchanged.
     assert read_file(path) == original.replace(c1["source"], new_source, 1)
 
@@ -213,7 +214,7 @@ def test_fr_s4_presence_and_leave_release_locks_through_kernel(kernel):
     a.subscribe(since=snap["seq"])
     c1 = snap["cells"][1]["cell_id"]
 
-    b.request("presence.update", {"client": who("B", "viewer1"), "focused_cell_id": c1,
+    b.request("presence.update", {"client": who("B", ["read"]), "focused_cell_id": c1,
                                   "cursor": {"cell_id": c1, "line": 0, "column": 3}}, timeout=5)
     ev = drain(a, lambda e: e["type"] == "presence.update")[-1]["data"]
     assert ev["client_id"] == "B" and ev["focused_cell_id"] == c1

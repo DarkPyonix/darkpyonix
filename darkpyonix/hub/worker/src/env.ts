@@ -5,11 +5,14 @@ import type { DnsProvider } from "./dns";
 export interface Env {
   /** Accounts, sessions, device links, devices, address records, shares, names (migrations/). */
   DB: D1Database;
+  NOTEBOOKS: R2Bucket;
   /** Static assets from ./public: the ash viewer under /ash/. */
   ASSETS: Fetcher;
-
-  /** `https://darkpyonix.dev` (no trailing slash). */
-  PUBLIC_URL: string;
+  FLATHUB_VERIFICATION_TOKEN?: string;
+  /** API and front origins, without trailing slashes. */
+  API_URL: string;
+  FRONT_URL: string;
+  CORS_DEV_ORIGINS?: string;
   /** DNS zone for `<name>.<zone>`, e.g. `darkpyonix.dev`. */
   ZONE: string;
   /** The relay devices and guests dial, e.g. `https://relay.darkpyonix.dev/` (SPEC FR-H3). */
@@ -31,12 +34,6 @@ export interface Env {
   CF_API_TOKEN?: string;
   /** The Cloudflare zone id of ZONE. */
   CF_ZONE_ID?: string;
-
-  /**
-   * Flathub website verification token for app ids under this domain (dev.darkpyonix.Ember),
-   * served as `/.well-known/org.flathub.VerifiedApps.txt` (SPEC FR-H7). Unset or empty = 404.
-   */
-  FLATHUB_VERIFICATION_TOKEN?: string;
 
   /** Optional Workers rate limiter for unauthenticated writes. */
   WRITE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };

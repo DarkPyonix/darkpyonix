@@ -14,7 +14,7 @@ import pytest
 
 from conftest import SRC_ROOT
 from darkpyonix import _home
-from darkpyonix import _discovery as discovery, _launcher as launcher, _lock as lock, _registry as registry
+from darkpyonix import _discovery as discovery, _launcher as launcher, _lock as lock
 from darkpyonix._protocol import EXIT_ALREADY_RUNNING, canonical_path, kernel_id_for
 from darkpyonix._runs import RunStore
 
@@ -60,6 +60,77 @@ def test_fr_k1_kernel_runs_from_uninstalled_interpreter(python, dp_home, scratch
         version = subprocess.run([python, "-c", "import platform; print(platform.python_version())"],
                                  env=env, capture_output=True, text=True, timeout=30).stdout.strip()
         assert info["python"]["version"] == version
+    finally:
+        reap(proc)
+
+
+def test_fr_k1_spawn_child_from_source_checkout_kernel_can_import_darkpyonix(
+        python, dp_home, scratch, monkeypatch):
+    """A multiprocessing spawn child of user code can ``import darkpyonix`` (issue #65)."""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    path = write_notebook(scratch, "spawn_nb.py", """
+        import multiprocessing
+
+        def child(q):
+            import darkpyonix
+            q.put("child imported " + darkpyonix.__name__)
+
+        # %% [code]
+        if __name__ == "__main__":
+            ctx = multiprocessing.get_context("spawn")
+            q = ctx.Queue()
+            p = ctx.Process(target=child, args=(q,))
+            p.start()
+            print(q.get(timeout=30))
+            p.join(30)
+            print("exit", p.exitcode)
+        """)
+    pid = launcher.launch(path, python=python)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=20)
+        assert info is not None, "kernel did not announce"
+        c = connect(info)
+        try:
+            status, _ = run_and_wait(c, timeout=60)
+            nb = c.request("runs.get", {"run_id": "latest"})
+        finally:
+            c.close()
+        assert status == "ok", [o.get("text") for c in nb["cells"] for o in c["outputs"]]
+        assert stream_text(nb).splitlines() == ["child imported darkpyonix", "exit 0"]
+    finally:
+        kill(pid, signal.SIGTERM)
+        if not wait_pid_gone(pid):
+            kill(pid, signal.SIGKILL)
+
+
+def test_fr_k1_installed_layout_kernel_leaves_pythonpath_unchanged(python, dp_home, scratch):
+    """A kernel whose package folder is named ``darkpyonix`` adds nothing to children's paths."""
+    root = os.path.join(scratch, "site")
+    os.makedirs(root)
+    import shutil
+    shutil.copytree(launcher.PACKAGE_DIR, os.path.join(root, "darkpyonix"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    path = write_notebook(scratch, "layout_nb.py", """
+        # %% [code]
+        import os
+        print(os.environ.get("PYTHONPATH"))
+        """)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = root
+    proc = subprocess.Popen([python, "-m", "darkpyonix", "--file", path], cwd=scratch, env=env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        info = launcher.wait_for_announce(kernel_id_for(path), pid=proc.pid, timeout=20)
+        assert info is not None, "kernel did not announce"
+        c = connect(info)
+        try:
+            status, _ = run_and_wait(c)
+            nb = c.request("runs.get", {"run_id": "latest"})
+        finally:
+            c.close()
+        assert status == "ok"
+        assert stream_text(nb).strip() == root
+        assert not os.path.exists(os.path.join(dp_home, "src"))
     finally:
         reap(proc)
 
@@ -162,7 +233,7 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
     try:
         info = launcher.wait_for_announce(kid, pid=pid, timeout=15)
         assert info is not None and info["pid"] == pid
-        assert registry.pid_alive(pid)
+        assert launcher.pid_alive(pid)
         # Detached: its own session, no controlling terminal shared with us.
         assert os.getsid(pid) == pid and os.getsid(pid) != os.getsid(0)
         log = os.path.join(_home.kernels_dir(), kid + ".log")
@@ -173,7 +244,7 @@ def test_fr_k4_kernel_survives_launcher_exit(python, dp_home, scratch):
         if not wait_pid_gone(pid):
             kill(pid, signal.SIGKILL)
             wait_pid_gone(pid)
-    # A clean shutdown removes the registry entry (PROTOCOL §2.5).
+    # No registry file is written or left behind (FR-D2).
     assert not os.path.exists(os.path.join(_home.kernels_dir(), kid + ".json"))
 
 
@@ -227,7 +298,6 @@ def test_fr_k7_hard_restart_keeps_kernel_id(python, dp_home, scratch):
 
 
 def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
-    monkeypatch.delenv("DARKPYONIX_DISCOVERY", raising=False)   # bye travels by multicast
     path = write_notebook(scratch, "shutdown.py", """
         import time
         # %% [code]
@@ -243,7 +313,6 @@ def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
     try:
         info = launcher.wait_for_announce(kid, pid=proc.pid, timeout=15)
         assert info is not None
-        assert os.path.exists(registry.entry_path(kid))
         c = connect(info)
         try:
             acc = c.request("run", {"mode": "all"})
@@ -266,7 +335,7 @@ def test_fr_k8_shutdown_is_graceful(python, dp_home, scratch, monkeypatch):
         reap(proc)
     assert any(m.get("op") == "bye" and m.get("kernel_id") == kid and m.get("pid") == proc.pid
                for m in seen)
-    assert not os.path.exists(registry.entry_path(kid))
+    assert not os.path.exists(os.path.join(_home.kernels_dir(), kid + ".json"))
     # The OS lock is gone: a new holder gets it at once (the lock file itself may remain).
     probe = lock.FileLock(lock.lock_path(kid))
     assert probe.acquire()

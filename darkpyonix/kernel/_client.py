@@ -7,7 +7,6 @@ Standard library only; Python 3.8+.
 """
 from __future__ import annotations
 
-import base64
 import itertools
 import os
 import queue
@@ -15,8 +14,8 @@ import socket
 import threading
 from typing import Any, Dict, Iterator, Optional
 
-from . import _home
-from ._protocol import DKPError, auth_mac, encode, recv_frame
+from . import _peer, _winpipe
+from ._protocol import DKPError, encode, recv_frame
 
 _CLOSED = object()
 
@@ -30,16 +29,13 @@ class _Pending:
 
 
 class KernelClient:
-    def __init__(self, port: int, kernel_id: str, key: Optional[bytes] = None,
-                 host: str = "127.0.0.1", name: str = "client", kind: str = "cli") -> None:
-        self.port = port
+    def __init__(self, control: str, kernel_id: str, name: str = "client", kind: str = "cli") -> None:
+        self.control = control  # the announce's ``control``: a Unix socket path (PROTOCOL §3.1)
         self.kernel_id = kernel_id
-        self.host = host
         self.name = name
         self.kind = kind
-        self._key = key
         self.welcome = None  # type: Optional[Dict[str, Any]]
-        self._sock = None  # type: Optional[socket.socket]
+        self._sock = None  # type: Any  # a socket, or a _winpipe.PipeSocket on Windows
         self._send_lock = threading.Lock()
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
@@ -53,27 +49,48 @@ class KernelClient:
     # ------------------------------------------------------------ connection
 
     def connect(self, timeout: float = 5.0) -> "KernelClient":
-        key = self._key if self._key is not None else _home.user_key()
-        sock = socket.create_connection((self.host, self.port), timeout=timeout)
+        if _winpipe.is_pipe_name(self.control):
+            if os.name != "nt":
+                raise DKPError("kernel_unreachable", "%s is a Windows named pipe" % self.control)
+            sock = None  # type: Any
+        elif not hasattr(socket, "AF_UNIX"):
+            raise DKPError("kernel_unreachable", "no Unix sockets on this platform")
+        else:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            if sock is None:
+                pipe = _winpipe.connect_client(self.control, timeout)
+                sock = _winpipe.PipeSocket(pipe)
+                # FR-A1: the process serving the pipe must run as this account, or nothing is sent.
+                if not _winpipe.same_server_account(pipe):
+                    raise DKPError("kernel_unreachable", "%s is served by another OS account" % self.control)
+            else:
+                sock.settimeout(timeout)
+                sock.connect(self.control)
+                # FR-A1: the kernel must run as this account too, or nothing is sent to it.
+                if not _peer.same_account(sock):
+                    raise DKPError("kernel_unreachable", "%s is served by another OS account" % self.control)
+            sock.settimeout(timeout)
             hello = recv_frame(sock)
             if hello.get("op") != "hello":
                 raise DKPError("bad_request", "expected hello, got %r" % (hello.get("op"),))
             if hello.get("kernel_id") != self.kernel_id:
-                raise DKPError("auth_failed", "port belongs to kernel %r, not %r"
-                               % (hello.get("kernel_id"), self.kernel_id))
-            nonce = base64.b64decode(hello["nonce"])
+                raise DKPError("kernel_unreachable", "%s belongs to kernel %r, not %r"
+                               % (self.control, hello.get("kernel_id"), self.kernel_id))
             sock.sendall(encode({
                 "op": "auth",
                 "client": {"name": self.name, "kind": self.kind, "pid": os.getpid()},
-                "mac": auth_mac(key, nonce, self.kernel_id),
             }))
             reply = recv_frame(sock)
             if reply.get("op") != "welcome":
-                raise DKPError(reply.get("code") or "auth_failed", reply.get("message") or "")
+                raise DKPError(reply.get("code") or "bad_request", reply.get("message") or "")
+        except OSError as e:
+            if sock is not None:
+                sock.close()
+            raise DKPError("kernel_unreachable", "cannot connect to %s: %s" % (self.control, e))
         except BaseException:
-            sock.close()
+            if sock is not None:
+                sock.close()
             raise
         sock.settimeout(None)
         self.welcome = reply

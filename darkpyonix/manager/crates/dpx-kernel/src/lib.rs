@@ -1,6 +1,6 @@
 //! `RealBackend`: the [`KernelBackend`] of the DarkPyonix manager against real kernels.
 //!
-//! * discovery: loopback UDP multicast merged with the registry (FR-D1, FR-D2);
+//! * discovery: loopback UDP multicast only, no registry files (FR-D1, FR-D2);
 //! * one shared DKP/1 connection per kernel for requests and event fan-out (FR-M5, PR-2, PR-3);
 //! * idempotent start of the embedded stdlib-Python kernel (FR-M2, INTENT D3, D10);
 //! * the FR-R4 document via `darkpyonix._document` in Python.
@@ -13,7 +13,6 @@ pub mod home;
 pub mod ident;
 pub mod launch;
 pub mod process;
-pub mod registry;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,13 +20,13 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use dpx_core::{DpxError, Ensured, EventStream, KernelBackend, KernelInfo, Result, StartKernel};
+use dpx_core::{AdoptRequest, DpxError, Ensured, EventStream, KernelBackend, KernelInfo, Result, StartKernel};
 use serde_json::{json, Value};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::discovery::Discovery;
 use crate::dkp::{Connection, FanoutConfig};
-use crate::registry::{entry_pid, Entry};
+pub use crate::discovery::{entry_pid, Entry};
 
 pub use crate::ident::{canonical_path, kernel_id_for};
 
@@ -35,16 +34,17 @@ pub use crate::ident::{canonical_path, kernel_id_for};
 pub const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// Extra time a `runs.wait` request gets beyond its own `timeout` before the manager gives up.
 const RUNS_WAIT_MARGIN: Duration = Duration::from_secs(15);
+/// How long a child whose pid differs from the announced pid gets to exit (lost start race)
+/// before it is taken for a launcher stub (FR-M2).
+const LAUNCHER_WINDOW: Duration = Duration::from_secs(2);
 const READY_STATUSES: [&str; 2] = ["idle", "busy"];
 
-/// Backend settings. [`Config::from_env`] reads `DARKPYONIX_HOME`, `DARKPYONIX_DISCOVERY` and
+/// Backend settings. [`Config::from_env`] reads `DARKPYONIX_HOME` and
 /// `DARKPYONIX_PYTHON`; tests build one explicitly so that parallel tests never share state.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The runtime home (PROTOCOL §1).
     pub home: PathBuf,
-    /// `false` = `DARKPYONIX_DISCOVERY=registry` (no multicast).
-    pub multicast: bool,
     /// Default interpreter for kernels and the document builder (`DARKPYONIX_PYTHON`).
     pub python: Option<String>,
     pub fanout: FanoutConfig,
@@ -55,9 +55,6 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             home: home::default_home(),
-            multicast: std::env::var("DARKPYONIX_DISCOVERY")
-                .map(|v| v.trim().to_lowercase() != "registry")
-                .unwrap_or(true),
             python: std::env::var("DARKPYONIX_PYTHON")
                 .ok()
                 .filter(|p| !p.is_empty()),
@@ -79,7 +76,6 @@ type Slot = Arc<AsyncMutex<Option<Arc<Connection>>>>;
 
 pub struct RealBackend {
     cfg: Config,
-    key: Vec<u8>,
     user_tag: String,
     discovery: Arc<Discovery>,
     conns: std::sync::Mutex<HashMap<String, Slot>>,
@@ -95,7 +91,7 @@ fn not_found(kernel_id: &str) -> DpxError {
     DpxError::new("not_found", format!("no running kernel {kernel_id}"))
 }
 
-/// Build the OpenAPI `Kernel` from an announce / registry entry / `status` result.
+/// Build the OpenAPI `Kernel` from an announce / `status` result.
 pub fn kernel_info(entry: &Entry) -> KernelInfo {
     let s = |k: &str| {
         entry
@@ -140,27 +136,19 @@ pub fn kernel_info(entry: &Entry) -> KernelInfo {
             .unwrap_or("")
             .to_string(),
         runs_dir: s("runs_dir"),
-        port: entry
-            .get("port")
-            .and_then(Value::as_u64)
-            .filter(|p| *p <= u16::MAX as u64)
-            .unwrap_or(0) as u16,
+        control: s("control"),
     }
 }
 
 impl RealBackend {
-    /// Open (and create if needed) the runtime home and its `user.key`.
+    /// Open (and create if needed) the runtime home.
     pub fn new(cfg: Config) -> Result<Self> {
         home::create_dir_private(&cfg.home)
             .map_err(|e| internal(format!("runtime home {}: {e}", cfg.home.display())))?;
-        let key = home::user_key(&cfg.home).map_err(|e| internal(format!("user.key: {e}")))?;
-        let user_tag = home::user_tag(&key);
-        let kernels_dir = home::subdir(&cfg.home, "kernels")
-            .map_err(|e| internal(format!("kernels dir: {e}")))?;
-        let discovery = Discovery::new(user_tag.clone(), kernels_dir, cfg.multicast);
+        let user_tag = home::user_tag().map_err(|e| internal(format!("OS account: {e}")))?;
+        let discovery = Discovery::new_for_home(user_tag.clone(), &cfg.home);
         Ok(Self {
             cfg,
-            key,
             user_tag,
             discovery,
             conns: Default::default(),
@@ -221,21 +209,21 @@ impl RealBackend {
                 .find(kernel_id)
                 .await
                 .ok_or_else(|| not_found(kernel_id))?;
-            let port = kernel_info(&entry).port;
-            if port == 0 {
+            let control = kernel_info(&entry).control;
+            if control.is_empty() {
                 return Err(DpxError::new(
                     "kernel_unreachable",
                     format!("kernel {kernel_id} has no control channel"),
                 ));
             }
-            match Connection::connect(port, kernel_id, &self.key, self.cfg.fanout).await {
+            match Connection::connect(&control, kernel_id, self.cfg.fanout).await {
                 Ok(c) => {
                     *guard = Some(c.clone());
                     return Ok(c);
                 }
                 Err(e) if e.code == "kernel_unreachable" && attempt == 0 => {
-                    // A cached announce may name an old port (e.g. after a hard restart).
-                    self.discovery.forget_cached(kernel_id);
+                    // A cached announce may name an old socket (e.g. after a hard restart).
+                    self.discovery.forget(kernel_id);
                     last_err = Some(e);
                 }
                 Err(e) => return Err(e),
@@ -256,7 +244,7 @@ impl RealBackend {
 
     async fn info_with_status(&self, entry: Entry) -> KernelInfo {
         let mut info = kernel_info(&entry);
-        if info.port == 0 {
+        if info.control.is_empty() {
             return info;
         }
         let status = match self.connection(&info.kernel_id).await {
@@ -285,12 +273,21 @@ impl RealBackend {
             if let Some(entry) = self.discovery.snapshot(Some(kernel_id)).pop() {
                 let status = entry.get("status").and_then(Value::as_str).unwrap_or("");
                 if READY_STATUSES.contains(&status) {
-                    let launched = entry_pid(&entry) == pid;
+                    let mut launched = entry_pid(&entry) == pid;
                     if !launched {
-                        // Another manager's kernel won the start race and holds the file
-                        // lock. Ours has not announced, so it is not a kernel yet; stop it
-                        // so that it cannot take over later when the winner exits.
-                        child.abort();
+                        // The announced pid is not the pid we spawned. Either another
+                        // manager's kernel won the start race (our child then loses the file
+                        // lock and exits by itself, FR-K3), or `python` is a launcher stub
+                        // (a Windows venv `python.exe`) whose child is the real kernel. Give
+                        // our child a moment to exit: if it does, the winner is someone
+                        // else's; if it stays alive it is a launcher and the kernel is ours.
+                        // Never kill it here: stopping a launcher stub kills its job object,
+                        // and with it the real kernel.
+                        let window = tokio::time::Instant::now() + LAUNCHER_WINDOW;
+                        while process::pid_alive(pid) && tokio::time::Instant::now() < window {
+                            tokio::time::sleep(Duration::from_millis(25)).await;
+                        }
+                        launched = process::pid_alive(pid);
                     }
                     return Ok(Ensured {
                         kernel: self.info_with_status(entry).await,
@@ -302,8 +299,8 @@ impl RealBackend {
             if !process::pid_alive(pid) {
                 // Lost a start race (exit 3) or crashed: give a winner's announce a moment.
                 if child_gone_since.is_none() {
-                    // The winner may be a live kernel whose registry entry is missing (it is
-                    // rewritten only every 5 s); ask it directly once.
+                    // The winner may be a live kernel this manager has not heard yet (it
+                    // announces every 5 s); ask it directly once.
                     self.discovery
                         .query(Some(kernel_id), discovery::QUERY_TIMEOUT, &Default::default())
                         .await;
@@ -383,12 +380,10 @@ impl KernelBackend for RealBackend {
 
         // Listen before launching so that the child's first announce is never missed.
         self.discovery.ensure_listening();
-        // Cache + registry only, no multicast query: every announce is mirrored to the
-        // registry (PROTOCOL §2.4), so a live kernel of this home is already visible here.
-        // A targeted query would cost its full QUERY_TIMEOUT (200 ms) on every real launch,
-        // because a kernel that does not exist never answers. The rare live kernel without a
-        // registry entry is still found: our child then loses the file lock (FR-K3) and
-        // `wait_ready` queries for the winner.
+        // Cache only, no multicast query up front: a targeted query would cost its full
+        // QUERY_TIMEOUT (200 ms) on every real launch, because a kernel that does not exist
+        // never answers. A live kernel this manager has not heard yet is still found: our
+        // child then loses the file lock (FR-K3) and `wait_ready` queries for the winner.
         if let Some(entry) = self.discovery.snapshot(Some(&kernel_id)).pop() {
             return Ok(Ensured {
                 kernel: self.info_with_status(entry).await,
@@ -452,6 +447,25 @@ impl KernelBackend for RealBackend {
         let python = launch::resolve_python(None, self.cfg.python.as_deref())?;
         let root = self.runtime_root()?;
         launch::build_document(&python, &self.cfg.home, &root, &canonical, viewer_outputs).await
+    }
+
+    fn supports_handoff(&self) -> bool {
+        cfg!(unix)
+    }
+
+    #[allow(unused_variables)]
+    async fn adopt(&self, kernel_id: &str, req: AdoptRequest) -> Result<String> {
+        #[cfg(unix)]
+        {
+            let entry = self
+                .discovery
+                .find(kernel_id)
+                .await
+                .ok_or_else(|| not_found(kernel_id))?;
+            return dkp::adopt(&kernel_info(&entry).control, kernel_id, req).await;
+        }
+        #[cfg(not(unix))]
+        Err(DpxError::new("internal", "stream handoff needs a Unix socket (Windows is a follow-up of #47)"))
     }
 
     async fn kill(&self, kernel_id: &str) -> Result<()> {

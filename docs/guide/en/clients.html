@@ -84,29 +84,31 @@
       document: cells, versions, locks and who is present. When a client edits a cell, the change is saved to the
       file. When the file changes on disk (an agent's edit, <code>git checkout</code>), the kernel reloads it within
       a second and tells every client.</p>
-        <div class="warn">
+        <p>Collaboration runs over the 2025 WebSocket sync at <code>GET /api/ws/kernels/{kernel_id}?token=...</code>: clients ask for code, history and locks, and the kernel broadcasts cell locks, focus and execution events. The kernel answers the socket itself, and what it sends is filtered by the token's capabilities. Landed in pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/84">#84</a>.</p>
+    <div class="warn">
       <span class="label">Changing</span>
-      <p>Collaboration is moving to the 2025 WebSocket sync over a socket handed to the kernel <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>.</p>
+      <p>Handing the socket from the manager to the kernel, so streams outlive the manager, is still being finished <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>. WebSocket over TLS or HTTP/2 is not yet verified, and run-to-cell matching in history is by index <span class="pill partial">open <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
     </div>
 
-    <h2 id="permissions">Share permissions <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></h2>
-    <p>A dedicated manager issues share tokens per kernel with <code>darkpyonix share FILE --permission ...</code>.</p>
+    <h2 id="permissions">Share permissions</h2>
+    <p>A dedicated manager issues share tokens per kernel with <code>darkpyonix share FILE --capabilities ...</code>. A token carries a set of five capabilities, with no order and no tiers. The manager checks only that the one capability an operation needs is in the set; without it the answer is <code>403</code>. Landed in pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/84">#84</a>; some items stay open on issue <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a>.</p>
     <div class="tablewrap">
       <table>
-        <thead><tr><th scope="col">Permission</th><th scope="col">Code</th><th scope="col">Run logs and outputs</th><th scope="col">Run and interrupt</th><th scope="col">Shut down, manage shares</th></tr></thead>
+        <thead><tr><th scope="col">Capability</th><th scope="col">Meaning</th><th scope="col">Operations that need it</th></tr></thead>
         <tbody>
-          <tr><td><code>viewer1</code></td><td>yes</td><td></td><td></td><td></td></tr>
-          <tr><td><code>viewer2</code></td><td>yes</td><td>yes</td><td></td><td></td></tr>
-          <tr><td><code>viewer3</code></td><td>yes</td><td>yes</td><td>yes</td><td></td></tr>
-          <tr><td><code>admin</code> (master)</td><td>yes</td><td>yes</td><td>yes</td><td>yes</td></tr>
+          <tr><td><code>read</code></td><td>View code</td><td>Kernel list and status, cell code, event stream and WebSocket connection, presence and focus</td></tr>
+          <tr><td><code>history</code></td><td>Run logs and outputs</td><td>Run list and contents, outputs in documents and streams, variable listing, run-wait results</td></tr>
+          <tr><td><code>execute</code></td><td>Run and interrupt</td><td>Run, interrupt, cancel a queued run, start, restart and shut down a kernel</td></tr>
+          <tr><td><code>edit</code></td><td>Edit code, lock cells</td><td>Create, change, delete and move cells, lock and unlock, <code>start_typing</code></td></tr>
+          <tr><td><code>manage</code></td><td>Share settings</td><td>List, issue and revoke shares</td></tr>
         </tbody>
       </table>
     </div>
-
-    <p>These tiers, and today's <code>editor</code> tier for cell editing, are being replaced by five capabilities
-      that a token carries as a set, with no order: <code>read</code> (view code), <code>history</code> (run logs and outputs),
-      <code>execute</code> (run and interrupt), <code>edit</code> (edit code, lock cells) and <code>manage</code> (share settings).
-      Running code and editing code become separate capabilities <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
+    <p>The manager master token and a kernel's own login tokens carry all five. Running code and editing code are separate capabilities, so a token with <code>read,execute</code> can run but cannot lock or edit. A request may carry <code>user_permission</code> naming the capability the operation needs (the 2025 <code>"write"</code> maps to <code>execute</code> on runs and to <code>edit</code> on cells, <code>"admin"</code> on sharing maps to <code>manage</code>); other values are refused with 400, and the token's set decides.</p>
+    <div class="warn">
+      <span class="label">Changing</span>
+      <p>Placing kernel start, restart and shutdown under <code>execute</code>, and the variable listing under <code>history</code>, is provisional and under review by the project owner.</p>
+    </div>
     <nav class="pagenav" aria-label="Pagination">
       <a class="prev" href="manager-api.html"><span>Previous</span>&larr; Manager HTTP API</a>
       <a class="next" href="hub.html"><span>Next</span>darkpyonix.dev hub &rarr;</a>

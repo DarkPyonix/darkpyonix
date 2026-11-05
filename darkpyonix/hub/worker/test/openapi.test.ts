@@ -1,7 +1,8 @@
 // CLAUDE.md: the OpenAPI file is the SPEC. Every operation this Worker serves answers, with no
 // credentials and an empty body, only with a status its documentation lists; and every route
 // the Worker has is documented. Operations with a path-level `servers` entry live on the relay
-// host (darkpyonix/hub/server) and are checked there.
+// host (darkpyonix/hub/server) and are checked there. Paths marked `x-planned: true` are
+// agreed in the SPEC but not served yet and are skipped.
 
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -11,13 +12,13 @@ import { z32Encode } from "../src/pkarr";
 import { call, makeDeps } from "./helpers";
 
 type Operation = { responses: Record<string, unknown> };
-type PathItem = Record<string, Operation> & { servers?: unknown };
+type PathItem = Record<string, Operation> & { servers?: unknown; "x-planned"?: boolean };
 
 const spec = parse(specText) as { paths: Record<string, PathItem> };
 const METHODS = ["get", "put", "post", "patch", "delete"] as const;
 
 function workerPaths(): [string, PathItem][] {
-  return Object.entries(spec.paths).filter(([, item]) => item.servers === undefined);
+  return Object.entries(spec.paths).filter(([, item]) => item.servers === undefined && item["x-planned"] !== true);
 }
 
 function fill(path: string): string {

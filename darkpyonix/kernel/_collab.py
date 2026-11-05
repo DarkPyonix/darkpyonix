@@ -58,10 +58,9 @@ from darkpyonix._protocol import DKPError, now_iso
 Emit = Callable[[str, Dict[str, Any]], None]
 Handler = Callable[[Dict[str, Any]], Dict[str, Any]]
 
-# FR-A3 / FR-S8 permission ladder.
-PERMISSION_RANK = {"viewer1": 1, "viewer2": 2, "viewer3": 3, "editor": 4, "admin": 5}
-EDIT_PERMISSION = "editor"      # cell edits and locks (FR-S8)
-PRESENCE_PERMISSION = "viewer1"  # presence, focus, cursor (FR-S8)
+# FR-A3 capability names. The kernel never checks them (FR-S8, INTENT D5, D18): the manager has
+# already decided; the names are only echoed in presence.
+CAPABILITY_NAMES = ("read", "history", "execute", "edit", "manage")
 
 CURSOR_MIN_INTERVAL = 1.0 / 20  # FR-S4: at most 20 cursor events per second per client
 
@@ -310,18 +309,14 @@ class DocumentState(object):
             data["request_id"] = rid
         self._emit_cb(type_, data)
 
-    def _client(self, params: Dict[str, Any], need: str) -> Dict[str, Any]:
+    def _client(self, params: Dict[str, Any]) -> Dict[str, Any]:
         client = params.get("client")
         if not isinstance(client, dict) or not isinstance(client.get("client_id"), str) \
                 or not client.get("client_id"):
             raise DKPError("bad_request", "client with a client_id is required")
-        perm = client.get("permission")
-        if perm not in PERMISSION_RANK:
-            raise DKPError("forbidden", "unknown permission %r" % (perm,))
-        if PERMISSION_RANK[perm] < PERMISSION_RANK[need]:
-            raise DKPError("forbidden", "%s permission is required" % need,
-                           {"permission": perm, "required": need})
-        out = {"client_id": client["client_id"], "permission": perm,
+        caps = client.get("capabilities")
+        caps = [c for c in CAPABILITY_NAMES if isinstance(caps, list) and c in caps]
+        out = {"client_id": client["client_id"], "capabilities": caps,
                "user": client.get("user") if isinstance(client.get("user"), str) else "",
                "nickname": client.get("nickname") if isinstance(client.get("nickname"), str) else ""}
         if isinstance(client.get("avatar"), str):
@@ -368,7 +363,7 @@ class DocumentState(object):
     def _presence_dict(self, p: _Presence) -> Dict[str, Any]:
         c = p.client
         out = {"client_id": c["client_id"], "nickname": c.get("nickname", ""),
-               "user": c.get("user", ""), "permission": c["permission"],
+               "user": c.get("user", ""), "capabilities": list(c.get("capabilities") or []),
                "focused_cell_id": p.focused_cell_id, "focused_at": p.focused_at,
                "cursor": p.cursor, "last_seen": p.last_seen_iso}  # type: Dict[str, Any]
         if "avatar" in c:
@@ -427,7 +422,7 @@ class DocumentState(object):
     @_request
     def cell_create(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, EDIT_PERMISSION)
+            client = self._client(params)
             type_ = self._type_param(params, False) or dpformat.CODE
             source = _str_param(params, "source", False) or ""
             title = _str_param(params, "title", False) or None
@@ -503,7 +498,7 @@ class DocumentState(object):
     @_request
     def cell_update(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, EDIT_PERMISSION)
+            client = self._client(params)
             i = self._find(params.get("cell_id"))
             entry = self._entries[i]
             base = _int_param(params, "base_version")
@@ -530,7 +525,7 @@ class DocumentState(object):
     @_request
     def cell_delete(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, EDIT_PERMISSION)
+            client = self._client(params)
             i = self._find(params.get("cell_id"))
             entry = self._entries[i]
             if i == 0:
@@ -557,7 +552,7 @@ class DocumentState(object):
     @_request
     def cell_move(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, EDIT_PERMISSION)
+            client = self._client(params)
             i = self._find(params.get("cell_id"))
             to = _int_param(params, "to_index")
             if i == 0 or to < 1 or to >= len(self._entries):
@@ -579,7 +574,7 @@ class DocumentState(object):
     @_request
     def lock(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, EDIT_PERMISSION)
+            client = self._client(params)
             entry = self._entries[self._find(params.get("cell_id"))]
             lk = self._check_lock(entry.cell_id, client)
             if lk is not None:  # already ours: renew
@@ -596,7 +591,7 @@ class DocumentState(object):
     @_request
     def unlock(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, EDIT_PERMISSION)
+            client = self._client(params)
             entry = self._entries[self._find(params.get("cell_id"))]
             lk = self._check_lock(entry.cell_id, client)
             if params.get("source") is not None:
@@ -670,7 +665,7 @@ class DocumentState(object):
     @_request
     def presence_update(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, PRESENCE_PERMISSION)
+            client = self._client(params)
             now = self._clock()
             cid = client["client_id"]
             p = self._presence.get(cid)
@@ -710,7 +705,7 @@ class DocumentState(object):
     @_request
     def presence_leave(self, params: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            client = self._client(params, PRESENCE_PERMISSION)
+            client = self._client(params)
             self._leave(client["client_id"], client)
             return {}
 

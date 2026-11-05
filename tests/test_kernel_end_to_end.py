@@ -52,12 +52,12 @@ def _start(path, python):
     pid = launcher.launch(path, python=python)
     info = launcher.wait_for_announce(kernel_id_for(path), pid=pid, timeout=15.0)
     assert info is not None, "kernel did not announce"
-    assert info["port"] > 0
+    assert info["control"]
     return pid, info
 
 
 def _client(info):
-    c = KernelClient(info["port"], info["kernel_id"], name="test", kind="cli")
+    c = KernelClient(info["control"], info["kernel_id"], name="test", kind="cli")
     c.connect()
     return c
 
@@ -141,7 +141,7 @@ def test_fr_k4_kernel_survives_manager_kill(scratch, dp_home):
         p = %r
         pid = launcher.launch(p)
         info = launcher.wait_for_announce(kernel_id_for(p), pid=pid, timeout=15)
-        c = KernelClient(info["port"], info["kernel_id"]); c.connect()
+        c = KernelClient(info["control"], info["kernel_id"]); c.connect()
         c.request("run", {"mode": "all"})
         print(pid, flush=True)
         time.sleep(60)

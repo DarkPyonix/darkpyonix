@@ -50,9 +50,12 @@ dev = [
     "pyyaml>=6",
     "nbformat>=5",
     "jsonschema>=4",
+    "hatchling>=1.27",
 ]
 
-# No console script: the `darkpyonix` CLI is the Rust binary (INTENT D10).
+# No console script: the `darkpyonix` CLI is the Rust binary (INTENT D10), shipped as a wheel
+# script by packaging/hatch_build.py (SPEC FR-C3, INTENT D22). The py3-none-any wheel and the
+# sdist carry a script that says the manager is unsupported on that platform instead.
 
 [tool.hatch.version]
 path = "darkpyonix/kernel/__init__.py"
@@ -66,8 +69,12 @@ path = "darkpyonix/kernel/__init__.py"
 [tool.hatch.build.targets.wheel]
 only-include = ["darkpyonix/kernel"]
 
+# DARKPYONIX_BINARY + DARKPYONIX_WHEEL_TAG select a platform wheel (see the hook).
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "packaging/hatch_build.py"
+
 [tool.hatch.build.targets.sdist]
-only-include = ["darkpyonix/kernel", "README.md", "LICENSE", "pyproject.toml"]
+only-include = ["darkpyonix/kernel", "packaging", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

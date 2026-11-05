@@ -1,9 +1,9 @@
-"""Kernel discovery over loopback UDP multicast, with the registry as fallback (PROTOCOL §2).
+"""Kernel discovery over loopback UDP multicast, and nothing else (PROTOCOL §2, INTENT D4).
 
 FR-D1: a query reaches every kernel of the same user; each answers with an ``announce``
 that echoes the query's nonce. Answers go unicast to the querying socket; unsolicited
-announces and ``bye`` go to the group. FR-D2: every announce is mirrored to the registry,
-and ``DARKPYONIX_DISCOVERY=registry`` turns multicast off entirely.
+announces and ``bye`` go to the group. There is no registry file and no fallback; a
+machine without loopback multicast is out of scope (FR-D3).
 
 Standard library only; Python 3.8+.
 """
@@ -18,7 +18,6 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from darkpyonix import _registry as registry
 from darkpyonix._protocol import (
     ANNOUNCE_INTERVAL, DISCOVERY_GROUP, DISCOVERY_INTERFACE, DISCOVERY_PORT, DKP_VERSION,
     QUERY_TIMEOUT,
@@ -26,10 +25,6 @@ from darkpyonix._protocol import (
 
 MAX_DATAGRAM = 65507
 _GROUP_ADDR = (DISCOVERY_GROUP, DISCOVERY_PORT)
-
-
-def multicast_enabled() -> bool:
-    return os.environ.get("DARKPYONIX_DISCOVERY", "").strip().lower() != "registry"
 
 
 def _log(message: str) -> None:
@@ -116,15 +111,14 @@ class DiscoveryResponder:
     # -------------------------------------------------------------- lifecycle
 
     def start(self) -> None:
-        if multicast_enabled():
-            try:
-                self._send = open_send_socket()
-                self._recv = open_group_socket()
-                self._recv.settimeout(0.5)
-                self.multicast = True
-            except OSError as e:
-                _log("multicast unavailable (%s); using the registry only" % e)
-                self._close_sockets()
+        try:
+            self._send = open_send_socket()
+            self._recv = open_group_socket()
+            self._recv.settimeout(0.5)
+            self.multicast = True
+        except OSError as e:
+            _log("multicast unavailable (%s); this kernel cannot be discovered" % e)
+            self._close_sockets()
         self.announce_now()
         self._thread = threading.Thread(target=self._run, name="darkpyonix-discovery", daemon=True)
         self._thread.start()
@@ -143,13 +137,8 @@ class DiscoveryResponder:
         self._close_sockets()
 
     def announce_now(self) -> None:
-        """Mirror the current body to the registry and multicast it (start, status change)."""
-        body = self._body()
-        try:
-            registry.write(body)
-        except (OSError, KeyError) as e:
-            _log("registry write failed: %s" % e)
-        self._sendto(_encode(body), _GROUP_ADDR)
+        """Multicast the current body (start, status change)."""
+        self._sendto(_encode(self._body()), _GROUP_ADDR)
         self._wake.set()  # restart the periodic timer
 
     # -------------------------------------------------------------- internals
@@ -245,8 +234,6 @@ class DiscoveryClient:
 
         Returns early once ``expect`` distinct kernels (or the named ``kernel_id``) answered.
         """
-        if not multicast_enabled():
-            return []
         if kernel_id is not None and expect is None:
             expect = 1
         nonce = secrets.token_hex(8)
@@ -288,7 +275,7 @@ class DiscoveryClient:
 
     def listen(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Call ``callback(message)`` for each announce or bye of this user, in a daemon thread."""
-        if self._listen_thread is not None or not multicast_enabled():
+        if self._listen_thread is not None:
             return
         try:
             sock = open_group_socket()
@@ -329,20 +316,12 @@ class DiscoveryClient:
 
 
 def discover(kernel_id: Optional[str] = None, timeout: float = QUERY_TIMEOUT) -> List[Dict[str, Any]]:
-    """Live kernels of this user: multicast answers merged with the registry (FR-D1, FR-D2)."""
+    """Live kernels of this user, found by one multicast query (FR-D1)."""
     from darkpyonix import _home
 
-    merged = {}  # type: Dict[str, Dict[str, Any]]
-    for entry in registry.scan(prune=True):
-        if kernel_id is None or entry.get("kernel_id") == kernel_id:
-            merged[entry["kernel_id"]] = entry
-    if multicast_enabled():
-        client = DiscoveryClient(_home.user_tag())
-        try:
-            answers = client.query(kernel_id=kernel_id, timeout=timeout)
-        finally:
-            client.close()
-        for entry in answers:
-            if registry.pid_alive(entry.get("pid", 0)):
-                merged[entry["kernel_id"]] = entry  # a live answer beats the file
-    return sorted(merged.values(), key=lambda e: str(e.get("kernel_id")))
+    client = DiscoveryClient(_home.user_tag())
+    try:
+        answers = client.query(kernel_id=kernel_id, timeout=timeout)
+    finally:
+        client.close()
+    return sorted(answers, key=lambda e: str(e.get("kernel_id")))

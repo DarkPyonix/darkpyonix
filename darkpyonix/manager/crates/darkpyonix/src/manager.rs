@@ -42,8 +42,9 @@ impl From<&ManagerArgs> for ManagerOpts {
 ///
 /// `dpx_kernel::RealBackend` (discovery, DKP/1, the embedded kernel) behind
 /// `dpx_server::serve` (the OpenAPI over HTTP/SSE, TLS, proxy). Ephemeral managers bind
-/// loopback and write `<DARKPYONIX_HOME>/managers/<pid>.json` (0600) once listening; they
-/// exit after `idle_timeout` and never touch kernels. Never reads stdin or writes stdout.
+/// loopback and write no file; once listening, every manager prints one JSON line
+/// `{"url", "token", "pid"}` on stdout for the process that started it (SPEC FR-M3, FR-C1).
+/// They exit after `idle_timeout` and never touch kernels. Never reads stdin.
 pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -70,18 +71,55 @@ pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
         let handle = dpx_server::serve(config, std::sync::Arc::new(backend))
             .await
             .map_err(|e| format!("cannot serve: {e}"))?;
-        eprintln!("darkpyonix manager listening on {}", handle.url);
-        if dedicated_random_token {
-            eprintln!("master token (shown once; set DARKPYONIX_MANAGER_TOKEN to fix it): {}", handle.token);
+        println!("{}", startup_line(&handle.url, &handle.token, std::process::id()));
+        {
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+        }
+        for line in stderr_notices(&handle.url, &handle.token, dedicated_random_token) {
+            eprintln!("{line}");
         }
         dpx_server::run_until_signal(handle).await;
         Ok(())
     })
 }
 
+/// The one stdout line a manager prints once it listens (SPEC FR-M3, FR-C1).
+pub fn startup_line(url: &str, token: &str, pid: u32) -> String {
+    serde_json::json!({"url": url, "token": token, "pid": pid}).to_string()
+}
+
+/// Lines a manager writes to stderr. An ephemeral manager's stderr is `manager.log`, so the
+/// token appears only for a dedicated manager (a terminal), never for an ephemeral one
+/// (SPEC FR-C1).
+pub fn stderr_notices(url: &str, token: &str, show_master_token: bool) -> Vec<String> {
+    let mut v = vec![format!("darkpyonix manager listening on {url}")];
+    if show_master_token {
+        v.push(format!("master token (shown once; set DARKPYONIX_MANAGER_TOKEN to fix it): {token}"));
+    }
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_fr_c1_ephemeral_stderr_notices_carry_no_token() {
+        let n = stderr_notices("http://127.0.0.1:5000", "sekret", false);
+        assert!(n.iter().all(|l| !l.contains("sekret")), "{n:?}");
+        assert!(stderr_notices("u", "sekret", true).iter().any(|l| l.contains("sekret")));
+    }
+
+    #[test]
+    fn test_fr_m3_url_and_token_are_printed_on_stdout() {
+        let line = startup_line("http://127.0.0.1:5000", "tok", 42);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["url"], "http://127.0.0.1:5000");
+        assert_eq!(v["token"], "tok");
+        assert_eq!(v["pid"], 42);
+        assert!(!line.contains('\n'));
+    }
 
     fn args(dedicated: bool, port: Option<u16>, idle: Option<u64>) -> ManagerArgs {
         ManagerArgs { dedicated, ephemeral: !dedicated, host: None, port, idle_timeout: idle }

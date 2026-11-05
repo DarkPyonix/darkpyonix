@@ -71,7 +71,7 @@
           <tr><td><code>darkpyonix restart FILE [--hard]</code></td><td>Soft restart clears the namespace. <code>--hard</code> re-executes the process with the same interpreter; the kernel id stays.</td></tr>
           <tr><td><code>darkpyonix shutdown FILE [--force]</code></td><td>Interrupts, finishes the run log and exits cleanly. Only <code>--force</code> kills the process.</td></tr>
           <tr><td><code>darkpyonix kernel FILE [--python PATH]</code></td><td>Starts the kernel without running anything.</td></tr>
-          <tr><td><code>darkpyonix share FILE --permission viewer1|viewer2|viewer3</code></td><td>Issues a share token for the file's kernel. Needs a dedicated manager. Becomes <code>--capabilities read,history,...</code> <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></td></tr>
+          <tr><td><code>darkpyonix share FILE --capabilities read,history[,execute,edit,manage]</code></td><td>Issues a share token that carries exactly the capabilities you list. Needs a dedicated manager. The old tier names <code>viewer1</code>, <code>viewer2</code>, <code>viewer3</code>, <code>admin</code> and <code>editor</code> are refused with 400. Landed in pull request <a href="https://github.com/DarkPyonix/darkpyonix/pull/84">#84</a>.</td></tr>
           <tr><td><code>darkpyonix manager [--ephemeral|--dedicated] [--host H] [--port P] [--idle-timeout S]</code></td><td>Runs a manager. The default is ephemeral: loopback only, exits when idle. Giving both modes is an error.</td></tr>
         </tbody>
       </table>
@@ -125,13 +125,10 @@
 
 
     <h2 id="manager">Which manager</h2>
-    <p>Today the CLI picks a live manager from <code>~/.darkpyonix/managers/*.json</code> and starts an
-      ephemeral one when there is none. An agent does not need to know another manager's token; the same OS
-      user is enough. The ephemeral manager exits after 120 idle seconds by default; the kernels stay.</p>
-        <div class="warn">
-      <span class="label">Changing</span>
-      <p>Registry files are being removed <span class="pill partial">changing <a href="https://github.com/DarkPyonix/darkpyonix/issues/50">#50</a></span>. The CLI will use <code>DARKPYONIX_MANAGER_URL</code> and <code>DARKPYONIX_TOKEN</code> when they are set, and otherwise start its own ephemeral manager and read its address and token from that process. The commands and their behavior above do not change.</p>
-    </div>
+    <p>The CLI uses the manager named by <code>DARKPYONIX_MANAGER_URL</code> and <code>DARKPYONIX_TOKEN</code>
+      when both are set. Otherwise it starts its own ephemeral manager and reads the address and token from
+      the one JSON line that manager prints on stdout (<code>{url, token, pid}</code>). No file is written or read.
+      An agent that does not know a token simply gets its own manager. The ephemeral manager exits after 120 idle seconds by default; the kernels stay.</p>
 
     <nav class="pagenav" aria-label="Pagination">
       <a class="prev" href="notebook-format.html"><span>Previous</span>&larr; Notebook files</a>

@@ -11,20 +11,24 @@ describe("config", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toEqual({
       hub_version: expect.any(String),
+      api_url: "https://api.darkpyonix.dev",
+      front_url: "https://darkpyonix.dev",
       relay_urls: ["https://relay.darkpyonix.dev/"],
-      pkarr_url: "https://darkpyonix.dev/pkarr",
+      pkarr_url: "https://api.darkpyonix.dev/pkarr",
       link_url: "https://darkpyonix.dev/link",
     });
   });
 
   it("test_fr_h8_config_follows_the_worker_vars", async () => {
     const response = await call(makeDeps(), "GET", "/config", {
-      env: { PUBLIC_URL: "https://hub.example", RELAY_URL: "https://relay.example/" },
+      env: { API_URL: "https://api.example", FRONT_URL: "https://front.example", RELAY_URL: "https://relay.example/" },
     });
     const body = (await response.json()) as Record<string, unknown>;
+    expect(body.api_url).toBe("https://api.example");
+    expect(body.front_url).toBe("https://front.example");
     expect(body.relay_urls).toEqual(["https://relay.example/"]);
-    expect(body.pkarr_url).toBe("https://hub.example/pkarr");
-    expect(body.link_url).toBe("https://hub.example/link");
+    expect(body.pkarr_url).toBe("https://api.example/pkarr");
+    expect(body.link_url).toBe("https://front.example/link");
   });
 
   it("test_nfr_v1_versioned_hub_path_is_not_served", async () => {

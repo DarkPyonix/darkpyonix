@@ -82,28 +82,31 @@
     <p>매니저 여러 개가 한 커널에 붙을 수 있고, 각자 같은 이벤트를 받습니다. 공유 문서(셀, 버전, 잠금, 접속자)는
       커널이 들고 있습니다. 클라이언트가 셀을 고치면 파일에 저장됩니다. 디스크의 파일이 바뀌면(에이전트의 편집,
       <code>git checkout</code>) 커널이 1초 안에 다시 읽고 모든 클라이언트에 알립니다.</p>
-        <div class="warn">
+        <p>협업은 2025 WebSocket 동기화(<code>GET /api/ws/kernels/{kernel_id}?token=...</code>)로 합니다. 클라이언트가 코드, 기록, 잠금을 요청하면 커널이 셀 잠금, 포커스, 실행 이벤트를 알립니다. 소켓에는 커널이 직접 답하고, 보내는 내용은 토큰의 능력으로 걸러집니다. PR <a href="https://github.com/DarkPyonix/darkpyonix/pull/84">#84</a>에서 들어갔습니다.</p>
+    <div class="warn">
       <span class="label">변경 중</span>
-      <p>협업은 커널에 넘긴 소켓 위의 2025 WebSocket 동기화로 옮기는 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span> <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>.</p>
+      <p>매니저가 소켓을 커널에 넘겨 매니저가 끝나도 스트림이 이어지게 하는 일은 아직 마무리 중입니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/47">#47</a></span>. TLS나 HTTP/2 위의 WebSocket은 아직 확인하지 못했고, 기록의 실행과 셀 대응은 인덱스 기준입니다 <span class="pill partial">열림 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
     </div>
 
-    <h2 id="permissions">공유 권한 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span></h2>
-    <p>전용 매니저는 <code>darkpyonix share FILE --permission ...</code>으로 커널마다 공유 토큰을 발급합니다.</p>
+    <h2 id="permissions">공유 권한</h2>
+    <p>전용 매니저는 <code>darkpyonix share FILE --capabilities ...</code>으로 커널마다 공유 토큰을 발급합니다. 토큰은 능력 다섯 개의 집합을 가집니다. 순서도 등급도 없습니다. 매니저는 작업마다 그 작업에 필요한 능력 하나가 집합에 있는지만 보고, 없으면 <code>403</code>으로 답합니다. PR <a href="https://github.com/DarkPyonix/darkpyonix/pull/84">#84</a>에서 들어갔고, 일부 항목은 이슈 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a>에 남아 있습니다.</p>
     <div class="tablewrap">
       <table>
-        <thead><tr><th scope="col">권한</th><th scope="col">코드</th><th scope="col">실행 기록과 출력</th><th scope="col">실행과 인터럽트</th><th scope="col">종료, 공유 관리</th></tr></thead>
+        <thead><tr><th scope="col">능력</th><th scope="col">뜻</th><th scope="col">필요한 작업</th></tr></thead>
         <tbody>
-          <tr><td><code>viewer1</code></td><td>예</td><td></td><td></td><td></td></tr>
-          <tr><td><code>viewer2</code></td><td>예</td><td>예</td><td></td><td></td></tr>
-          <tr><td><code>viewer3</code></td><td>예</td><td>예</td><td>예</td><td></td></tr>
-          <tr><td><code>admin</code>(마스터)</td><td>예</td><td>예</td><td>예</td><td>예</td></tr>
+          <tr><td><code>read</code></td><td>코드 보기</td><td>커널 목록과 상태, 셀 코드, 이벤트 스트림과 WebSocket 연결, 접속자 표시와 포커스</td></tr>
+          <tr><td><code>history</code></td><td>실행 기록과 출력</td><td>실행 기록 목록과 내용, 문서와 스트림의 출력, 변수 목록, 실행 대기 결과</td></tr>
+          <tr><td><code>execute</code></td><td>실행과 인터럽트</td><td>실행, 인터럽트, 대기 실행 취소, 커널 시작, 재시작, 종료</td></tr>
+          <tr><td><code>edit</code></td><td>코드 수정, 셀 잠금</td><td>셀 생성, 수정, 삭제, 이동, 잠금과 해제, <code>start_typing</code></td></tr>
+          <tr><td><code>manage</code></td><td>공유 설정</td><td>공유 목록, 발급, 철회</td></tr>
         </tbody>
       </table>
     </div>
-
-    <p>위 등급과 지금 있는 셀 편집용 <code>editor</code> 등급은, 토큰이 순서 없는 집합으로 가지는 능력 다섯으로 바뀌는 중입니다.
-      <code>read</code>(코드 보기), <code>history</code>(실행 기록과 출력), <code>execute</code>(실행과 인터럽트),
-      <code>edit</code>(코드 수정, 셀 잠금), <code>manage</code>(공유 설정)입니다. 코드 실행과 코드 수정은 다른 능력이 됩니다 <span class="pill partial">변경 중 <a href="https://github.com/DarkPyonix/darkpyonix/issues/49">#49</a></span>.</p>
+    <p>매니저 마스터 토큰과 커널 자신의 로그인 토큰은 다섯을 모두 가집니다. 코드 실행과 코드 수정은 다른 능력이어서, <code>read,execute</code> 토큰은 실행할 수 있지만 잠그거나 고칠 수 없습니다. 요청은 <code>user_permission</code>에 그 작업에 필요한 능력 이름을 실을 수 있습니다(2025 <code>"write"</code>는 실행에서는 <code>execute</code>, 셀에서는 <code>edit</code>, 공유의 <code>"admin"</code>은 <code>manage</code>). 다른 값은 400이고, 허락은 토큰의 집합이 정합니다.</p>
+    <div class="warn">
+      <span class="label">변경 중</span>
+      <p>커널 시작, 재시작, 종료를 <code>execute</code>에, 변수 목록을 <code>history</code>에 둔 것은 임시이고 프로젝트 소유자가 다시 검토할 예정입니다.</p>
+    </div>
     <nav class="pagenav" aria-label="페이지 이동">
       <a class="prev" href="manager-api.html"><span>이전</span>&larr; 매니저 HTTP API</a>
       <a class="next" href="hub.html"><span>다음</span>darkpyonix.dev 허브 &rarr;</a>

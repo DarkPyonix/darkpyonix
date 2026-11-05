@@ -19,8 +19,9 @@ import {
 import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
 import type { Deps, Env } from "./env";
 import { callback, login, logout } from "./github";
-import { ApiError, SESSION_COOKIE, getCookie, html, json, redirect } from "./http";
+import { ApiError, SESSION_COOKIE, corsOrigin, getCookie, html, json, redirect } from "./http";
 import { clearAcmeChallenge, listNames, releaseName, reserveName, setAcmeChallenge } from "./names";
+import { createNotebook, listMine, listPublic, getNotebook, updateNotebook, deleteNotebook, pushVersion, readVersion, deleteVersion, readSource, readRun, purgeOrphans } from "./notebooks";
 import { linkPage } from "./pages";
 import { admit, presence } from "./relay";
 import { ashPage, publishShare, resolveShare, sharePage, unpublishShare } from "./shares";
@@ -56,9 +57,11 @@ function config(_request: Request, env: Env): Response {
     200,
     {
       hub_version: VERSION,
+      api_url: env.API_URL,
+      front_url: env.FRONT_URL,
       relay_urls: [env.RELAY_URL],
-      pkarr_url: `${env.PUBLIC_URL}/pkarr`,
-      link_url: `${env.PUBLIC_URL}/link`,
+      pkarr_url: `${env.API_URL}/pkarr`,
+      link_url: `${env.FRONT_URL}/link`,
     },
     { "cache-control": "public, max-age=300" },
   );
@@ -129,13 +132,20 @@ export const ROUTES: Route[] = [
   route("/shares/{share_id}", { GET: resolveShare, DELETE: unpublishShare }),
   route("/s/{share_id}", { GET: sharePage }),
   route("/ash/", { GET: (r, e) => ashPage(r, e) }),
+  route("/notebooks", { GET: listMine, POST: createNotebook }),
+  route("/users/{github_login}/notebooks", { GET: listPublic }),
+  route("/notebooks/{notebook_id}", { GET: getNotebook, PATCH: updateNotebook, DELETE: deleteNotebook }),
+  route("/notebooks/{notebook_id}/versions", { POST: pushVersion }),
+  route("/notebooks/{notebook_id}/versions/{version}", { GET: readVersion, DELETE: deleteVersion }),
+  route("/notebooks/{notebook_id}/versions/{version}/source", { GET: readSource }),
+  route("/notebooks/{notebook_id}/versions/{version}/run", { GET: readRun }),
   // FR-H5 names
   route("/names", { GET: listNames }),
   route("/names/{name}", { PUT: reserveName, DELETE: releaseName }),
   route("/names/{name}/acme-challenge", { PUT: setAcmeChallenge, DELETE: clearAcmeChallenge }),
 ];
 
-export async function handle(request: Request, env: Env, deps: Deps): Promise<Response> {
+async function dispatch(request: Request, env: Env, deps: Deps): Promise<Response> {
   const url = new URL(request.url);
   try {
     for (const r of ROUTES) {
@@ -148,7 +158,6 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
       const params = match.slice(1).map((p) => decodeURIComponent(p));
       return await handler(request, env, deps, ...params);
     }
-    // Everything else: static assets (the ash viewer's files under /ash/).
     if (url.pathname.startsWith("/ash/")) return env.ASSETS.fetch(request);
     return json(404, { error: "not found" });
   } catch (err) {
@@ -158,9 +167,30 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
   }
 }
 
+export async function handle(request: Request, env: Env, deps: Deps): Promise<Response> {
+  const origin = request.headers.get("origin");
+  const allowed = corsOrigin(origin, env);
+  const response = request.method === "OPTIONS" && allowed
+    ? new Response(null, { status: 204 })
+    : await dispatch(request, env, deps);
+  if (allowed && origin) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+    response.headers.append("Vary", "Origin");
+    response.headers.set("Access-Control-Expose-Headers", "ETag");
+    if (request.method === "OPTIONS") {
+      response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE");
+      response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, If-None-Match");
+      response.headers.set("Access-Control-Max-Age", "600");
+    }
+  }
+  return response;
+}
+
 /** Hourly: drop expired single-use rows. */
 export async function cleanup(env: Env, nowMs: number): Promise<void> {
   const now = nowSecs(nowMs);
+  await purgeOrphans(env, nowMs);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM oauth_transactions WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM device_links WHERE expires_at < ?").bind(now),
