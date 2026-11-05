@@ -1,11 +1,11 @@
 import type { Deps, Env } from "./env";
 import { ApiError, json, noContent, principal, readJson, type Principal } from "./http";
-import { nowSecs, sha256, toHex } from "./util";
+import { SHARE_ID_RE, nowSecs, sha256, toHex } from "./util";
 
-type Notebook = { notebook_id: string; account_id: string; creator_device: string | null; title: string; visibility: string; created_at: number; updated_at: number; github_login: string; latest_version: number | null };
+type Notebook = { notebook_id: string; account_id: string; creator_device: string | null; title: string; visibility: string; share_id: string | null; created_at: number; updated_at: number; github_login: string; latest_version: number | null };
 type Version = { version: number; created_at: number; message: string | null; source_filename: string; source_sha256: string; source_size: number; source_cells: number; run_id: string | null; run_sha256: string | null; run_size: number | null };
 const selectNotebook = `SELECT n.*, a.github_login, (SELECT MAX(version) FROM notebook_versions v WHERE v.notebook_id = n.notebook_id) AS latest_version FROM notebooks n JOIN accounts a ON a.account_id = n.account_id`;
-const view = (n: Notebook) => ({ notebook_id: n.notebook_id, owner: { github_login: n.github_login }, title: n.title, visibility: n.visibility, share_id: null, latest_version: n.latest_version, created_at: n.created_at, updated_at: n.updated_at, taken_down: false });
+const view = (n: Notebook) => ({ notebook_id: n.notebook_id, owner: { github_login: n.github_login }, title: n.title, visibility: n.visibility, share_id: n.share_id, latest_version: n.latest_version, created_at: n.created_at, updated_at: n.updated_at, taken_down: false });
 const versionView = (v: Version) => ({ version: v.version, created_at: v.created_at, message: v.message, source: { filename: v.source_filename, sha256: v.source_sha256, size: v.source_size, cells: v.source_cells }, run: v.run_id === null ? null : { run_id: v.run_id, sha256: v.run_sha256, size: v.run_size } });
 const robot = (n: Notebook): Record<string, string> => n.visibility === "unlisted" ? { "x-robots-tag": "noindex" } : {};
 const key = (n: Notebook, v: number, part: string) => `nb/${n.account_id}/${n.notebook_id}/${v}/${part}`;
@@ -32,9 +32,16 @@ async function owned(request: Request, env: Env, deps: Deps, id: string, admin: 
   return n;
 }
 function fields(body: Record<string, unknown>, partial: boolean) {
-  if (Object.keys(body).some(k => !["title", "visibility"].includes(k)) || (partial && !Object.keys(body).length)) throw ApiError.badRequest("invalid fields");
+  if (Object.keys(body).some(k => !["title", "visibility", ...(partial ? ["share_id"] : [])].includes(k)) || (partial && !Object.keys(body).length)) throw ApiError.badRequest("invalid fields");
   if ((!partial || body.title !== undefined) && (typeof body.title !== "string" || body.title.length < 1 || body.title.length > 120)) throw ApiError.badRequest("invalid title");
   if (body.visibility !== undefined && !["private", "unlisted", "public"].includes(body.visibility as string)) throw ApiError.badRequest("invalid visibility");
+  if (body.share_id !== undefined && body.share_id !== null && (typeof body.share_id !== "string" || !SHARE_ID_RE.test(body.share_id))) throw ApiError.badRequest("invalid share_id");
+}
+/** FR-H17: the share must be published by a live device of the notebook's own account. */
+async function checkShare(env: Env, n: Notebook, shareId: string) {
+  const host = await env.DB.prepare("SELECT d.account_id FROM shares s JOIN devices d ON d.endpoint_id = s.endpoint_id WHERE s.share_id = ? AND d.revoked_at IS NULL").bind(shareId).first<{account_id: string}>();
+  if (!host) throw ApiError.notFound();
+  if (host.account_id !== n.account_id) throw ApiError.conflict("the share is published by another account", "share_not_in_account");
 }
 export async function createNotebook(r: Request, e: Env, d: Deps) {
   const p = await caller(r, e, d);
@@ -62,7 +69,8 @@ export async function getNotebook(r: Request, e: Env, d: Deps, id: string) {
 }
 export async function updateNotebook(r: Request, e: Env, d: Deps, id: string) {
   const n = await owned(r, e, d, id, true); const body = await readJson<Record<string, unknown>>(r); fields(body, true);
-  await e.DB.prepare("UPDATE notebooks SET title = ?, visibility = ?, updated_at = ? WHERE notebook_id = ?").bind(body.title ?? n.title, body.visibility ?? n.visibility, nowSecs(d.nowMs()), id).run();
+  if (typeof body.share_id === "string") await checkShare(e, n, body.share_id);
+  await e.DB.prepare("UPDATE notebooks SET title = ?, visibility = ?, share_id = ?, updated_at = ? WHERE notebook_id = ?").bind(body.title ?? n.title, body.visibility ?? n.visibility, body.share_id === undefined ? n.share_id : body.share_id, nowSecs(d.nowMs()), id).run();
   return json(200, view(await find(e, id)));
 }
 async function getVersion(e: Env, n: Notebook, ref: string): Promise<Version> {

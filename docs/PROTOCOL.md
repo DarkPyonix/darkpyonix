@@ -140,7 +140,7 @@ INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 �
 | `runs.get` | `run_id: str \| "latest" \| "current"` | nbformat 4 노트북 | |
 | `subscribe` | `since: int?` | `{seq: int, replayed: int}` | `since` 이후의 이벤트를 다시 보내고 이어서 실시간 전송 |
 | `unsubscribe` | `{}` | `{}` | |
-| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. POSIX 구현됨(#47), Windows `share`는 구현 대기 |
+| `adopt` | §3.7.1 | `{stream_id}` | 매니저가 인증한 스트림 연결을 커널에 넘김. 구현됨(#47, POSIX `fd`, Windows `share`) |
 | `streams.close` | `share_id` | `{closed: int}` | 그 공유로 넘겨받은 스트림을 모두 닫음. 구현됨(#47) |
 | `tokens.issue` | `kind: "initial"\|"login"\|"share"`, `capabilities: [str]`, `label?`, `expires_at?` | `{token, share_id?}` | 커널이 토큰을 만들고 해시만 영속화(§6). 커널 구현됨(#48) |
 | `tokens.verify` | `token` | `{valid, revoked, kind?, capabilities?, share_id?}` | 커널 접근 토큰 확인(§6). 커널 구현됨(#48) |
@@ -202,7 +202,7 @@ INTENT D6. 매니저는 HTTP 요청을 인증하고 권한을 검사한 뒤, 오
 | `ws` | `GET /api/ws/kernels/{kernel_id}` (Upgrade) | `101 Switching Protocols`, §5의 2025 WebSocket 동기화 |
 | `wait` | `GET /api/kernels/{kernel_id}/runs/{run_ref}/wait` | 실행이 끝나거나 `timeout`이 지나면 JSON 한 번(SPEC FR-S7) |
 
-짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. POSIX 커널은 구현됨(#47), Windows `share`는 구현 대기(#47). `ws`의 동기화 메시지(§5)는 POSIX 커널에 구현됨(#49).
+짧은 요청(§3.3의 나머지 메서드)은 넘기지 않습니다. 커널 구현됨(#47, POSIX `fd`, Windows `share`). `ws`의 동기화 메시지(§5)는 POSIX 커널에 구현됨(#49).
 
 #### 3.7.1 `adopt` 요청
 
