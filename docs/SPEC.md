@@ -338,7 +338,8 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 
 ### FR-M2 커널 시작은 멱등 — `Done`
 `POST /kernels {path}`는 그 파일의 커널이 살아 있으면 그 커널을 `200`으로, 없으면 새로 띄워서 `201`로 돌려줍니다. 커널이 announce를 낼 때까지 최대 10초를 기다립니다.
-- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 시작한 프로세스의 pid와 announce의 pid는 같다고 가정하지 않습니다. Windows의 venv `python.exe`는 진짜 인터프리터를 자식으로 띄우고 기다리는 런처라서, 매니저가 띄운 pid와 커널이 알리는 `os.getpid()`가 다릅니다. announce의 pid가 띄운 pid와 다르면 매니저는 최대 2초 동안 띄운 프로세스가 스스로 끝나는지 봅니다. 끝나면(파일 잠금 경쟁에서 져서 종료 코드 3으로 끝남, FR-K3) 다른 커널이 이긴 것이므로 `launched`는 거짓입니다. 2초 뒤에도 살아 있으면 런처이고 그 자식이 커널이므로 `launched`는 참입니다. 어느 쪽이든 매니저는 띄운 프로세스를 죽이지 않습니다. 런처를 죽이면 job object 때문에 진짜 커널도 같이 죽습니다.
+- 테스트: `test_fr_m2_start_kernel_is_idempotent`(Rust `darkpyonix/manager/crates/dpx-server/tests/api.rs`), Rust `fr_m2_start_kernel_is_idempotent_on_every_interpreter`, `fr_m2_start_timeout_when_no_announce`, `fr_m2_ensure_starts_the_interpreter_without_a_discovery_wait`, `fr_m2_ensure_attaches_to_a_live_kernel_unknown_to_the_cache`, `fr_m2_venv_launcher_pid_differs_from_kernel_pid`, `fr_m2_lost_start_race_is_not_launched`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-M3 임시 모드 수명 — `Done` (유휴 판정이 바뀜, 구현됨 #47, develop CI 실행 41936239905에서 Rust 테스트 통과 확인)
 임시 매니저는 `127.0.0.1`의 임의 포트에 리슨합니다. 주소와 토큰은 자기를 띄운 프로세스에게 표준 출력 한 줄(JSON `{url, token, pid}`)로만 알리고 파일에 쓰지 않습니다(INTENT D4, FR-D2). HTTP 요청이 없는 상태가 `idle_timeout`(기본 120초) 동안 이어지면 스스로 끝납니다. 커널에 넘긴 스트림은 세지 않습니다. 매니저가 그 연결을 들고 있지 않고, 매니저가 끝나도 이어지기 때문입니다(INTENT D6). TLS·HTTP/2·터널로 퍼 나르는 스트림도 세지 않습니다(커널이 소유하고 `Handoff` 표시를 단 응답). 끝날 때 커널은 건드리지 않습니다.
