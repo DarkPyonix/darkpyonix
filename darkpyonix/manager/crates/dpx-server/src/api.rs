@@ -1191,25 +1191,34 @@ pub async fn verify_token(
 ) -> Response {
     let r = async {
         visible(&st, &p, &kid).await?;
-        // A share made with `POST /shares` lives in the manager database (FR-A6, #113). A token of
-        // another kernel answers like an unknown one, so it does not tell that it exists.
-        if let Some((sp, revoked)) = st.auth.shares.as_ref().and_then(|store| store.db_row(&token)) {
-            if sp.kernel_id.as_deref() != Some(kid.as_str()) {
-                return Err(ApiError::unauthorized());
+        // A share made with `POST /shares` is a manager database record the kernel knows nothing
+        // about, so it is checked here. A token of another kernel answers like an unknown one so
+        // that it does not reveal that the token exists.
+        if let Some(store) = st.auth.shares.as_ref() {
+            match store.db_row(&token) {
+                auth::DbShare::Live(sp) => {
+                    if sp.kernel_id.as_deref() != Some(kid.as_str()) {
+                        return Err(ApiError::unauthorized());
+                    }
+                    return ok_json(
+                        StatusCode::OK,
+                        json!({
+                            "valid": true,
+                            "kernel_id": kid,
+                            "capabilities": sp.caps.names(),
+                            "blacklisted": false,
+                            "password_set": st.auth.password_set(),
+                        }),
+                    );
+                }
+                auth::DbShare::Revoked { kernel_id } => {
+                    if kernel_id != kid {
+                        return Err(ApiError::unauthorized());
+                    }
+                    return Err(ApiError::new(StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked"));
+                }
+                auth::DbShare::Unknown => {}
             }
-            if revoked {
-                return Err(ApiError::new(StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked"));
-            }
-            return ok_json(
-                StatusCode::OK,
-                json!({
-                    "valid": true,
-                    "kernel_id": kid,
-                    "capabilities": sp.caps.names(),
-                    "blacklisted": false,
-                    "password_set": st.auth.password_set(),
-                }),
-            );
         }
         let v = call(&st, &kid, "tokens.verify", json!({ "token": token })).await?;
         if v["revoked"].as_bool() == Some(true) {
