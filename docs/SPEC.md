@@ -369,6 +369,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 상태 메모: 평문 TCP는 hyper가 읽기 전에 요청 머리를 `peek`해서 검사하고(`handoff::intercept`), 통과하면 머리를 읽어 치우고 소켓을 `SCM_RIGHTS`로 넘긴 뒤 자기 복사본을 닫습니다. 검사에 실패하면 hyper에 그대로 넘겨 평소의 `401`/`403`/`404`/`400`이 나갑니다. 커널에는 토큰을 뺀 요청을 다시 만들어 보냅니다. 아직 없음: Windows `WSADuplicateSocketW`, TLS·HTTP/2 위의 WebSocket 퍼 나르기(`/api/ws/…` 경로 자체가 #49), 공유 토큰 재발급 시 `streams.close`(재발급이 #48). 이 PR은 Rust를 컴파일하지 않고 썼으므로 CI 결과가 첫 확인입니다.
 
 ## 8. CLI (C)
+- 연결 하나의 첫 요청만 넘길 수 있다. 같은 연결을 재사용(keep-alive)한 두 번째 이후의 스트림 요청은 넘기지 않고 매니저가 중계하므로 매니저와 함께 끝난다. 스트림을 구독하는 클라이언트는 새 연결을 써야 한다.
 
 ### FR-C1 매니저 찾기 — `Done` (사용자 지시, 2026-10-05 구현, develop CI 실행 41936239905에서 Rust 테스트 통과 확인)
 매니저의 주소와 토큰을 파일로 나누지 않습니다(INTENT D4). `darkpyonix` CLI는 `DARKPYONIX_MANAGER_URL`과 `DARKPYONIX_TOKEN`이 있으면 그 매니저를 씁니다. 에이전트가 이미 아는 토큰입니다. 없으면 자기 임시 매니저를 자식 프로세스로 띄우고, 그 매니저가 표준 출력 첫 줄에 쓴 `{url, token, pid}`를 파이프로 읽어 씁니다. 토큰을 모르는 에이전트는 이렇게 자기 매니저를 씁니다. 커널은 모든 매니저가 멀티캐스트로 찾으므로 어느 매니저로 붙어도 같은 커널입니다(FR-M5).
@@ -814,7 +815,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 커널과 런타임 API는 CPython 3.8 이상 모든 마이너 버전에서 동작합니다. 테스트는 그 기계에 있는 모든 인터프리터(`DARKPYONIX_TEST_PYTHONS`, 기본은 PATH에서 찾은 `python3.*`)로 커널 테스트를 돌립니다.
 - 테스트: `python` 픽스처로 매개변수화된 커널·런타임 테스트 39개(`tests/conftest.py`)
 - 측정 기록 (2026-10-03, macOS arm64): `DARKPYONIX_TEST_PYTHONS`에 CPython 3.8.20, 3.9.6, 3.10.20, 3.11.10, 3.12.13, 3.13.0(intel64), 3.14.7, 3.15.0rc1을 넣어 39개 × 8개 인터프리터 = 312개 중 304개 통과, 8개는 `DARKPYONIX_SKIP_PERF=1`로 뺀 NFR-K3 측정입니다(NFR-K3는 따로 돌려 통과). 3.8·3.10·3.12는 `uv python install`로 `.scratch/` 아래에 받은 인터프리터입니다.
-- 측정 기록 (2026-11-05, 맥미니 M 시리즈, 부하 평균 약 2.8, 디버그 빌드, `cargo test -p darkpyonix --test manager_latency`): 같은 시험(10 ms 간격 200줄)에서 p50 29 ms, p99 59 ms, 최대 60 ms입니다. 시험의 매니저는 실제 파이썬 커널 앞에서 평문 TCP로 SSE를 받으므로 넘김 대상(FR-M6)입니다. 다만 시험이 이 연결이 실제로 넘겨졌다는 것을 따로 단언하지는 않으므로, 넘김 경로 단언을 더한 뒤에 `Done`으로 올립니다(#47).
+- 측정 기록 (2026-11-05, 맥미니 M 시리즈, 부하 평균 약 2.8, 디버그 빌드, `cargo test -p darkpyonix --test manager_latency`): 구독자가 새 연결로 SSE를 받아 커널이 소켓을 넘겨받고(FR-M6), 20줄이 도착한 뒤 매니저를 멈춰도 나머지 줄이 모두 도착하는 것까지 시험이 단언한다. 10 ms 간격 200줄에서 p50 30 ms, p99 59 ms, 최대 59 ms다(50 ms 병합 창 포함, 중계 때의 p99 61 ms와 같은 수준).
 
 ### NFR-K2 표준 라이브러리 전용 — `Done`
 `darkpyonix/kernel/*.py`(런타임 API와 커널 프로세스 모듈), `darkpyonix/kernel/format/`의 모든 import가 표준 라이브러리임을 테스트가 AST로 확인합니다(`sys.stdlib_module_names`, 3.8용 고정 목록 병행). 예외는 `darkpyonix/kernel/_mplbackend.py` 하나입니다. 사용자 코드가 pyplot을 import할 때 matplotlib이 직접 불러오는 백엔드 모듈이라 `matplotlib`을 import할 수 있고(FR-X6), 다른 커널 코드는 이 모듈을 import하지 않습니다.
@@ -837,7 +838,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 테스트: Rust `test_nfr_m1_list_kernels_with_20_real_kernels_within_300_ms`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널 20개, 캐시·`refresh=true`·새 매니저의 첫 조회)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 커널 20개에서 캐시 조회 p50 2.2 ms·p99 4.9 ms, `refresh=true` p50 3.9 ms·p99 5.1 ms, 새 매니저의 첫 조회 p50 4.6 ms·최대 4.7 ms입니다.
 
-### NFR-M2 이벤트 지연 — `Agreed` (재측정 대기 #47, 넘김 구현 뒤 CI에서 측정)
+### NFR-M2 이벤트 지연 — `Done` (넘긴 스트림으로 재측정 2026-11-05)
 커널의 출력이 SSE 구독자에게 도달하기까지 p99 100 ms 이하입니다(스트림 병합 50 ms 포함). 스트림 넘김(FR-M6) 뒤에는 커널이 구독자 소켓에 직접 쓰므로 그 경로로 다시 잽니다. 아래 기록은 매니저가 중계하던 구현의 값입니다.
 - 테스트: Rust `test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99`(`darkpyonix/manager/crates/darkpyonix/tests/manager_latency.rs`, 실제 커널의 `print` 시각부터 SSE 수신까지)
 - 측정 기록 (2026-10-03, 맥미니 M 시리즈, 부하 평균 약 1.3, 디버그 빌드): 10 ms 간격 200줄에서 p50 31 ms, p99 61 ms, 최대 63 ms입니다(50 ms 병합 창 포함).
