@@ -75,6 +75,48 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  python-windows:
+    name: Python on Windows (${{ matrix.python }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.8", "3.13"]
+    env:
+      DARKPYONIX_HOME: ${{ github.workspace }}\.scratch\home
+      DARKPYONIX_SKIP_PERF: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the test tools
+        run: python -m pip install "pytest>=7,<8.4" "pyyaml>=6" "nbformat>=5" "jsonschema>=4"
+      - name: Named-pipe control channel (FR-A1, PR-2, PR-5; #80)
+        shell: pwsh
+        run: |
+          # The real-pipe tests must run on Windows; a skip there is a failure.
+          python -m pytest -rs -p no:cacheprovider tests/test_fr_a1_windows_pipe.py tests/test_nfr_k2_stdlib_only.py 2>&1 | Tee-Object -FilePath pytest-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Select-String -Path pytest-win.log -Pattern "needs a Windows named pipe") {
+            Write-Error "real Windows pipe tests were skipped"; exit 1
+          }
+
+  rust-windows:
+    name: Rust manager on Windows (kernel client)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: darkpyonix/manager
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: darkpyonix/manager
+      - name: Named-pipe client (FR-A1; #80)
+        run: cargo test -p dpx-kernel test_fr_a1
+
   hub-worker:
     name: Hub worker
     runs-on: ubuntu-latest
