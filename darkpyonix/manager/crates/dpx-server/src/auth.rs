@@ -320,7 +320,8 @@ impl ShareStore {
                  created_at    TEXT NOT NULL,
                  expires_at    TEXT,
                  expires_unix  INTEGER,
-                 token_sha256  TEXT NOT NULL UNIQUE
+                 token_sha256  TEXT NOT NULL UNIQUE,
+                 revoked_at    TEXT
              );
              CREATE INDEX IF NOT EXISTS shares_kernel ON shares(kernel_id);
              CREATE TABLE IF NOT EXISTS manager_auth (
@@ -337,6 +338,14 @@ impl ShareStore {
              );",
         )
         .map_err(std::io::Error::other)?;
+        // Databases made before #113 have no tombstone column: a revoked share was deleted.
+        let has_revoked: bool = conn
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('shares') WHERE name = 'revoked_at'", [], |r| r.get::<_, i64>(0))
+            .map(|n| n > 0)
+            .map_err(std::io::Error::other)?;
+        if !has_revoked {
+            conn.execute("ALTER TABLE shares ADD COLUMN revoked_at TEXT", []).map_err(std::io::Error::other)?;
+        }
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -344,33 +353,42 @@ impl ShareStore {
         self.conn.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    pub fn authenticate(&self, token: &str) -> Option<Principal> {
+    /// A manager database share (`POST /shares`) found by its token hash: its principal, and whether
+    /// it was revoked. `None` for an unknown or expired token. The token is only ever compared by
+    /// hash (the lookup key), never stored (#113).
+    pub fn db_row(&self, token: &str) -> Option<(Principal, bool)> {
         let digest = sha256_hex(token);
-        type ShareRow = (String, String, String, Option<i64>, Option<String>);
+        type ShareRow = (String, String, String, Option<i64>, Option<String>, Option<String>);
         let row: Option<ShareRow> = self
             .lock()
             .query_row(
-                "SELECT share_id, kernel_id, permission, expires_unix, label FROM shares WHERE token_sha256 = ?1",
+                "SELECT share_id, kernel_id, permission, expires_unix, label, revoked_at FROM shares WHERE token_sha256 = ?1",
                 params![digest],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
             )
             .optional()
             .ok()
             .flatten();
-        let (share_id, kernel_id, permission, expires, label) = row?;
-        if let Some(t) = expires {
-            if t <= util::unix_now() {
-                return None;
+        let (share_id, kernel_id, permission, expires, label, revoked) = row?;
+        let revoked = revoked.is_some();
+        if !revoked {
+            if let Some(t) = expires {
+                if t <= util::unix_now() {
+                    return None;
+                }
             }
         }
-        Some(Principal {
-            caps: parse_caps(&permission)?,
-            kernel_id: Some(kernel_id),
-            share_id: Some(share_id),
-            label,
-            master: false,
-            initial: false,
-        })
+        Some((
+            Principal {
+                caps: parse_caps(&permission)?,
+                kernel_id: Some(kernel_id),
+                share_id: Some(share_id),
+                label,
+                master: false,
+                initial: false,
+            },
+            revoked,
+        ))
     }
 
     fn auth_get(&self, key: &str) -> Option<String> {
@@ -451,7 +469,7 @@ impl ShareStore {
         let conn = self.lock();
         let mut stmt = conn.prepare(
             "SELECT share_id, kernel_id, permission, label, created_at, expires_at
-             FROM shares WHERE kernel_id = ?1 ORDER BY created_at, share_id",
+             FROM shares WHERE kernel_id = ?1 AND revoked_at IS NULL ORDER BY created_at, share_id",
         )?;
         let rows = stmt.query_map(params![kernel_id], |r| {
             Ok(Share {
@@ -503,8 +521,8 @@ impl ShareStore {
 
     pub fn revoke(&self, kernel_id: &str, share_id: &str) -> rusqlite::Result<bool> {
         let n = self.lock().execute(
-            "DELETE FROM shares WHERE share_id = ?1 AND kernel_id = ?2",
-            params![share_id, kernel_id],
+            "UPDATE shares SET revoked_at = ?3 WHERE share_id = ?1 AND kernel_id = ?2 AND revoked_at IS NULL",
+            params![share_id, kernel_id, util::now_iso()],
         )?;
         Ok(n > 0)
     }
@@ -552,8 +570,9 @@ impl Auth {
         }
         let Some(shares) = self.shares.as_ref() else { return Lookup::Unknown };
         match shares.shared_lookup(token) {
-            Lookup::Unknown => match shares.authenticate(token) {
-                Some(p) => Lookup::Found(p),
+            Lookup::Unknown => match shares.db_row(token) {
+                Some((_, true)) => Lookup::Revoked,
+                Some((p, false)) => Lookup::Found(p),
                 None => Lookup::Unknown,
             },
             other => other,
