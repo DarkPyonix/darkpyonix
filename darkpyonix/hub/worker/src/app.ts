@@ -19,7 +19,7 @@ import {
 import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
 import type { Deps, Env } from "./env";
 import { callback, login, logout } from "./github";
-import { ApiError, SESSION_COOKIE, getCookie, html, json, redirect } from "./http";
+import { ApiError, SESSION_COOKIE, corsOrigin, getCookie, html, json, redirect } from "./http";
 import { clearAcmeChallenge, listNames, releaseName, reserveName, setAcmeChallenge } from "./names";
 import { createNotebook, listMine, listPublic, getNotebook, updateNotebook, deleteNotebook, pushVersion, readVersion, deleteVersion, readSource, readRun, purgeOrphans } from "./notebooks";
 import { linkPage } from "./pages";
@@ -57,9 +57,11 @@ function config(_request: Request, env: Env): Response {
     200,
     {
       hub_version: VERSION,
+      api_url: env.API_URL,
+      front_url: env.FRONT_URL,
       relay_urls: [env.RELAY_URL],
-      pkarr_url: `${env.PUBLIC_URL}/pkarr`,
-      link_url: `${env.PUBLIC_URL}/link`,
+      pkarr_url: `${env.API_URL}/pkarr`,
+      link_url: `${env.FRONT_URL}/link`,
     },
     { "cache-control": "public, max-age=300" },
   );
@@ -143,7 +145,7 @@ export const ROUTES: Route[] = [
   route("/names/{name}/acme-challenge", { PUT: setAcmeChallenge, DELETE: clearAcmeChallenge }),
 ];
 
-export async function handle(request: Request, env: Env, deps: Deps): Promise<Response> {
+async function dispatch(request: Request, env: Env, deps: Deps): Promise<Response> {
   const url = new URL(request.url);
   try {
     for (const r of ROUTES) {
@@ -156,7 +158,6 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
       const params = match.slice(1).map((p) => decodeURIComponent(p));
       return await handler(request, env, deps, ...params);
     }
-    // Everything else: static assets (the ash viewer's files under /ash/).
     if (url.pathname.startsWith("/ash/")) return env.ASSETS.fetch(request);
     return json(404, { error: "not found" });
   } catch (err) {
@@ -164,6 +165,26 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
     console.error("unhandled", err);
     return json(500, { error: "internal error" });
   }
+}
+
+export async function handle(request: Request, env: Env, deps: Deps): Promise<Response> {
+  const origin = request.headers.get("origin");
+  const allowed = corsOrigin(origin, env);
+  const response = request.method === "OPTIONS" && allowed
+    ? new Response(null, { status: 204 })
+    : await dispatch(request, env, deps);
+  if (allowed && origin) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+    response.headers.append("Vary", "Origin");
+    response.headers.set("Access-Control-Expose-Headers", "ETag");
+    if (request.method === "OPTIONS") {
+      response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE");
+      response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, If-None-Match");
+      response.headers.set("Access-Control-Max-Age", "600");
+    }
+  }
+  return response;
 }
 
 /** Hourly: drop expired single-use rows. */

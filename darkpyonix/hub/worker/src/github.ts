@@ -10,6 +10,7 @@ import {
   SESSION_COOKIE,
   STATE_COOKIE,
   clearCookie,
+  corsOrigin,
   getCookie,
   noContent,
   redirect,
@@ -33,7 +34,7 @@ function configured(env: Env): { clientId: string; clientSecret: string } {
 }
 
 function callbackUrl(env: Env): string {
-  return `${env.PUBLIC_URL}/auth/callback`;
+  return `${env.API_URL}/auth/callback`;
 }
 
 /** `GET /auth/login?return_to=/path`: start the GitHub authorization. */
@@ -189,7 +190,7 @@ export async function callback(request: Request, env: Env, deps: Deps): Promise<
   )
     .bind(await hashToken(session), accountId, now, now + SESSION_TTL_SECS)
     .run();
-  return redirect(safeReturnTo(tx.return_to), [
+  return redirect(`${env.FRONT_URL}${safeReturnTo(tx.return_to)}`, [
     ["set-cookie", setCookie(SESSION_COOKIE, session, SESSION_TTL_SECS)],
     ["set-cookie", clearCookie(STATE_COOKIE)],
   ]);
@@ -198,7 +199,7 @@ export async function callback(request: Request, env: Env, deps: Deps): Promise<
 /** `POST /auth/logout` */
 export async function logout(request: Request, env: Env): Promise<Response> {
   const origin = request.headers.get("origin");
-  if (origin !== null && origin !== new URL(env.PUBLIC_URL).origin) {
+  if (getCookie(request, SESSION_COOKIE) && !corsOrigin(origin, env)) {
     throw ApiError.forbidden("cross-origin logout");
   }
   const session = getCookie(request, SESSION_COOKIE);

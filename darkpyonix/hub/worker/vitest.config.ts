@@ -3,7 +3,7 @@ import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-worker
 import { defineConfig } from "vitest/config";
 
 // Tests run inside workerd (the pool's own Miniflare), with the bindings of wrangler.toml:
-// D1 (migrated per test file by test/apply-migrations.ts), the assets and the rate limiter.
+// D1 (migrated per test file by test/apply-migrations.ts) and the rate limiter.
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({

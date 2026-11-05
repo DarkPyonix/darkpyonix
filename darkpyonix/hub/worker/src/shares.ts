@@ -43,7 +43,7 @@ export async function publishShare(request: Request, env: Env, deps: Deps): Prom
     .bind(shareId)
     .first<{ endpoint_id: string }>();
   if (owner?.endpoint_id !== device.endpointId) throw ApiError.conflict("published by another device");
-  return json(201, { share_id: shareId, url: `${env.PUBLIC_URL}/s/${shareId}` });
+  return json(201, { share_id: shareId, url: `${env.FRONT_URL}/s/${shareId}` });
 }
 
 /** `GET /shares/{share_id}`: public. Returns the host and a fresh guest relay pass. */

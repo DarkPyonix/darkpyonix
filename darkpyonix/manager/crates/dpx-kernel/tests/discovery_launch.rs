@@ -529,3 +529,59 @@ async fn fr_r4_document_is_built_by_the_embedded_python() {
         .unwrap_err();
     assert_eq!(err.code, "not_found");
 }
+
+/// FR-M2: `python` may be a launcher stub (a Windows venv `python.exe`) that runs the real
+/// interpreter as a child and waits, so the pid we spawn is not the pid the kernel announces.
+/// The kernel is ours (`launched`) and must not be killed.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fr_m2_venv_launcher_pid_differs_from_kernel_pid() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("m2-launcher");
+    let home = dir.join("home");
+    let be = backend(&home);
+    let reaper = Reaper::default();
+    let nb = write_notebook(&dir, "nb.py");
+    let launcher = dir.join("launcher.sh");
+    // No `exec`: the shell stays alive as the parent and waits for the real interpreter.
+    std::fs::write(
+        &launcher,
+        format!(
+            "#!/bin/sh\n\"{}\" \"$@\"\nrc=$?\nexit $rc\n",
+            venv_python().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let e = be.ensure(start(&nb, Some(&launcher))).await.unwrap();
+    reaper.add(e.kernel.pid);
+    assert!(e.launched, "a launcher stub's kernel is the one we launched");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(process::pid_alive(e.kernel.pid), "the kernel stays alive");
+    let again = be.get(&e.kernel.kernel_id).await.unwrap();
+    assert_eq!(again.pid, e.kernel.pid);
+    for p in kernel_pids_for(&nb) {
+        reaper.add(p);
+    }
+}
+
+/// FR-M2: a manager whose child loses the start race (the file lock is held) reports
+/// `launched = false` and returns the winner's kernel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fr_m2_lost_start_race_is_not_launched() {
+    let dir = scratch("m2-lost-race");
+    let home = dir.join("home");
+    let winner = backend(&home);
+    let reaper = Reaper::default();
+    let nb = write_notebook(&dir, "nb.py");
+    let first = winner.ensure(start(&nb, None)).await.unwrap();
+    reaper.add(first.kernel.pid);
+    assert!(first.launched);
+
+    let loser = backend(&home); // empty cache: it spawns a child that loses the lock
+    let second = loser.ensure(start(&nb, None)).await.unwrap();
+    assert!(!second.launched);
+    assert_eq!(second.kernel.pid, first.kernel.pid);
+    assert!(process::pid_alive(first.kernel.pid));
+}

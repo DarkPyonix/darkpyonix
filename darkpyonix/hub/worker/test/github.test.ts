@@ -12,7 +12,7 @@ describe("GitHub sign-in", () => {
     const location = new URL(response.headers.get("location")!);
     expect(location.origin + location.pathname).toBe("https://github.com/login/oauth/authorize");
     expect(location.searchParams.get("client_id")).toBe("Iv1.testclient");
-    expect(location.searchParams.get("redirect_uri")).toBe("https://darkpyonix.dev/auth/callback");
+    expect(location.searchParams.get("redirect_uri")).toBe("https://api.darkpyonix.dev/auth/callback");
     expect(location.searchParams.get("code_challenge_method")).toBe("S256");
     expect(location.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(location.searchParams.get("scope")).toBeNull(); // public profile only
@@ -96,7 +96,7 @@ describe("GitHub sign-in", () => {
     const state = location.searchParams.get("state")!;
     deps.github.codes.set("c1", { challenge: location.searchParams.get("code_challenge")!, user: { id: 300, login: "not-listed" } });
     const done = await handle(
-      new Request(`https://darkpyonix.dev/auth/callback?code=c1&state=${state}`, { headers: { cookie: `__Host-dp_oauth=${state}` } }),
+      new Request(`https://api.darkpyonix.dev/auth/callback?code=c1&state=${state}`, { headers: { cookie: `__Host-dp_oauth=${state}` } }),
       env,
       deps,
     );
@@ -111,7 +111,7 @@ describe("GitHub sign-in", () => {
       const state = location.searchParams.get("state")!;
       deps.github.codes.set("c", { challenge: location.searchParams.get("code_challenge")!, user: { id: 5, login: "f" } });
       const done = await call(deps, "GET", `/auth/callback?code=c&state=${state}`, { cookie: `__Host-dp_oauth=${state}` });
-      expect(done.headers.get("location")).toBe("/");
+      expect(done.headers.get("location")).toBe("https://darkpyonix.dev/");
     }
   });
 
