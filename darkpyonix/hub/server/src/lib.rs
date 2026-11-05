@@ -6,22 +6,11 @@
 //! host** at `relay.darkpyonix.dev`: the iroh relay with its probes and QUIC address
 //! discovery on UDP 7842 (FR-H3), which Workers cannot serve.
 //!
-//! Still to do here (needs a build, so it is a separate change): drop `api.rs` down to
-//! `/ping`, `/generate_204` and `/health`, drop `db.rs` and `dns.rs`, replace `HubAccess`'s
-//! SQLite lookups with `POST https://darkpyonix.dev/internal/relay/admit` (honouring
-//! `cache_secs`) plus `/internal/relay/presence` reports, add `POST /admin/disconnect`,
-//! and replace the `fr_h1`/`fr_h2`/`fr_h4`/`fr_h5` tests (now covered by `darkpyonix/hub/worker/test/`)
-//! with relay tests against a stub admission endpoint. Until then the API code below is the
-//! pre-D15 implementation and is not deployed.
-
-mod api;
-mod db;
-pub mod dns;
+mod routes;
 mod serve;
 mod state;
-mod util;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use iroh_relay::{
     defaults::DEFAULT_KEY_CACHE_CAPACITY,
@@ -33,7 +22,6 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 
-pub use crate::dns::{DnsError, DnsProvider, MemoryDns};
 
 /// A certificate chain and its private key for the hub's own TLS.
 #[derive(Debug)]
@@ -44,8 +32,6 @@ pub struct TlsCert {
 
 /// How to run a hub.
 pub struct HubConfig {
-    /// SQLite database file.
-    pub db_path: PathBuf,
     /// Main listener: HTTPS when `tls` is set, plain HTTP otherwise (development, tests).
     pub listen: SocketAddr,
     /// TLS for the main listener and for QUIC address discovery.
@@ -58,21 +44,15 @@ pub struct HubConfig {
     /// The URL the hub is reached at, e.g. `https://darkpyonix.dev`. Defaults to the main
     /// listener's address (`http(s)://<ip>:<port>`).
     pub public_url: Option<Url>,
-    /// DNS zone for names, e.g. `darkpyonix.dev`.
-    pub zone: String,
-    /// If set, `POST /accounts` requires this in `X-Hub-Signup-Secret`.
-    pub signup_secret: Option<String>,
-    /// Directory with the built ash viewer, served under `/ash/`.
-    pub ash_dir: Option<PathBuf>,
-    /// Where ACME challenge TXT records go.
-    pub dns: Arc<dyn DnsProvider>,
+    /// Worker API base URL.
+    pub api_url: Url,
+    /// Shared secret for relay callbacks and administrative requests.
+    pub relay_shared_secret: String,
 }
 
 /// Errors starting a hub.
 #[derive(Debug, thiserror::Error)]
 pub enum HubError {
-    #[error("database: {0}")]
-    Db(#[from] rusqlite::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("tls: {0}")]
@@ -141,11 +121,9 @@ pub async fn start(config: HubConfig) -> Result<RunningHub, HubError> {
             "QUIC address discovery needs a TLS certificate".to_string(),
         ));
     }
-    if let Some(parent) = config.db_path.parent() {
-        std::fs::create_dir_all(parent)?;
+    if config.relay_shared_secret.is_empty() || !matches!(config.api_url.scheme(), "http" | "https") || config.api_url.host().is_none() {
+        return Err(HubError::Config("a valid API URL and nonempty relay secret are required".to_owned()));
     }
-    let db = db::Db::open(&config.db_path)?;
-
     let listener = TcpListener::bind(config.listen).await?;
     let addr = listener.local_addr()?;
     let public_url = match config.public_url {
@@ -160,14 +138,8 @@ pub async fn start(config: HubConfig) -> Result<RunningHub, HubError> {
         }
     };
 
-    let state = Arc::new(state::State::new(
-        db,
-        public_url.clone(),
-        config.zone,
-        config.signup_secret,
-        config.ash_dir,
-        config.dns,
-    ));
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let state = state::State::new(config.api_url, config.relay_shared_secret);
 
     let relay = RelayService::new(
         Handlers::default(),
@@ -211,14 +183,14 @@ pub async fn start(config: HubConfig) -> Result<RunningHub, HubError> {
         let side_listener = TcpListener::bind(side).await?;
         http_addr = Some(side_listener.local_addr()?);
         let front = serve::Frontend {
-            router: api::side_router(state.clone()),
+            router: routes::side_router(state.clone(), public_url.clone()),
             relay: None,
         };
         tasks.push(tokio::spawn(serve::run(side_listener, None, front)));
     }
 
     let front = serve::Frontend {
-        router: api::router(state.clone()),
+        router: routes::router(state.clone()),
         relay: Some(relay),
     };
     tasks.push(tokio::spawn(serve::run(listener, acceptor, front)));
