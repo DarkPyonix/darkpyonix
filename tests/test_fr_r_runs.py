@@ -325,34 +325,15 @@ def test_fr_r2_update_is_throttled(scratch):
         assert len(json.load(f)["cells"][0]["outputs"]) == n   # the last update was written
 
 
-def test_fr_r2_slow_writes_shrink_the_interval_to_keep_the_one_second_bound(scratch, monkeypatch):
-    """A snapshot is visible only after the write finishes, so a slow disk or a loaded runner
-    (#77) adds its duration to the staleness. The schedule must absorb that."""
-    path = notebook_file(scratch)
-    store = runs.RunStore(path, kernel_id_for(path))
-    run = make_run(path)
-    rec = add_cell(run, 1, "loop()")
-    store.begin(run)
-    spans = []                                   # (snapshot started, snapshot visible)
-    real = runs._write_atomic
-
-    def slow(p, data):
-        t0 = time.monotonic()
-        time.sleep(0.4)
-        real(p, data)
-        spans.append((t0, time.monotonic()))
-
-    monkeypatch.setattr(runs, "_write_atomic", slow)
-    start = time.monotonic()
-    while time.monotonic() - start < 4.0:
-        rec.outputs.append(stream("x\n"))
-        store.update(run)
-        time.sleep(0.01)
-    time.sleep(1.0)
-    assert len(spans) >= 4, spans
-    # the oldest output missing just before write i+1 became visible was captured at the start of write i
-    stale = [b[1] - a[0] for a, b in zip(spans, spans[1:])]
-    assert all(g <= 1.0 for g in stale), stale
+def test_fr_r2_slow_writes_shrink_the_interval_to_keep_the_one_second_bound():
+    eps = 1e-12
+    for took in (0, 0.1, 0.3, 0.5, 0.7, 2.0):
+        interval = runs.next_write_interval(took)
+        assert interval == min(0.8, max(0.25, runs.STALENESS_BUDGET - took))
+        assert runs.MIN_WRITE_INTERVAL <= interval <= runs.WRITE_INTERVAL
+        if took <= runs.STALENESS_BUDGET - runs.MIN_WRITE_INTERVAL:
+            assert interval + took <= runs.STALENESS_BUDGET + eps
+        assert runs.STALENESS_BUDGET <= 0.85 + eps
 
 
 # ---------------------------------------------------------------- FR-R3

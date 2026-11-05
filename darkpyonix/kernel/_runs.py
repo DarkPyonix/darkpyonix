@@ -50,6 +50,11 @@ _RUN_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
 _TMP_RE = re.compile(r"^.+\.[0-9a-f]{8}\.tmp$")
 
 
+def next_write_interval(write_took: float) -> float:
+    """Choose the next snapshot interval from the previous write duration."""
+    return min(WRITE_INTERVAL, max(MIN_WRITE_INTERVAL, STALENESS_BUDGET - write_took))
+
+
 def runs_dir_for(path: str) -> str:
     """``<dir of file>/__runs__/<file name>/`` (INTENT D8). Not created."""
     full = os.path.abspath(path)
@@ -339,7 +344,7 @@ class RunStore(object):
                     if not self._cond.wait(timeout=30.0) and not self._dirty:
                         self._writer = None
                         return
-                interval = min(WRITE_INTERVAL, max(MIN_WRITE_INTERVAL, STALENESS_BUDGET - self._write_took))
+                interval = next_write_interval(self._write_took)
                 wait = self._last_write + interval - time.monotonic()
                 if wait > 0:
                     self._cond.wait(timeout=wait)
