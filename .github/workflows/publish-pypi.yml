@@ -1,67 +1,260 @@
 name: Publish to PyPI
 
-# Publishing happens only when a GitHub Release is published. The upload uses PyPI trusted
-# publishing (OIDC); there is no API token anywhere in this repository.
+# SPEC FR-C3, INTENT D22. One release builds:
+#   * a py3-none-<platform> wheel per supported platform, holding the Rust `darkpyonix`
+#     binary (CLI + manager) as the wheel script, plus the kernel and runtime API;
+#   * a py3-none-any wheel and an sdist with kernel + runtime API only, whose `darkpyonix`
+#     command says the manager is unsupported (musl Linux and every other platform).
+# Every wheel is installed into a fresh venv on a matching runner and smoke-tested before
+# anything can be uploaded.
+#
+# Upload happens only when a GitHub Release is published, through PyPI trusted publishing
+# (OIDC); there is no API token anywhere in this repository. Run the workflow by hand
+# (Actions > Publish to PyPI > Run workflow) for a dry run: it builds and smoke-tests
+# everything and uploads nothing.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+  # Dry run from a branch: workflow_dispatch only exists for workflows on the default branch.
+  # A pull request that touches packaging builds and smoke-tests everything; the publish job
+  # below is release-only, so a pull request never uploads.
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/publish-pypi.yml"
+      - "pyproject.toml"
+      - "darkpyonix/manager/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build:
-    name: Build and check the package
+  version:
+    name: Check versions
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-
-      - name: Build sdist and wheel
-        run: uv build -o dist
-
-      - name: Release tag must be v + package version
+      - id: v
         env:
+          EVENT: ${{ github.event_name }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          # The version is declared once, in darkpyonix/kernel/__init__.py, and pyproject.toml
-          # reads it from there ([tool.hatch.version]); the built wheel carries it.
-          version="$(python3 - <<'PY'
-          import glob, zipfile
-          whl, = glob.glob("dist/*.whl")
-          with zipfile.ZipFile(whl) as z:
-              meta = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
-              for line in z.read(meta).decode().splitlines():
-                  if line.startswith("Version: "):
-                      print(line.split(": ", 1)[1])
-                      break
-          PY
-          )"
-          echo "tag=$TAG package=$version"
-          if [ "$TAG" != "v$version" ]; then
+          # kernel/__init__.py is the single source; Cargo.toml must follow it.
+          python3 packaging/check_versions.py
+          version="$(grep -m1 '^__version__' darkpyonix/kernel/__init__.py | cut -d'"' -f2)"
+          echo "tag=${TAG:-<none>}"
+          if [ "$EVENT" = "release" ] && [ "$TAG" != "v$version" ]; then
             echo "::error::release tag '$TAG' does not match package version 'v$version'"
             exit 1
           fi
 
-      - name: Smoke-test the wheel in a fresh environment
-        working-directory: ${{ runner.temp }}
+  # ---- platform wheels -------------------------------------------------------------------
+  wheel:
+    name: Wheel ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            tag: macosx_11_0_arm64
+            deployment: "11.0"
+          - name: macos-x86_64
+            # Cross-compiled on the arm64 runner; smoke-tested on an Intel runner below.
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            tag: macosx_10_12_x86_64
+            deployment: "10.12"
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            container: quay.io/pypa/manylinux_2_28_x86_64
+            target: x86_64-unknown-linux-gnu
+            tag: manylinux_2_28_x86_64
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
+            target: aarch64-unknown-linux-gnu
+            tag: manylinux_2_28_aarch64
+          - name: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            tag: win_amd64
+    defaults:
+      run:
+        shell: bash
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain (manylinux container)
+        if: matrix.container
         run: |
-          # Run outside the checkout so the source tree cannot shadow the installed package.
-          uv venv --no-project -p 3.8 smoke
-          uv pip install -p smoke/bin/python "$GITHUB_WORKSPACE"/dist/*.whl
-          smoke/bin/python -c "import darkpyonix, darkpyonix._server, darkpyonix._protocol as p; assert p.KERNEL_VERSION == darkpyonix.__version__; print(darkpyonix.__version__, darkpyonix.__file__)"
-          # The kernel's launch command.
-          smoke/bin/python -m darkpyonix --help
+          # manylinux_2_28 keeps the binary loadable on glibc >= 2.28.
+          command -v cmake >/dev/null || yum install -y cmake
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "/opt/python/cp312-cp312/bin" >> "$GITHUB_PATH"
+      - name: Toolchain
+        if: ${{ !matrix.container }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        if: ${{ !matrix.container }}
+        with:
+          python-version: "3.12"
+
+      - name: Build the darkpyonix binary
+        working-directory: darkpyonix/manager
+        run: cargo build --release --locked -p darkpyonix --target ${{ matrix.target }}
+
+      - name: Binary reports the package version
+        # The x86_64 macOS binary is cross-compiled; the Rosetta smoke test covers it.
+        if: matrix.name != 'macos-x86_64'
+        run: python packaging/check_versions.py --binary "darkpyonix/manager/target/${{ matrix.target }}/release/darkpyonix${{ runner.os == 'Windows' && '.exe' || '' }}"
+
+      - name: Binary must not need a newer glibc than manylinux_2_28
+        if: matrix.container
+        run: |
+          bin=darkpyonix/manager/target/${{ matrix.target }}/release/darkpyonix
+          newest="$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+          echo "newest glibc symbol: $newest"
+          [ "$(printf '%s\nGLIBC_2.28\n' "$newest" | sort -V | tail -1)" = "GLIBC_2.28" ]
+
+      - name: Build the wheel around the binary
+        env:
+          DARKPYONIX_BINARY: ${{ github.workspace }}/darkpyonix/manager/target/${{ matrix.target }}/release/darkpyonix${{ runner.os == 'Windows' && '.exe' || '' }}
+          DARKPYONIX_WHEEL_TAG: ${{ matrix.tag }}
+        run: |
+          python -m pip install "hatchling>=1.27"
+          python -m hatchling build -t wheel -d dist
+          ls -l dist
+          # exactly one wheel, with the expected tag and version
+          test "$(ls dist | wc -l | tr -d " ")" = 1
+          test -f "dist/darkpyonix-${{ needs.version.outputs.version }}-py3-none-${{ matrix.tag }}.whl"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: dist-${{ matrix.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  # ---- fallback wheel and sdist ----------------------------------------------------------
+  fallback:
+    name: Fallback wheel and sdist
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"   # pinned: resolving "latest" calls the GitHub API (rate limit)
+      - name: Build
+        run: |
+          uv build --sdist --wheel -o dist
+          ls -l dist
+          test -f "dist/darkpyonix-${{ needs.version.outputs.version }}-py3-none-any.whl"
+          test -f "dist/darkpyonix-${{ needs.version.outputs.version }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-fallback
           path: dist/
           if-no-files-found: error
 
+  # ---- fresh-venv smoke tests ------------------------------------------------------------
+  smoke:
+    name: Smoke ${{ matrix.name }}
+    needs: [version, wheel]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: macos-arm64,   runner: macos-latest,     pyspec: "3.8"}
+          # arm64 runner, x86_64 Python and wheel: the binary runs under Rosetta.
+          - {name: macos-x86_64,  runner: macos-latest,     pyspec: "cpython-3.8-macos-x86_64"}
+          - {name: linux-x86_64,  runner: ubuntu-latest,    pyspec: "3.8"}
+          - {name: linux-aarch64, runner: ubuntu-24.04-arm, pyspec: "3.8"}
+          - {name: windows-x64,   runner: windows-latest,   pyspec: "3.8"}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The checkout supplies only packaging/smoke.py; the package under test comes from the wheel.
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"   # pinned: resolving "latest" calls the GitHub API (rate limit)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # runs packaging/smoke.py only; the venv under test is 3.8
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: dist
+      - name: Rosetta
+        if: matrix.name == 'macos-x86_64'
+        run: |
+          softwareupdate --install-rosetta --agree-to-license || true
+          arch -x86_64 /usr/bin/true && echo "Rosetta works"
+      - name: Install the wheel into a fresh venv (oldest supported Python)
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv venv --no-project -p "${{ matrix.pyspec }}" smoke-venv
+          vpy=smoke-venv/bin/python
+          [ -x "$vpy" ] || vpy=smoke-venv/Scripts/python.exe
+          uv pip install --no-cache -p "$vpy" "$GITHUB_WORKSPACE"/dist/*.whl
+      - name: Version, manager API and kernel
+        working-directory: ${{ runner.temp }}
+        run: |
+          # -I and a cwd outside the checkout: the source tree cannot shadow the install.
+          python3 -I "$GITHUB_WORKSPACE/packaging/smoke.py" --venv smoke-venv --version "${{ needs.version.outputs.version }}"
+
+  smoke-fallback:
+    name: Smoke fallback wheel and sdist
+    needs: [version, fallback]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"   # pinned: resolving "latest" calls the GitHub API (rate limit)
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-fallback
+          path: dist
+      - name: Wheel and sdist, each in a fresh venv
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv venv --no-project -p 3.8 venv-wheel
+          uv pip install --no-cache -p venv-wheel/bin/python "$GITHUB_WORKSPACE"/dist/*.whl
+          python3 -I "$GITHUB_WORKSPACE/packaging/smoke.py" --venv venv-wheel --fallback --version "${{ needs.version.outputs.version }}"
+          # The sdist builds the same manager-less wheel on a platform without a binary wheel.
+          uv venv --no-project -p 3.8 venv-sdist
+          uv pip install --no-cache -p venv-sdist/bin/python "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          python3 -I "$GITHUB_WORKSPACE/packaging/smoke.py" --venv venv-sdist --fallback --version "${{ needs.version.outputs.version }}"
+
+  # ---- upload ----------------------------------------------------------------------------
   publish:
     name: Upload to PyPI
-    needs: build
+    # Never on workflow_dispatch: that is the dry run.
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: [version, smoke, smoke-fallback]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -71,6 +264,24 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: The release is exactly the expected files
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          test "$TAG" = "v$VERSION"
+          python3 - <<'PY'
+          import os
+          v = os.environ["VERSION"]
+          want = {f"darkpyonix-{v}-py3-none-{t}.whl" for t in (
+              "any", "macosx_11_0_arm64", "macosx_10_12_x86_64", "manylinux_2_28_x86_64",
+              "manylinux_2_28_aarch64", "win_amd64")} | {f"darkpyonix-{v}.tar.gz"}
+          have = set(os.listdir("dist"))
+          print(sorted(have))
+          if have != want:
+              raise SystemExit(f"missing {sorted(want - have)}, unexpected {sorted(have - want)}")
+          PY
       - uses: pypa/gh-action-pypi-publish@release/v1

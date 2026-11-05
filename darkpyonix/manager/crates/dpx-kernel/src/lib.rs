@@ -34,6 +34,9 @@ pub use crate::ident::{canonical_path, kernel_id_for};
 pub const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// Extra time a `runs.wait` request gets beyond its own `timeout` before the manager gives up.
 const RUNS_WAIT_MARGIN: Duration = Duration::from_secs(15);
+/// How long a child whose pid differs from the announced pid gets to exit (lost start race)
+/// before it is taken for a launcher stub (FR-M2).
+const LAUNCHER_WINDOW: Duration = Duration::from_secs(2);
 const READY_STATUSES: [&str; 2] = ["idle", "busy"];
 
 /// Backend settings. [`Config::from_env`] reads `DARKPYONIX_HOME` and
@@ -270,12 +273,21 @@ impl RealBackend {
             if let Some(entry) = self.discovery.snapshot(Some(kernel_id)).pop() {
                 let status = entry.get("status").and_then(Value::as_str).unwrap_or("");
                 if READY_STATUSES.contains(&status) {
-                    let launched = entry_pid(&entry) == pid;
+                    let mut launched = entry_pid(&entry) == pid;
                     if !launched {
-                        // Another manager's kernel won the start race and holds the file
-                        // lock. Ours has not announced, so it is not a kernel yet; stop it
-                        // so that it cannot take over later when the winner exits.
-                        child.abort();
+                        // The announced pid is not the pid we spawned. Either another
+                        // manager's kernel won the start race (our child then loses the file
+                        // lock and exits by itself, FR-K3), or `python` is a launcher stub
+                        // (a Windows venv `python.exe`) whose child is the real kernel. Give
+                        // our child a moment to exit: if it does, the winner is someone
+                        // else's; if it stays alive it is a launcher and the kernel is ours.
+                        // Never kill it here: stopping a launcher stub kills its job object,
+                        // and with it the real kernel.
+                        let window = tokio::time::Instant::now() + LAUNCHER_WINDOW;
+                        while process::pid_alive(pid) && tokio::time::Instant::now() < window {
+                            tokio::time::sleep(Duration::from_millis(25)).await;
+                        }
+                        launched = process::pid_alive(pid);
                     }
                     return Ok(Ensured {
                         kernel: self.info_with_status(entry).await,
