@@ -66,7 +66,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 - 상태 메모 (2026-10-05): 등록 파일이 없으므로(FR-D2) "종료 뒤 등록 파일 없음"은 "`kernels/` 아래에 `.json`이 없음"으로 바뀌었고, 테스트는 그것만 확인합니다.
 - 테스트: `test_fr_k8_shutdown_interrupts_running_cell_and_finishes_run`(실행기 쪽), `test_fr_k8_shutdown_is_graceful`(실제 커널 프로세스: 셀이 도는 중에 `shutdown`을 보내면 `bye` 데이터그램, 종료 코드 0, `kernels/` 아래에 `.json` 없음, 잠금을 곧바로 다시 잡을 수 있음, 실행 기록 `interrupted`). "잠금이 남지 않음"은 OS 잠금이 풀린다는 뜻이고, 잠금 파일 자체는 지우지 않습니다(지우면 `flock`과 경합이 생깁니다).
 
-### FR-K9 넘겨받은 스트림 — `Agreed` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`)
+### FR-K9 넘겨받은 스트림 — `Done` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, Windows 종단 시험 통과: CI 실행 42115113942)
 커널은 매니저가 `adopt`로 넘긴 연결(PROTOCOL §3.7)에 직접 응답합니다. `events`는 SSE, `ws`는 2025 WebSocket 동기화(PROTOCOL §5), `wait`는 실행 대기 응답입니다. 커널은 넘겨받은 요청 바이트를 소켓에서 읽은 것처럼 다루고, 인증하거나 토큰을 검사하지 않습니다. 능력 집합(`label.capabilities`, FR-A3)은 보낼 내용을 거르는 데만 씁니다. `history`가 없으면 출력과 실행 기록을 보내지 않습니다. `read`가 없으면 셀 소스를 비워 보냅니다. `edit`이 없으면 WebSocket 편집 메시지(`start_typing`)를 받지 않습니다. `streams.close {share_id}`가 오면 그 공유로 넘겨받은 스트림을 모두 닫습니다.
 - 수용 기준(사용 가능한 모든 인터프리터, NFR-K1):
   - POSIX에서 `SCM_RIGHTS`로 넘긴 SSE 연결에 커널이 `200 text/event-stream`과 이벤트를 쓰고, 넘긴 매니저를 `SIGKILL`로 죽인 뒤에도 같은 연결로 이벤트가 계속 옵니다.
@@ -353,7 +353,7 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
 같은 사용자의 매니저 여러 개가 같은 커널에 동시에 붙을 수 있고, 각자 같은 이벤트를 받습니다.
 - 테스트: `test_fr_m5_two_managers_share_one_kernel`, Rust `fr_m5_two_managers_share_one_kernel`, `fr_m5_reconnects_on_demand_after_kernel_restart`(`darkpyonix/manager/crates/dpx-kernel/tests/dkp_fake_kernel.rs`)
 
-### FR-M6 오래 열린 스트림은 커널에 넘김 — `Agreed` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, CI 확인 대기)
+### FR-M6 오래 열린 스트림은 커널에 넘김 — `Done` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, Windows 종단 시험 통과: CI 실행 42115113942)
 INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는 이벤트 스트림(`GET /api/kernels/{kernel_id}/events`), WebSocket 동기화(`GET /api/ws/kernels/{kernel_id}`), 실행 대기(`GET /api/kernels/{kernel_id}/runs/{run_ref}/wait`)를 인증하고 권한을 검사한 뒤 연결을 커널에 넘깁니다. 이미 읽은 요청 바이트와 `{capabilities, client_id, user, nickname, share_id}`를 함께 보냅니다(FR-A3). 나머지 REST 호출은 매니저가 DKP/1 요청으로 처리합니다.
 - POSIX 날 소켓: 커널의 제어 채널인 유닉스 도메인 소켓(announce의 `control`, FR-A1)으로 `SCM_RIGHTS`. 넘긴 뒤 매니저는 자기 FD를 닫습니다.
 - Windows 날 소켓: `WSADuplicateSocketW`로 만든 `WSAPROTOCOL_INFOW`를 제어 파이프 위 `adopt`의 `share`로 보냅니다.
@@ -366,7 +366,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
   - 틀린 토큰의 스트림 요청은 커널에 닿지 않고 `401`입니다.
   - 공유를 지우면 그 공유 토큰으로 연 스트림이 1초 안에 닫히고, 마스터 토큰으로 연 스트림은 남습니다.
 - 테스트(Rust): `test_fr_m6_plain_stream_survives_manager_kill`(`darkpyonix/manager/crates/darkpyonix/tests/handoff.rs`, 진짜 매니저 프로세스와 파이썬 커널), `test_fr_m6_plain_stream_is_handed_off_and_survives_the_manager`, `test_fr_m6_tls_http2_stream_is_pumped_and_ends_with_manager`(h2c로 같은 경로를 탐), `test_fr_m6_unauthenticated_stream_never_reaches_kernel`, `test_fr_m6_revoking_a_share_closes_its_streams`, `test_fr_m6_wait_is_handed_off_with_its_run_ref`(`darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `dkp.rs`의 `test_pr_5_adopt_sends_the_frame_then_the_descriptor`
-- 상태 메모: 평문 TCP는 hyper가 읽기 전에 요청 머리를 `peek`해서 검사하고(`handoff::intercept`), 통과하면 머리를 읽어 치우고 소켓을 `SCM_RIGHTS`로 넘긴 뒤 자기 복사본을 닫습니다. 검사에 실패하면 hyper에 그대로 넘겨 평소의 `401`/`403`/`404`/`400`이 나갑니다. 커널에는 토큰을 뺀 요청을 다시 만들어 보냅니다. 아직 없음: Windows `WSADuplicateSocketW`, TLS·HTTP/2 위의 WebSocket 퍼 나르기(`/api/ws/…` 경로 자체가 #49), 공유 토큰 재발급 시 `streams.close`(재발급이 #48). 이 PR은 Rust를 컴파일하지 않고 썼으므로 CI 결과가 첫 확인입니다.
+- 상태 메모: 평문 TCP는 hyper가 읽기 전에 요청 머리를 `peek`해서 검사하고(`handoff::intercept`), 통과하면 머리를 읽어 치우고 소켓을 `SCM_RIGHTS`로 넘긴 뒤 자기 복사본을 닫습니다. 검사에 실패하면 hyper에 그대로 넘겨 평소의 `401`/`403`/`404`/`400`이 나갑니다. 커널에는 토큰을 뺀 요청을 다시 만들어 보냅니다. Windows는 `WSADuplicateSocketW`로 만든 정보를 제어 파이프 위 `share`로 보내며, 윈도우 러너에서 진짜 매니저와 파이썬 커널로 `test_fr_m6_plain_stream_survives_manager_kill`이 통과한다(이슈 #121). 아직 없음: 실제 커널 앞의 TLS 위 WebSocket 시험(FR-S9, #49).
 
 ## 8. CLI (C)
 - 연결 하나의 첫 요청만 넘길 수 있다. 같은 연결을 재사용(keep-alive)한 두 번째 이후의 스트림 요청은 넘기지 않고 매니저가 중계하므로 매니저와 함께 끝난다. 스트림을 구독하는 클라이언트는 새 연결을 써야 한다.
@@ -894,7 +894,7 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
 - 테스트: `test_pr_4_unknown_fields_are_ignored`
 
-### PR-5 스트림 넘김 `adopt` — `Agreed` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, CI 확인 대기)
+### PR-5 스트림 넘김 `adopt` — `Done` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, Windows 종단 시험 통과: CI 실행 42115113942)
 PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
 - 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
 - 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. `test_pr_5_adopt_over_a_windows_pipe_is_bad_request`(Windows 전용, #80. `share`는 아직 없어서 Windows 파이프의 `adopt`는 모두 `bad_request`)
