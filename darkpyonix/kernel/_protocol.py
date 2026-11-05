@@ -43,7 +43,7 @@ EXIT_ALREADY_RUNNING = 3
 ERROR_CODES = (
     "bad_request", "unknown_method", "busy", "not_found",
     "frame_too_large", "shutting_down", "internal",
-    "conflict", "locked", "forbidden",  # PROTOCOL §4 (collaborative document)
+    "conflict", "locked",  # PROTOCOL §4 (collaborative document)
 )
 
 KERNEL_STATUSES = ("starting", "idle", "busy", "stopping")

@@ -109,7 +109,7 @@ def _error_response(status: int, reason: str, code: str, message: str) -> bytes:
 
 
 _STATUS = {"bad_request": (400, "Bad Request"), "not_found": (404, "Not Found"),
-           "busy": (409, "Conflict"), "forbidden": (403, "Forbidden"),
+           "busy": (409, "Conflict"),
            "poll_limit_exceeded": (429, "Too Many Requests")}
 
 
