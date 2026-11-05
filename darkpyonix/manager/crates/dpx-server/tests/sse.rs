@@ -73,7 +73,7 @@ async fn test_pr3_resume_older_than_the_ring_reports_replay_truncated() {
 }
 
 #[tokio::test]
-async fn test_fr_a3_viewer1_events_omit_outputs() {
+async fn test_fr_a3_read_only_events_omit_outputs() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, _) = s.kernel("train.py");
     let share = s.admin().post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"]})).await;
