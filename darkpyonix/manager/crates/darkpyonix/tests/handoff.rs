@@ -1,8 +1,10 @@
 //! SPEC FR-M6 end to end: a real `darkpyonix manager` process, a real Python kernel, and a real
-//! `SIGKILL` of the manager. The handed-off event stream keeps flowing afterwards.
+//! kill of the manager (`SIGKILL`, `TerminateProcess` on Windows). The handed-off event stream
+//! keeps flowing afterwards. On Windows the stream travels by `WSADuplicateSocketW` and
+//! `socket.fromshare`, and the CI job fails if this test did not run.
 //!
 //! `cargo test -p darkpyonix --test handoff`
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 use std::io::{BufRead, Read, Write};
 use std::net::TcpStream;
@@ -33,12 +35,14 @@ fn venv_python() -> PathBuf {
         return PathBuf::from(p);
     }
     for dir in repo_root().ancestors() {
-        let p = dir.join(".venv/bin/python");
-        if p.is_file() {
-            return p;
+        for rel in [".venv/bin/python", ".venv/Scripts/python.exe"] {
+            let p = dir.join(rel);
+            if p.is_file() {
+                return p;
+            }
         }
     }
-    panic!("no .venv/bin/python found above {}", repo_root().display());
+    panic!("no .venv python found above {}; set DPX_TEST_PYTHON", repo_root().display());
 }
 
 struct Manager {
