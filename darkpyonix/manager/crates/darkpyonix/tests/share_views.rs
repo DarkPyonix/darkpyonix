@@ -285,7 +285,7 @@ async fn test_fr_a3_share_views_on_a_real_kernel() {
     let mut m = Manager::start(&home).await;
 
     let nb = dir.join("shared.py");
-    std::fs::write(&nb, "# %%\nprint('visible-output')\n").unwrap();
+    std::fs::write(&nb, "# %%\nprint('visible-' + 'output')\n").unwrap();
     let (status, k) = m
         .call(
             &m.token.clone(),
