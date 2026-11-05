@@ -4,7 +4,7 @@ import type { Env } from "./env";
 import { hashToken } from "./util";
 
 /** Machine-readable error codes (components/schemas/Error in the OpenAPI file). */
-export type ErrorCode = "invalid_credentials" | "device_removed" | "main_server_exists" | "replace_mismatch" | "quota_exceeded";
+export type ErrorCode = "invalid_credentials" | "device_removed" | "main_server_exists" | "replace_mismatch" | "quota_exceeded" | "share_not_in_account";
 
 /** An error answered as `{"error": "...", "code"?: "..."}` with a status the OpenAPI file documents. */
 export class ApiError extends Error {
