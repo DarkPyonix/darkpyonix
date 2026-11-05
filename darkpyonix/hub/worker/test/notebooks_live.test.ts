@@ -7,8 +7,9 @@ const newShare = () => `s_${Array.from(crypto.getRandomValues(new Uint8Array(8))
 async function setup() {
   const deps = makeDeps(), cookie = await signIn(deps, { id: Math.floor(Math.random() * 1e9), login: `user${crypto.randomUUID().slice(0, 8)}` });
   const notebook = await (await call(deps, "POST", "/notebooks", { cookie, json: { title: "Live", visibility: "public" } })).json() as any;
-  const token = await linkDevice(deps, { cookie }, await newDevice(), "main_server");
-  return { deps, cookie, token, path: `/notebooks/${notebook.notebook_id}` };
+  const device = await newDevice();
+  const token = await linkDevice(deps, { cookie }, device, "main_server");
+  return { deps, cookie, token, device, path: `/notebooks/${notebook.notebook_id}` };
 }
 const attach = (s: Awaited<ReturnType<typeof setup>>, share_id: string | null) => call(s.deps, "PATCH", s.path, { cookie: s.cookie, json: { share_id } });
 
@@ -48,5 +49,14 @@ describe("live kernel attachment", () => {
     await attach(s, SHARE);
     expect((await call(s.deps, "DELETE", `/shares/${SHARE}`, { token: s.token })).status).toBe(204);
     expect((await (await call(s.deps, "GET", s.path)).json() as any).share_id).toBeNull();
+  });
+  it("test_fr_h18_device_removal_detaches_shares", async () => {
+    const s = await setup(), SHARE = newShare();
+    const dev = s.device;
+    expect((await call(s.deps, "POST", "/shares", { token: s.token, json: { share_id: SHARE } })).status).toBe(201);
+    expect(((await (await attach(s, SHARE)).json()) as any).share_id).toBe(SHARE);
+    expect((await call(s.deps, "DELETE", `/devices/${dev.endpointId}`, { cookie: s.cookie })).status).toBe(204);
+    expect(((await (await call(s.deps, "GET", s.path)).json()) as any).share_id).toBeNull();
+    expect((await call(s.deps, "GET", `/shares/${SHARE}`)).status).toBe(404);
   });
 });
