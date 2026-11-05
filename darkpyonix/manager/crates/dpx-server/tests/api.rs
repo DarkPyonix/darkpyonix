@@ -14,7 +14,7 @@ async fn test_fr_m1_health_and_manager_info() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let h = s.anon().get("/health").await;
     assert_eq!(h.status, 200);
-    assert_eq!(h.body, json!({"status": "ok", "version": "0.1.0"}));
+    assert_eq!(h.body, json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}));
     let info = s.admin().get("/api/manager").await;
     assert_eq!(info.status, 200);
     assert_eq!(info.body["mode"], "ephemeral");

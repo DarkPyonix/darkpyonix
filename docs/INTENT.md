@@ -232,6 +232,18 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 
 사용자 결정(2026-10-03): "core·ember는 Apache, ash는 MPL 유지". 그래서 이 저장소(core)의 라이선스를 MIT에서 Apache-2.0으로 바꿉니다. 저작권자는 그대로 DarkPyonix입니다. `darkpyonix-ember`도 Apache-2.0이고, `darkpyonix-ash`는 MPL-2.0을 유지합니다.
 
+### D22. PyPI에는 플랫폼별 휠로 바이너리를 싣고, 나머지 플랫폼에는 매니저 없는 휠을 냅니다
+
+D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 구체화합니다(리더 승인).
+
+- **플랫폼 휠(`py3-none-<플랫폼>`).** Rust `darkpyonix` 바이너리를 휠의 스크립트(`<이름>.data/scripts/darkpyonix`)로 담습니다. 설치하면 `darkpyonix`가 PATH에 놓이고 CLI와 매니저가 됩니다. 커널과 런타임 API(`darkpyonix/kernel/`)도 같은 휠에 들어 있어 `import darkpyonix`가 됩니다. 파이썬 확장이 아니므로 파이썬 버전 태그는 `py3-none`입니다. 대상은 macOS arm64, macOS x86_64, Linux x86_64·aarch64(manylinux), Windows x64입니다.
+- **빌드 도구는 hatchling을 그대로 쓰고, 바이너리를 넣는 빌드 훅만 더합니다.** maturin(`bindings = "bin"`)도 같은 모양의 휠을 만들지만, 이 저장소의 두 사정과 맞지 않습니다. (1) 휠의 `darkpyonix` 패키지가 소스 폴더 `darkpyonix/kernel/`을 이름을 바꿔 담는 것(hatchling `sources` 매핑, D3)을 maturin은 지원하지 않습니다. (2) 버전의 단일 출처가 `darkpyonix/kernel/__init__.py`인데, maturin은 `Cargo.toml`이나 `pyproject.toml`의 정적 값만 읽습니다. 그래서 휠을 만드는 도구는 하나로 두고(Rust 컴파일은 CI가 따로 하고, 훅은 컴파일된 파일의 경로만 받습니다), 휠 태그와 스크립트 포함을 훅이 정합니다.
+- **musl Linux는 0.3.0에서 만들지 않습니다.** 지원하지 않는다고 SPEC과 README에 적습니다.
+- **그 밖의 플랫폼(musl Linux, 32비트, Windows arm64 등)에는 `py3-none-any` 휠과 sdist를 냅니다.** 커널과 런타임 API만 담고 매니저 바이너리는 없습니다. 그래서 `pip install darkpyonix`는 어디서나 실패하지 않고, 이 휠의 `darkpyonix` 명령(작은 파이썬 스크립트)은 "이 플랫폼에서는 매니저를 지원하지 않는다"고 밝히고 종료 코드 1로 끝납니다. 플랫폼 휠에는 이 스크립트가 없습니다.
+- **버전은 한 곳에서 정합니다.** 단일 출처는 `darkpyonix/kernel/__init__.py`의 `__version__`입니다(pyproject가 여기서 읽음). Cargo 작업 공간 버전(`darkpyonix/manager/Cargo.toml`)은 이 값을 따라가고, 바이너리의 `--version`도 같아야 합니다. 셋이 하나라도 다르면 사용자가 서로 다른 커널 소스와 매니저를 받게 되므로, `packaging/check_versions.py`가 `test.yml`과 릴리스 워크플로의 버전 단계에서 확인하고 다르면 실패합니다. 릴리스 워크플로는 만든 바이너리의 `--version`까지 확인합니다.
+- **x86_64 macOS 휠은 교차 컴파일하고 Rosetta로 시험합니다.** Intel 러너는 쓰지 않습니다(리더 결정). arm64 러너에서 `x86_64-apple-darwin`으로 빌드하고, 같은 러너에서 `arch -x86_64`로 x86_64 파이썬에 설치해 스모크 시험을 합니다.
+- **커널과 런타임 API는 표준 라이브러리 전용이고 설치 없이 소스에서 실행됩니다(§2, NFR-K2).** 이 결정은 그 둘을 건드리지 않습니다. 훅과 대체 스크립트는 `packaging/`에 두고 휠에만 들어갑니다.
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
