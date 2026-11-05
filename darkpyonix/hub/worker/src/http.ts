@@ -147,7 +147,7 @@ export async function principal(
     if (row) {
       if (request.method !== "GET" && request.method !== "HEAD") {
         const origin = request.headers.get("origin");
-        if (origin !== new URL(env.PUBLIC_URL).origin) {
+        if (!corsOrigin(origin, env)) {
           throw ApiError.forbidden("cross-origin request with a session cookie");
         }
       }
@@ -194,4 +194,9 @@ export async function resolvePrincipal(request: Request, env: Env, now: number):
 export function requireDevice(p: Principal): Extract<Principal, { kind: "device" }> {
   if (p.kind === "device") return p;
   throw ApiError.unauthorized("this operation needs a device token");
+}
+
+/** Origins allowed for credentialed browser access (FR-H13). */
+export function corsOrigin(origin: string | null, env: Env): boolean {
+  return origin !== null && origin !== "null" && [env.FRONT_URL, ...(env.CORS_DEV_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean)].includes(origin);
 }

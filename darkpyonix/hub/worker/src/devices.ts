@@ -198,7 +198,7 @@ export async function createLink(request: Request, env: Env, deps: Deps): Promis
     if (result.meta.changes === 1) break;
     if (attempt >= 4) throw new ApiError(503, "could not allocate a user code");
   }
-  const verification = `${env.PUBLIC_URL}/link`;
+  const verification = `${env.FRONT_URL}/link`;
   return json(201, {
     link_id: linkId,
     user_code: userCode,
@@ -327,7 +327,7 @@ export async function getLink(_request: Request, env: Env, deps: Deps, linkId: s
     name: link.name,
     role: link.role,
     user_code: link.user_code,
-    verification_uri_complete: `${env.PUBLIC_URL}/link?code=${link.user_code}`,
+    verification_uri_complete: `${env.FRONT_URL}/link?code=${link.user_code}`,
     challenge: link.challenge,
     interval: LINK_POLL_INTERVAL_SECS,
     expires_at: link.expires_at,
