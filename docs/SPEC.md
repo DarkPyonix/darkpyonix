@@ -848,10 +848,10 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다. 설계했지만 아직 구현하지 않은 연산은 OpenAPI에 `x-darkpyonix-status: planned`와 `x-darkpyonix-issue: <번호>`를 달아 둡니다. 테스트는 이 연산을 서빙 검사에서 빼고, 대신 404로 답하는지 확인합니다. 그래서 연산을 구현한 변경에서 `planned` 표시를 지우지 않으면 테스트가 실패합니다(#56).
 - 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`) 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
 
-### NFR-H1 종단 간 암호화 — `Agreed`
+### NFR-H1 종단 간 암호화 — `Done`
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
 - 수용 기준: 릴레이 전용 연결로 알려진 평문 표식을 보낼 때, 클라이언트와 허브 사이의 바이트(허브까지 TLS 없이 평문 HTTP 릴레이로 둔 경우에도)에 그 표식이 나타나지 않고, 상대 끝단에서는 그대로 받습니다.
-- 테스트: `test_nfr_h1_relay_sees_only_ciphertext`
+- 테스트: `test_nfr_h1_relay_sees_only_ciphertext`(`darkpyonix/hub/server/tests/hub/nfr_h1.rs`). develop `1bff9b5`의 CI(Test 실행 42324439510, Hub server 작업)에서 통과했습니다.
   - 검증 범위: 릴레이(평문 HTTP) 앞에 바이트를 기록하는 TCP 프록시를 두고, 직접 경로를 끈(`clear_ip_transports`) iroh 엔드포인트 둘이 그 릴레이로만 통신합니다. 상대 끝단이 표식을 그대로 받고, 기록된 양방향 바이트에 표식이 없음을 확인합니다. 클라이언트→릴레이 방향의 WebSocket 프레임은 마스킹되므로 그 방향의 부재만으로는 증거가 되지 않고, 릴레이→클라이언트 방향(마스킹 없음)과 QUIC 암호화가 실질적 증거입니다. 허브 앞단 Cloudflare 프록시 구성은 이 테스트가 다루지 않습니다.
 
 ### NFR-H2 토큰 노출 최소화 — `Agreed`
