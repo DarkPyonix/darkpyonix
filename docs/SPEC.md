@@ -867,15 +867,15 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 - 수용 기준: `docs/api/manager.openapi.yaml`과 `docs/api/hub.openapi.yaml`의 어떤 경로에도 `v<숫자>` 조각이 없습니다. 예전 버전 경로(`/api/v1/manager`, `/v1/config`)는 404입니다.
 - 테스트: `test_nfr_v1_no_version_segment_in_any_rest_path`(`tests/test_nfr_v1_rest_paths.py`), `test_nfr_v1_versioned_manager_path_is_not_served`(`darkpyonix/manager/crates/dpx-server/tests/api.rs`), `test_nfr_v1_versioned_hub_path_is_not_served`(`darkpyonix/hub/worker/test/config.test.ts`)
 
-### NFR-H3 남의 노트북 내용 격리 — `Agreed`
+### NFR-H3 남의 노트북 내용 격리 — `Done`
 호스팅한 노트북의 출력, 라이브 커널의 출력, 마크다운 안의 HTML, ash가 브라우저에서 돌리는 코드(Pyodide 등)는 모두 남이 쓴 것입니다. 메인 페이지 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로(FR-H13), 이것들은 메인 페이지 출처에서 돌지 않습니다(INTENT D15 개정).
 - 스크립트가 돌 수 있는 내용은 `sandbox="allow-scripts"`(그 밖의 허용은 필요한 것만, **`allow-same-origin`은 절대 없음**) iframe 안에서만 돌립니다. 그 iframe은 `srcdoc`이나 `blob:`이 아니라 메인 페이지가 내는 렌더러 페이지 `https://darkpyonix.dev/sandbox/`를 읽고, 그릴 내용은 `postMessage`로 받습니다. `srcdoc`·`blob:` 문서는 메인 페이지의 CSP를 물려받아 출력 안의 인라인 스크립트(Plotly, Bokeh 등)가 막히지만, 따로 읽은 렌더러 페이지는 자기 CSP를 가집니다. 렌더러를 별도 등록 도메인으로 옮기는 것은 그 URL 하나만 바꾸면 되도록 둡니다. 그 iframe의 출처는 opaque(`null`)이므로 프런트의 DOM·저장소·쿠키에 닿지 못하고, 그 iframe의 요청에는 교차 사이트 규칙이 걸려 `SameSite=Lax` 세션 쿠키가 실리지 않으며, API는 `null` 출처에 CORS를 열지 않습니다(FR-H13).
 - API의 노트북 본문 응답은 문서로 실행되지 않는 헤더를 붙입니다(FR-H14). 별도 콘텐츠 호스트나 R2 공개 버킷으로 본문을 내지 않습니다.
 - **열린 질문(PROJECT Q18): 사용자 콘텐츠 도메인.** 렌더러 iframe을 `darkpyonix.dev`와 다른 등록 도메인(예: `darkpyonix-usercontent.dev`, 이름 미정)에서 띄울지 정하지 않았습니다. opaque 샌드박스는 메인 페이지의 DOM·저장소·API 쿠키를 지키지만, 같은 사이트 안에 남는 것(Safe Browsing 판정이 `darkpyonix.dev` 전체에 걸릴 위험, 브라우저에 따라 같은 프로세스, 그 프레임 안의 피싱 화면)과 opaque 출처의 제약(저장소·서비스 워커 없음)은 풀지 못합니다. 정해지면 이 항목과 FR-H12의 `frame-src`를 고칩니다.
 - 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트의 남의 서버입니다. 세션 쿠키는 `__Host-`라 그 서브도메인이 덮어쓸 수 없고, 출처 검사가 그 서브도메인의 쿠키 쓰기를 막습니다(FR-H13).
 - 수용 기준: `text/html` 출력으로 `<script>`가 `document.cookie`, `parent.document`, `localStorage`를 읽고 `fetch("https://api.darkpyonix.dev/me", {credentials: "include"})`를 부르는 노트북을 열었을 때, 앞의 셋은 예외나 빈 값이고, API 요청은 쿠키 없이 `Origin: null`로 도착해 401이며 응답을 읽지 못합니다. 같은 내용을 API 본문 주소로 직접 열면 내려받기가 되고 실행되지 않습니다.
-- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`(아직 없음), Worker `test_nfr_h3_null_origin_gets_no_cors`, `test_nfr_h3_sandboxed_frame_api_call_is_unauthorized_and_unreadable`(`darkpyonix/hub/worker/test/cors.test.ts`), 본문 주소 직접 열기는 `test_fr_h14_content_responses_cannot_render_as_documents`
-  - 검증 범위: Worker 시험은 렌더러 프레임이 보내는 요청(`Origin: null`, 쿠키 없음)에 API가 401로 답하고 CORS 헤더를 내지 않음을 확인합니다. 프레임 안의 `document.cookie`·`parent.document`·`localStorage` 차단은 브라우저와 ash 렌더러 페이지의 몫이라 ash 시험이 생길 때까지 `Agreed`로 둡니다.
+- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`, `test_nfr_h3_sandbox_frame_uses_allow_scripts_only_and_loads_sandbox_url`, `test_nfr_h3_sandbox_frame_rejects_blob_data_srcdoc_and_oversized_html`(`DarkPyonix/darkpyonix-ash` `packages/starboard-notebook/test/share/sandbox.test.ts`, PR #9 / `6f863f8`), Worker `test_nfr_h3_null_origin_gets_no_cors`, `test_nfr_h3_sandboxed_frame_api_call_is_unauthorized_and_unreadable`(`darkpyonix/hub/worker/test/cors.test.ts`), 본문 주소 직접 열기는 `test_fr_h14_content_responses_cannot_render_as_documents`
+  - 검증 범위: Worker 시험은 렌더러 프레임이 보내는 요청(`Origin: null`, 쿠키 없음)에 API가 401로 답하고 CORS 헤더를 내지 않음을 확인하고, darkpyonix-ash의 헤드리스 Chromium 시험(`test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`)은 `/sandbox/` 프레임(`sandbox="allow-scripts"`, `allow-same-origin` 없음) 안의 `document.cookie`·`parent.document`·`localStorage` 차단, 쿠키 없는 `Origin: null` API 호출 차단, 본문 직접 열기의 다운로드 전환을 끝까지 검증합니다.
 
 ## 12. 프로토콜 요구사항
 
