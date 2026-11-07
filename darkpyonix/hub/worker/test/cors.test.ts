@@ -55,4 +55,14 @@ describe("FR-H13", () => {
       expect((await call(deps, "POST", "/auth/logout", { cookie, origin })).status).toBe(403);
     }
   });
+  it("test_nfr_h3_sandboxed_frame_api_call_is_unauthorized_and_unreadable", async () => {
+    // What a script in the opaque-origin renderer frame sends: Origin: null and, under
+    // SameSite=Lax, no session cookie. The API answers 401 without opening CORS to it.
+    const deps = makeDeps();
+    for (const path of ["/me", "/notebooks", "/devices"]) {
+      const r = await call(deps, "GET", path, { origin: "null" });
+      expect(r.status).toBe(401);
+      for (const [name] of r.headers) expect(name.toLowerCase().startsWith("access-control-")).toBe(false);
+    }
+  });
 });

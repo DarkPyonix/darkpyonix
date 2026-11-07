@@ -874,7 +874,8 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 - **열린 질문(PROJECT Q18): 사용자 콘텐츠 도메인.** 렌더러 iframe을 `darkpyonix.dev`와 다른 등록 도메인(예: `darkpyonix-usercontent.dev`, 이름 미정)에서 띄울지 정하지 않았습니다. opaque 샌드박스는 메인 페이지의 DOM·저장소·API 쿠키를 지키지만, 같은 사이트 안에 남는 것(Safe Browsing 판정이 `darkpyonix.dev` 전체에 걸릴 위험, 브라우저에 따라 같은 프로세스, 그 프레임 안의 피싱 화면)과 opaque 출처의 제약(저장소·서비스 워커 없음)은 풀지 못합니다. 정해지면 이 항목과 FR-H12의 `frame-src`를 고칩니다.
 - 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트의 남의 서버입니다. 세션 쿠키는 `__Host-`라 그 서브도메인이 덮어쓸 수 없고, 출처 검사가 그 서브도메인의 쿠키 쓰기를 막습니다(FR-H13).
 - 수용 기준: `text/html` 출력으로 `<script>`가 `document.cookie`, `parent.document`, `localStorage`를 읽고 `fetch("https://api.darkpyonix.dev/me", {credentials: "include"})`를 부르는 노트북을 열었을 때, 앞의 셋은 예외나 빈 값이고, API 요청은 쿠키 없이 `Origin: null`로 도착해 401이며 응답을 읽지 못합니다. 같은 내용을 API 본문 주소로 직접 열면 내려받기가 되고 실행되지 않습니다.
-- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`, Worker `test_nfr_h3_null_origin_gets_no_cors`
+- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`(아직 없음), Worker `test_nfr_h3_null_origin_gets_no_cors`, `test_nfr_h3_sandboxed_frame_api_call_is_unauthorized_and_unreadable`(`darkpyonix/hub/worker/test/cors.test.ts`), 본문 주소 직접 열기는 `test_fr_h14_content_responses_cannot_render_as_documents`
+  - 검증 범위: Worker 시험은 렌더러 프레임이 보내는 요청(`Origin: null`, 쿠키 없음)에 API가 401로 답하고 CORS 헤더를 내지 않음을 확인합니다. 프레임 안의 `document.cookie`·`parent.document`·`localStorage` 차단은 브라우저와 ash 렌더러 페이지의 몫이라 ash 시험이 생길 때까지 `Agreed`로 둡니다.
 
 ## 12. 프로토콜 요구사항
 
