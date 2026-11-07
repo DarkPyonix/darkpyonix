@@ -5,7 +5,7 @@
 //! the pump. HTTP/2 WebSocket is refused (no RFC 8441), see `dpx-server/tests/ws_tls.rs`.
 //!
 //! `cargo test -j2 -p darkpyonix --test ws_tls_real`
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

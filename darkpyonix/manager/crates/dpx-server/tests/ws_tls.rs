@@ -2,8 +2,8 @@
 //! and HTTP/2 (no RFC 8441 extended CONNECT) refused with a clear error.
 //!
 //! The fake kernel answers `101` on the pumped socket and speaks WebSocket frames with
-//! tungstenite. The real Python kernel behind TLS is not covered here.
-#![cfg(unix)]
+//! tungstenite. The real Python kernel behind TLS is in `crates/darkpyonix/tests/ws_tls_real.rs`.
+#![cfg(any(unix, windows))]
 
 mod common;
 
@@ -58,7 +58,10 @@ impl KernelBackend for WsBackend {
             .lines()
             .find_map(|l| l.to_ascii_lowercase().starts_with("sec-websocket-key:").then(|| l.split_once(':').unwrap().1.trim().to_string()))
             .expect("sec-websocket-key reached the kernel");
+        #[cfg(unix)]
         let sock = std::os::unix::net::UnixStream::from(req.fd);
+        #[cfg(windows)]
+        let sock = req.socket;
         sock.set_nonblocking(false).unwrap();
         std::thread::spawn(move || {
             use std::io::Write;
