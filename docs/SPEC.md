@@ -792,13 +792,13 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 수용 기준: 같은 계정의 공유는 걸리고, 다른 계정의 공유는 409, 없는 공유는 404입니다. 노트북 메타데이터에 `share_id`가 나옵니다. 공유가 내려가면(FR-H4) 노트북의 `share_id`는 `null`이 됩니다. 브라우저에서 토큰이 있는 노트북 링크가 기기의 매니저에 붙어 실행하는 것(`viewer3`)과 토큰 없이 읽기 전용으로 남는 것은 릴레이 호스트 연동 시험으로 확인합니다.
 - 테스트(`darkpyonix/hub/worker/test/notebooks_live.test.ts`): `test_fr_h17_attach_a_share_of_the_same_account`, `test_fr_h17_other_accounts_and_unknown_shares_are_refused`, `test_fr_h17_unpublished_share_detaches`. 연동: `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`
 
-### FR-H18 지우기 — `Agreed`
+### FR-H18 지우기 — `Done`
 - `DELETE /notebooks/{notebook_id}`는 노트북과 모든 판을 지웁니다(204). 그 뒤 모든 읽기는 404이고, R2 본문은 같은 요청에서 지우되 실패한 것은 Cron이 24시간 안에 지웁니다.
 - `DELETE /notebooks/{notebook_id}/versions/{version}`은 판 하나를 지웁니다(204). 번호는 다시 쓰지 않고, `latest`는 남은 판 중 가장 높은 것을 가리킵니다. 남은 판이 없으면 `latest_version`은 `null`이고 `latest` 읽기는 404입니다.
 - 권한은 FR-H14의 "지우기"와 같습니다. 기기를 지워도(FR-H1) 그 기기가 만든 노트북은 계정에 남고, 그 기기의 공유가 지워지므로 그 공유를 건 노트북의 `share_id`는 `null`이 됩니다.
 - 계정 삭제는 지금 허브 연산이 없습니다. 생기면 그 계정의 노트북과 R2 본문을 모두 지우는 것을 그 요구사항의 수용 기준에 넣습니다.
 - 수용 기준: 지운 노트북과 판은 주인에게도 404이고 R2에 본문이 남지 않습니다(Cron 뒤). 판을 지우면 `latest`가 내려가고, 새로 올린 판은 지운 번호 다음 번호입니다. 다른 계정이나 `client`의 삭제는 404/403입니다. 기기를 지우면 그 기기의 공유를 건 노트북의 `share_id`가 `null`이 됩니다.
-- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h18_delete_notebook_removes_every_version`, `test_fr_h18_delete_version_keeps_numbers`, `test_fr_h18_device_removal_detaches_shares`, `test_fr_h18_cron_purges_orphaned_blobs`
+- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h18_delete_notebook_removes_every_version`, `test_fr_h18_delete_version_keeps_numbers`, `test_fr_h18_deleted_versions_are_gone_for_the_owner`, `test_fr_h18_other_accounts_and_clients_cannot_delete`, `test_fr_h18_removed_device_notebooks_stay_with_the_account`, `test_fr_h18_cron_purges_orphaned_blobs`, `notebooks_live.test.ts`의 `test_fr_h18_device_removal_detaches_shares`, `test_fr_h18_replaced_main_server_detaches_shares`
 
 ### FR-H19 크기·할당량·남용 제한 — `Done` [provisional]
 값은 모두 실제 사용을 보고 바꿀 수 있는 처음 값입니다.
@@ -848,10 +848,10 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 매니저가 실제로 답하는 경로·메서드·응답 코드가 `docs/api/manager.openapi.yaml`과 같습니다. 구현 언어와 무관하게, 테스트는 모든 연산을 HTTP로 불러 문서에 있는 상태 코드로만 답하는지 확인합니다(`test_nfr_m3_every_operation_answers_with_a_documented_status`). 예외: API 문서 페이지(`/docs/`, `/docs/manager.openapi.yaml`, `/docs/hub.openapi.yaml`)는 계약 밖의 정적 파일입니다. 설계했지만 아직 구현하지 않은 연산은 OpenAPI에 `x-darkpyonix-status: planned`와 `x-darkpyonix-issue: <번호>`를 달아 둡니다. 테스트는 이 연산을 서빙 검사에서 빼고, 대신 404로 답하는지 확인합니다. 그래서 연산을 구현한 변경에서 `planned` 표시를 지우지 않으면 테스트가 실패합니다(#56).
 - 테스트: Rust `test_nfr_m3_every_operation_answers_with_a_documented_status`, `test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode`, `test_nfr_m3_undocumented_methods_are_not_served`(`darkpyonix/manager/crates/dpx-server/tests/openapi.rs`) 기준 `test_nfr_m3_every_operation_answers_with_a_documented_status`
 
-### NFR-H1 종단 간 암호화 — `Agreed`
+### NFR-H1 종단 간 암호화 — `Done`
 허브는 중계하는 내용을 볼 수 없습니다. 기기 사이 연결은 iroh의 QUIC TLS 1.3이고, 상대 인증은 양쪽의 ed25519 엔드포인트 키로 끝단끼리 합니다. 세션 키는 허브를 거치지 않고 합의하며, 릴레이는 암호문 데이터그램만 전달합니다. 허브가 TLS를 끝내는 구성(FR-H5 방식 B)은 두지 않습니다. Cloudflare Worker(darkpyonix.dev)는 기기 사이 트래픽의 경로에 있지 않고(서명된 주소 레코드와 메타데이터만 다룸), 암호문이 지나가는 곳은 릴레이 호스트뿐입니다(INTENT D15). 릴레이를 Cloudflare Container로 옮기더라도 Cloudflare 프록시가 보는 것은 릴레이 WebSocket 안의 암호문입니다.
 - 수용 기준: 릴레이 전용 연결로 알려진 평문 표식을 보낼 때, 클라이언트와 허브 사이의 바이트(허브까지 TLS 없이 평문 HTTP 릴레이로 둔 경우에도)에 그 표식이 나타나지 않고, 상대 끝단에서는 그대로 받습니다.
-- 테스트: `test_nfr_h1_relay_sees_only_ciphertext`
+- 테스트: `test_nfr_h1_relay_sees_only_ciphertext`(`darkpyonix/hub/server/tests/hub/nfr_h1.rs`). develop `1bff9b5`의 CI(Test 실행 42324439510, Hub server 작업)에서 통과했습니다.
   - 검증 범위: 릴레이(평문 HTTP) 앞에 바이트를 기록하는 TCP 프록시를 두고, 직접 경로를 끈(`clear_ip_transports`) iroh 엔드포인트 둘이 그 릴레이로만 통신합니다. 상대 끝단이 표식을 그대로 받고, 기록된 양방향 바이트에 표식이 없음을 확인합니다. 클라이언트→릴레이 방향의 WebSocket 프레임은 마스킹되므로 그 방향의 부재만으로는 증거가 되지 않고, 릴레이→클라이언트 방향(마스킹 없음)과 QUIC 암호화가 실질적 증거입니다. 허브 앞단 Cloudflare 프록시 구성은 이 테스트가 다루지 않습니다.
 
 ### NFR-H2 토큰 노출 최소화 — `Agreed`
@@ -874,7 +874,8 @@ INTENT D16. 매니저와 허브의 REST 경로에는 버전 조각(`v1`, `v2`, �
 - **열린 질문(PROJECT Q18): 사용자 콘텐츠 도메인.** 렌더러 iframe을 `darkpyonix.dev`와 다른 등록 도메인(예: `darkpyonix-usercontent.dev`, 이름 미정)에서 띄울지 정하지 않았습니다. opaque 샌드박스는 메인 페이지의 DOM·저장소·API 쿠키를 지키지만, 같은 사이트 안에 남는 것(Safe Browsing 판정이 `darkpyonix.dev` 전체에 걸릴 위험, 브라우저에 따라 같은 프로세스, 그 프레임 안의 피싱 화면)과 opaque 출처의 제약(저장소·서비스 워커 없음)은 풀지 못합니다. 정해지면 이 항목과 FR-H12의 `frame-src`를 고칩니다.
 - 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트의 남의 서버입니다. 세션 쿠키는 `__Host-`라 그 서브도메인이 덮어쓸 수 없고, 출처 검사가 그 서브도메인의 쿠키 쓰기를 막습니다(FR-H13).
 - 수용 기준: `text/html` 출력으로 `<script>`가 `document.cookie`, `parent.document`, `localStorage`를 읽고 `fetch("https://api.darkpyonix.dev/me", {credentials: "include"})`를 부르는 노트북을 열었을 때, 앞의 셋은 예외나 빈 값이고, API 요청은 쿠키 없이 `Origin: null`로 도착해 401이며 응답을 읽지 못합니다. 같은 내용을 API 본문 주소로 직접 열면 내려받기가 되고 실행되지 않습니다.
-- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`, Worker `test_nfr_h3_null_origin_gets_no_cors`
+- 테스트: darkpyonix-ash 브라우저 시험 `test_nfr_h3_untrusted_output_cannot_reach_the_front_or_the_api`(아직 없음), Worker `test_nfr_h3_null_origin_gets_no_cors`, `test_nfr_h3_sandboxed_frame_api_call_is_unauthorized_and_unreadable`(`darkpyonix/hub/worker/test/cors.test.ts`), 본문 주소 직접 열기는 `test_fr_h14_content_responses_cannot_render_as_documents`
+  - 검증 범위: Worker 시험은 렌더러 프레임이 보내는 요청(`Origin: null`, 쿠키 없음)에 API가 401로 답하고 CORS 헤더를 내지 않음을 확인합니다. 프레임 안의 `document.cookie`·`parent.document`·`localStorage` 차단은 브라우저와 ash 렌더러 페이지의 몫이라 ash 시험이 생길 때까지 `Agreed`로 둡니다.
 
 ## 12. 프로토콜 요구사항
 

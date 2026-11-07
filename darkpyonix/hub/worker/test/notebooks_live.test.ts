@@ -59,4 +59,13 @@ describe("live kernel attachment", () => {
     expect(((await (await call(s.deps, "GET", s.path)).json()) as any).share_id).toBeNull();
     expect((await call(s.deps, "GET", `/shares/${SHARE}`)).status).toBe(404);
   });
+  it("test_fr_h18_replaced_main_server_detaches_shares", async () => {
+    // Replacing the main server (FR-H1) removes the old one; its shares go the same way.
+    const s = await setup(), SHARE = newShare();
+    expect((await call(s.deps, "POST", "/shares", { token: s.token, json: { share_id: SHARE } })).status).toBe(201);
+    expect(((await (await attach(s, SHARE)).json()) as any).share_id).toBe(SHARE);
+    await linkDevice(s.deps, { cookie: s.cookie }, await newDevice(), "main_server", "new main", { replace: s.device.endpointId });
+    expect(((await (await call(s.deps, "GET", s.path)).json()) as any).share_id).toBeNull();
+    expect((await call(s.deps, "GET", `/shares/${SHARE}`)).status).toBe(404);
+  });
 });
