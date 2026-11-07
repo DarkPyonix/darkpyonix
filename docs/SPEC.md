@@ -792,13 +792,13 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 수용 기준: 같은 계정의 공유는 걸리고, 다른 계정의 공유는 409, 없는 공유는 404입니다. 노트북 메타데이터에 `share_id`가 나옵니다. 공유가 내려가면(FR-H4) 노트북의 `share_id`는 `null`이 됩니다. 브라우저에서 토큰이 있는 노트북 링크가 기기의 매니저에 붙어 실행하는 것(`viewer3`)과 토큰 없이 읽기 전용으로 남는 것은 릴레이 호스트 연동 시험으로 확인합니다.
 - 테스트(`darkpyonix/hub/worker/test/notebooks_live.test.ts`): `test_fr_h17_attach_a_share_of_the_same_account`, `test_fr_h17_other_accounts_and_unknown_shares_are_refused`, `test_fr_h17_unpublished_share_detaches`. 연동: `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`
 
-### FR-H18 지우기 — `Agreed`
+### FR-H18 지우기 — `Done`
 - `DELETE /notebooks/{notebook_id}`는 노트북과 모든 판을 지웁니다(204). 그 뒤 모든 읽기는 404이고, R2 본문은 같은 요청에서 지우되 실패한 것은 Cron이 24시간 안에 지웁니다.
 - `DELETE /notebooks/{notebook_id}/versions/{version}`은 판 하나를 지웁니다(204). 번호는 다시 쓰지 않고, `latest`는 남은 판 중 가장 높은 것을 가리킵니다. 남은 판이 없으면 `latest_version`은 `null`이고 `latest` 읽기는 404입니다.
 - 권한은 FR-H14의 "지우기"와 같습니다. 기기를 지워도(FR-H1) 그 기기가 만든 노트북은 계정에 남고, 그 기기의 공유가 지워지므로 그 공유를 건 노트북의 `share_id`는 `null`이 됩니다.
 - 계정 삭제는 지금 허브 연산이 없습니다. 생기면 그 계정의 노트북과 R2 본문을 모두 지우는 것을 그 요구사항의 수용 기준에 넣습니다.
 - 수용 기준: 지운 노트북과 판은 주인에게도 404이고 R2에 본문이 남지 않습니다(Cron 뒤). 판을 지우면 `latest`가 내려가고, 새로 올린 판은 지운 번호 다음 번호입니다. 다른 계정이나 `client`의 삭제는 404/403입니다. 기기를 지우면 그 기기의 공유를 건 노트북의 `share_id`가 `null`이 됩니다.
-- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h18_delete_notebook_removes_every_version`, `test_fr_h18_delete_version_keeps_numbers`, `test_fr_h18_device_removal_detaches_shares`, `test_fr_h18_cron_purges_orphaned_blobs`
+- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h18_delete_notebook_removes_every_version`, `test_fr_h18_delete_version_keeps_numbers`, `test_fr_h18_deleted_versions_are_gone_for_the_owner`, `test_fr_h18_other_accounts_and_clients_cannot_delete`, `test_fr_h18_removed_device_notebooks_stay_with_the_account`, `test_fr_h18_cron_purges_orphaned_blobs`, `notebooks_live.test.ts`의 `test_fr_h18_device_removal_detaches_shares`, `test_fr_h18_replaced_main_server_detaches_shares`
 
 ### FR-H19 크기·할당량·남용 제한 — `Done` [provisional]
 값은 모두 실제 사용을 보고 바꿀 수 있는 처음 값입니다.
