@@ -116,13 +116,13 @@ export async function pushVersion(r: Request, e: Env, d: Deps, id: string) {
   if (run instanceof File && run.size > LIMITS.runBytes) throw ApiError.tooLarge("run over 16 MiB");
   if (source.size + (run instanceof File ? run.size : 0) > LIMITS.requestBytes) throw ApiError.tooLarge("request over 18 MiB");
   const bytes = await source.arrayBuffer(); let text: string;
-  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw ApiError.badRequest("invalid UTF-8"); }
+  try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes); } catch { throw ApiError.badRequest("invalid UTF-8"); }
   if (text.includes("\0")) throw ApiError.badRequest("NUL in source");
   let runBytes: ArrayBuffer | null = null;
   if (run instanceof File) {
     runBytes = await run.arrayBuffer();
     try {
-      const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(runBytes));
+      const value = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(runBytes));
       if (!value || typeof value !== "object" || Array.isArray(value) || value.nbformat !== 4 || !Array.isArray(value.cells) || value.cells.some((c: any) => !c || typeof c !== "object" || (c.outputs !== undefined && (!Array.isArray(c.outputs) || c.outputs.some((o: any) => !o || !["stream", "display_data", "execute_result", "error"].includes(o.output_type)))))) throw new Error();
     } catch { throw ApiError.badRequest("invalid run"); }
   }
