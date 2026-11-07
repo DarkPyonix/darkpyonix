@@ -1,11 +1,28 @@
 import type { Deps, Env } from "./env";
 import { ApiError, json, noContent, principal, readJson, type Principal } from "./http";
-import { SHARE_ID_RE, nowSecs, sha256, toHex } from "./util";
+import { SHARE_ID_RE, ctEq, hashToken, nowSecs, sha256, toHex } from "./util";
 
-type Notebook = { notebook_id: string; account_id: string; creator_device: string | null; title: string; visibility: string; share_id: string | null; created_at: number; updated_at: number; github_login: string; latest_version: number | null };
+/**
+ * FR-H19 limits. Every value is provisional ("a first value, to be changed after real use"):
+ * change them here and nowhere else. Sizes are bytes; windows are seconds.
+ */
+export const LIMITS = {
+  sourceBytes: 1 * 1024 * 1024,
+  runBytes: 16 * 1024 * 1024,
+  requestBytes: 18 * 1024 * 1024,
+  notebooksPerAccount: 200,
+  versionsPerNotebook: 100,
+  storedBytesPerAccount: 512 * 1024 * 1024,
+  /** Per-minute rates live in wrangler.toml (PUSH_LIMITER, CREATE_LIMITER 10; READ_LIMITER 300). */
+  reportsPerAddress: 10,
+  reportWindowSecs: 3600,
+  reasonMaxChars: 1000,
+};
+
+type Notebook = { notebook_id: string; account_id: string; creator_device: string | null; title: string; visibility: string; share_id: string | null; created_at: number; updated_at: number; github_login: string; latest_version: number | null; taken_down: number };
 type Version = { version: number; created_at: number; message: string | null; source_filename: string; source_sha256: string; source_size: number; source_cells: number; run_id: string | null; run_sha256: string | null; run_size: number | null };
 const selectNotebook = `SELECT n.*, a.github_login, (SELECT MAX(version) FROM notebook_versions v WHERE v.notebook_id = n.notebook_id) AS latest_version FROM notebooks n JOIN accounts a ON a.account_id = n.account_id`;
-const view = (n: Notebook) => ({ notebook_id: n.notebook_id, owner: { github_login: n.github_login }, title: n.title, visibility: n.visibility, share_id: n.share_id, latest_version: n.latest_version, created_at: n.created_at, updated_at: n.updated_at, taken_down: false });
+const view = (n: Notebook) => ({ notebook_id: n.notebook_id, owner: { github_login: n.github_login }, title: n.title, visibility: n.visibility, share_id: n.share_id, latest_version: n.latest_version, created_at: n.created_at, updated_at: n.updated_at, taken_down: n.taken_down === 1 });
 const versionView = (v: Version) => ({ version: v.version, created_at: v.created_at, message: v.message, source: { filename: v.source_filename, sha256: v.source_sha256, size: v.source_size, cells: v.source_cells }, run: v.run_id === null ? null : { run_id: v.run_id, sha256: v.run_sha256, size: v.run_size } });
 const robot = (n: Notebook): Record<string, string> => n.visibility === "unlisted" ? { "x-robots-tag": "noindex" } : {};
 const key = (n: Notebook, v: number, part: string) => `nb/${n.account_id}/${n.notebook_id}/${v}/${part}`;
@@ -15,9 +32,14 @@ async function find(env: Env, id: string): Promise<Notebook> {
   return n;
 }
 async function caller(request: Request, env: Env, deps: Deps): Promise<Principal> { return principal(request, env, nowSecs(deps.nowMs())); }
+const clientIp = (r: Request) => r.headers.get("cf-connecting-ip") ?? "unknown";
+async function limit(limiter: Env["PUSH_LIMITER"], key: string) {
+  if (limiter && !(await limiter.limit({ key })).success) throw ApiError.tooMany();
+}
 async function readable(request: Request, env: Env, deps: Deps, id: string): Promise<Notebook> {
+  if (!request.headers.has("authorization") && !request.headers.has("cookie")) await limit(env.READ_LIMITER, `read:${clientIp(request)}`);
   const n = await find(env, id);
-  if (n.visibility === "private") {
+  if (n.visibility === "private" || n.taken_down) {
     let p: Principal;
     try { p = await caller(request, env, deps); } catch { throw ApiError.notFound(); }
     if (p.accountId !== n.account_id) throw ApiError.notFound();
@@ -47,8 +69,10 @@ export async function createNotebook(r: Request, e: Env, d: Deps) {
   const p = await caller(r, e, d);
   if (p.kind === "device" && p.role === "client") throw ApiError.forbidden("not permitted");
   const body = await readJson<Record<string, unknown>>(r); fields(body, false);
+  await limit(e.CREATE_LIMITER, `create:${p.accountId}`);
   const id = `n_${toHex(crypto.getRandomValues(new Uint8Array(16)))}`; const now = nowSecs(d.nowMs());
-  await e.DB.prepare("INSERT INTO notebooks (notebook_id, account_id, creator_device, title, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(id, p.accountId, p.kind === "device" ? p.endpointId : null, body.title, body.visibility ?? "private", now, now).run();
+  const inserted = await e.DB.prepare("INSERT INTO notebooks (notebook_id, account_id, creator_device, title, visibility, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM notebooks WHERE account_id = ?) < ?").bind(id, p.accountId, p.kind === "device" ? p.endpointId : null, body.title, body.visibility ?? "private", now, now, p.accountId, LIMITS.notebooksPerAccount).run();
+  if (!inserted.meta.changes) throw ApiError.conflict("notebook quota exceeded", "quota_exceeded");
   return json(201, view(await find(e, id)));
 }
 export async function listMine(r: Request, e: Env, d: Deps) {
@@ -59,7 +83,7 @@ export async function listMine(r: Request, e: Env, d: Deps) {
 export async function listPublic(_r: Request, e: Env, _d: Deps, login: string) {
   const account = await e.DB.prepare("SELECT account_id FROM accounts WHERE github_login = ? COLLATE NOCASE").bind(login).first<{account_id: string}>();
   if (!account) throw ApiError.notFound();
-  const rows = await e.DB.prepare(`${selectNotebook} WHERE n.account_id = ? AND n.visibility = 'public' ORDER BY n.created_at DESC, n.rowid DESC`).bind(account.account_id).all<Notebook>();
+  const rows = await e.DB.prepare(`${selectNotebook} WHERE n.account_id = ? AND n.visibility = 'public' AND n.taken_down = 0 ORDER BY n.created_at DESC, n.rowid DESC`).bind(account.account_id).all<Notebook>();
   return json(200, { notebooks: rows.results.map(view) });
 }
 export async function getNotebook(r: Request, e: Env, d: Deps, id: string) {
@@ -69,6 +93,8 @@ export async function getNotebook(r: Request, e: Env, d: Deps, id: string) {
 }
 export async function updateNotebook(r: Request, e: Env, d: Deps, id: string) {
   const n = await owned(r, e, d, id, true); const body = await readJson<Record<string, unknown>>(r); fields(body, true);
+  const rank = ["private", "unlisted", "public"];
+  if (n.taken_down && body.visibility !== undefined && rank.indexOf(body.visibility as string) > rank.indexOf(n.visibility)) throw ApiError.conflict("a taken-down notebook cannot be made more visible");
   if (typeof body.share_id === "string") await checkShare(e, n, body.share_id);
   await e.DB.prepare("UPDATE notebooks SET title = ?, visibility = ?, share_id = ?, updated_at = ? WHERE notebook_id = ?").bind(body.title ?? n.title, body.visibility ?? n.visibility, body.share_id === undefined ? n.share_id : body.share_id, nowSecs(d.nowMs()), id).run();
   return json(200, view(await find(e, id)));
@@ -81,9 +107,14 @@ async function getVersion(e: Env, n: Notebook, ref: string): Promise<Version> {
 }
 export async function pushVersion(r: Request, e: Env, d: Deps, id: string) {
   const n = await owned(r, e, d, id, false);
+  await limit(e.PUSH_LIMITER, `push:${n.account_id}`);
+  if (Number(r.headers.get("content-length")) > LIMITS.requestBytes) throw ApiError.tooLarge("request over 18 MiB");
   let form: FormData; try { form = await r.formData(); } catch { throw ApiError.badRequest("invalid multipart body"); }
   const source = form.get("source"), run = form.get("run"), message = form.get("message");
   if (!(source instanceof File) || !/^[^/\\\x00]{1,128}\.(py|pynb)$/.test(source.name) || (run !== null && !(run instanceof File)) || (message !== null && (typeof message !== "string" || message.length > 500))) throw ApiError.badRequest("invalid parts");
+  if (source.size > LIMITS.sourceBytes) throw ApiError.tooLarge("source over 1 MiB");
+  if (run instanceof File && run.size > LIMITS.runBytes) throw ApiError.tooLarge("run over 16 MiB");
+  if (source.size + (run instanceof File ? run.size : 0) > LIMITS.requestBytes) throw ApiError.tooLarge("request over 18 MiB");
   const bytes = await source.arrayBuffer(); let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw ApiError.badRequest("invalid UTF-8"); }
   if (text.includes("\0")) throw ApiError.badRequest("NUL in source");
@@ -95,8 +126,15 @@ export async function pushVersion(r: Request, e: Env, d: Deps, id: string) {
       if (!value || typeof value !== "object" || Array.isArray(value) || value.nbformat !== 4 || !Array.isArray(value.cells) || value.cells.some((c: any) => !c || typeof c !== "object" || (c.outputs !== undefined && (!Array.isArray(c.outputs) || c.outputs.some((o: any) => !o || !["stream", "display_data", "execute_result", "error"].includes(o.output_type)))))) throw new Error();
     } catch { throw ApiError.badRequest("invalid run"); }
   }
-  const allocated = await e.DB.prepare("UPDATE notebooks SET next_version = next_version + 1, updated_at = ? WHERE notebook_id = ? RETURNING next_version").bind(nowSecs(d.nowMs()), id).first<{next_version: number}>();
-  if (!allocated) throw ApiError.notFound(); const v = allocated.next_version;
+  // The quota checks and the number allocation are one statement, so concurrent pushes cannot both pass.
+  const allocated = await e.DB.prepare(`UPDATE notebooks SET next_version = next_version + 1, updated_at = ? WHERE notebook_id = ?
+    AND (SELECT COUNT(*) FROM notebook_versions WHERE notebook_id = ?) < ?
+    AND (SELECT COALESCE(SUM(v.source_size + COALESCE(v.run_size, 0)), 0) FROM notebook_versions v JOIN notebooks m ON m.notebook_id = v.notebook_id WHERE m.account_id = ?) + ? <= ?
+    RETURNING next_version`).bind(nowSecs(d.nowMs()), id, id, LIMITS.versionsPerNotebook, n.account_id, bytes.byteLength + (runBytes?.byteLength ?? 0), LIMITS.storedBytesPerAccount).first<{next_version: number}>();
+  if (!allocated) {
+    if (!(await e.DB.prepare("SELECT 1 FROM notebooks WHERE notebook_id = ?").bind(id).first())) throw ApiError.notFound();
+    throw ApiError.conflict("version or storage quota exceeded", "quota_exceeded");
+  } const v = allocated.next_version;
   await e.NOTEBOOKS.put(key(n, v, "source"), bytes);
   if (runBytes) await e.NOTEBOOKS.put(key(n, v, "run"), runBytes);
   const sourceHash = toHex(await sha256(new Uint8Array(bytes))), runHash = runBytes ? toHex(await sha256(new Uint8Array(runBytes))) : null;
@@ -146,3 +184,29 @@ export async function purgeOrphans(e: Env, nowMs: number) {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
 }
+
+export async function reportNotebook(r: Request, e: Env, d: Deps, id: string) {
+  const body = await readJson<Record<string, unknown>>(r);
+  if (Object.keys(body).some(k => k !== "reason") || typeof body.reason !== "string" || body.reason.length < 1 || body.reason.length > LIMITS.reasonMaxChars) throw ApiError.badRequest("invalid reason");
+  const n = await readable(r, e, d, id);
+  if (n.visibility === "private" || n.taken_down) throw ApiError.notFound();
+  const now = nowSecs(d.nowMs()), ip = toHex(await sha256(clientIp(r)));
+  const recent = await e.DB.prepare("SELECT COUNT(*) AS c FROM notebook_reports WHERE ip_hash = ? AND created_at > ?").bind(ip, now - LIMITS.reportWindowSecs).first<{c: number}>();
+  if ((recent?.c ?? 0) >= LIMITS.reportsPerAddress) throw ApiError.tooMany("too many reports from this address");
+  let reporter: string | null = null;
+  try { reporter = (await caller(r, e, d)).accountId; } catch { /* Anonymous reports are allowed. */ }
+  await e.DB.prepare("INSERT INTO notebook_reports (notebook_id, reporter_account, ip_hash, reason, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, reporter, ip, body.reason, now).run();
+  return new Response(null, { status: 202 });
+}
+async function operator(r: Request, e: Env) {
+  const token = /^Bearer (.+)$/i.exec(r.headers.get("authorization") ?? "")?.[1]?.trim();
+  if (!e.OPERATOR_SECRET || !token || !ctEq(await hashToken(token), await hashToken(e.OPERATOR_SECRET))) throw ApiError.unauthorized();
+}
+async function setTakenDown(r: Request, e: Env, d: Deps, id: string, down: boolean) {
+  await operator(r, e);
+  const done = await e.DB.prepare("UPDATE notebooks SET taken_down = ?, taken_down_at = ? WHERE notebook_id = ?").bind(down ? 1 : 0, down ? nowSecs(d.nowMs()) : null, id).run();
+  if (!done.meta.changes) throw ApiError.notFound();
+  return noContent();
+}
+export const takeDownNotebook = (r: Request, e: Env, d: Deps, id: string) => setTakenDown(r, e, d, id, true);
+export const restoreNotebook = (r: Request, e: Env, d: Deps, id: string) => setTakenDown(r, e, d, id, false);

@@ -2,6 +2,8 @@
 
 import type { DnsProvider } from "./dns";
 
+type RateLimiter = { limit(options: { key: string }): Promise<{ success: boolean }> };
+
 export interface Env {
   /** Accounts, sessions, device links, devices, address records, shares, names (migrations/). */
   DB: D1Database;
@@ -36,7 +38,13 @@ export interface Env {
   CF_ZONE_ID?: string;
 
   /** Optional Workers rate limiter for unauthenticated writes. */
-  WRITE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  WRITE_LIMITER?: RateLimiter;
+  /** FR-H19 per-minute limiters: notebook uploads and creation per account, anonymous reads per address. */
+  PUSH_LIMITER?: RateLimiter;
+  CREATE_LIMITER?: RateLimiter;
+  READ_LIMITER?: RateLimiter;
+  /** Secret. Bearer secret of the hub operator: notebook takedowns (FR-H19). Unset = takedown is closed. */
+  OPERATOR_SECRET?: string;
 }
 
 /** What tests replace: the network, the clock and the DNS provider. */
