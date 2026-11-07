@@ -1330,7 +1330,6 @@ paths:
           description: Too many anonymous reads (FR-H19).
 
   /notebooks/{notebook_id}/report:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:
@@ -1359,7 +1358,6 @@ paths:
           description: Too many reports from this address.
 
   /admin/notebooks/{notebook_id}/takedown:
-    x-planned: true
     parameters:
       - $ref: "#/components/parameters/NotebookId"
     post:

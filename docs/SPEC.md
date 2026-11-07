@@ -800,14 +800,15 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 수용 기준: 지운 노트북과 판은 주인에게도 404이고 R2에 본문이 남지 않습니다(Cron 뒤). 판을 지우면 `latest`가 내려가고, 새로 올린 판은 지운 번호 다음 번호입니다. 다른 계정이나 `client`의 삭제는 404/403입니다. 기기를 지우면 그 기기의 공유를 건 노트북의 `share_id`가 `null`이 됩니다.
 - 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h18_delete_notebook_removes_every_version`, `test_fr_h18_delete_version_keeps_numbers`, `test_fr_h18_device_removal_detaches_shares`, `test_fr_h18_cron_purges_orphaned_blobs`
 
-### FR-H19 크기·할당량·남용 제한 — `Agreed` [provisional]
+### FR-H19 크기·할당량·남용 제한 — `Done` [provisional]
 값은 모두 실제 사용을 보고 바꿀 수 있는 처음 값입니다.
 - **크기.** `source` 1 MiB, `run` 16 MiB(Worker 메모리 128 MB 안에서 JSON을 검사할 수 있는 크기이고, FR-R5가 셀 하나의 스트림을 16 MiB로 자르는 것과 맞춤), 요청 전체 18 MiB. 넘으면 413입니다.
 - **할당량(계정당).** 노트북 200개, 노트북당 판 100개, 저장 합계 512 MiB. 넘으면 409 `quota_exceeded`이고, 오래된 판을 저절로 지우지 않습니다.
 - **빈도.** 판 올리기는 계정당 분당 10번(Workers Rate Limiting), 노트북 만들기는 계정당 분당 10번입니다. 인증 없는 노트북 읽기는 IP당 분당 300번입니다. 넘으면 429입니다.
 - **신고와 내리기.** 누구나 `POST /notebooks/{notebook_id}/report {"reason": …}`로 `public`·`unlisted` 노트북을 신고할 수 있습니다(IP당 시간당 10번). 운영자는 `POST /admin/notebooks/{notebook_id}/takedown`(`OPERATOR_SECRET`)으로 노트북을 내립니다. 내린 노트북은 주인 아닌 사람에게 404이고, 주인에게는 `taken_down: true`로 보이며 공개 범위를 넓힐 수 없습니다(409). 가입 허용 목록(`GITHUB_ALLOWED_IDS`, FR-H6)은 그대로 첫 방어선입니다.
 - 수용 기준: 각 크기 한계를 1바이트 넘기면 413, 할당량을 넘기면 409 `quota_exceeded`, 빈도를 넘기면 429입니다. 내린 노트북은 인증 없이 404, 주인에게 `taken_down: true`이고, 운영자 비밀이 틀리면 401입니다.
-- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h19_size_limits`, `test_fr_h19_quotas`, `test_fr_h19_rate_limits`, `test_fr_h19_report_and_takedown`
+- 구현 메모: 신고의 시간당 한도는 Workers Rate Limiting의 기간(10초·60초)으로 낼 수 없어 D1 `notebook_reports`를 세어 막습니다(주소는 SHA-256만 저장). 운영자 비밀이 설정되지 않으면 내리기는 항상 401입니다. 값은 `src/notebooks.ts`의 `LIMITS`와 `wrangler.toml`의 `[[ratelimits]]` 한곳에 모아 두었습니다.
+- 테스트(`darkpyonix/hub/worker/test/notebooks_abuse.test.ts`): `test_fr_h19_size_limits`, `test_fr_h19_request_size_limit`, `test_fr_h19_quotas`, `test_fr_h19_rate_limits`, `test_fr_h19_report_and_takedown`, `test_fr_h19_reports_need_a_public_or_unlisted_notebook_and_a_valid_reason`, `test_fr_h19_reports_are_rate_limited_per_address`
 
 ## 11. 비기능 요구사항
 
