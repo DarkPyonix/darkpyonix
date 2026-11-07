@@ -143,6 +143,20 @@ jobs:
           if (-not (Select-String -Path handoff-win.log -Pattern "test_fr_m6_plain_stream_survives_manager_kill ... ok")) {
             Write-Error "the Windows handoff test did not run"; exit 1
           }
+      - name: WebSocket over TLS pump on Windows (FR-S9, FR-M6; #49)
+        shell: pwsh
+        run: |
+          $env:DPX_TEST_PYTHON = (Get-Command python).Source
+          cargo test -p dpx-server --test ws_tls -- --nocapture 2>&1 | Tee-Object -FilePath ws-tls-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path ws-tls-win.log -Pattern "test_fr_s9_ws_over_tls_http1_upgrade_exchanges_frames_and_closes ... ok")) {
+            Write-Error "the Windows ws_tls test did not run"; exit 1
+          }
+          cargo test -p darkpyonix --test ws_tls_real -- --nocapture 2>&1 | Tee-Object -FilePath ws-tls-real-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path ws-tls-real-win.log -Pattern "test_fr_s9_ws_over_tls_real_kernel_history_typing_and_revocation ... ok")) {
+            Write-Error "the Windows ws_tls_real test did not run"; exit 1
+          }
 
   hub-worker:
     name: Hub worker
