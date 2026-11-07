@@ -4,7 +4,7 @@ import type { Env } from "./env";
 import { hashToken } from "./util";
 
 /** Machine-readable error codes (components/schemas/Error in the OpenAPI file). */
-export type ErrorCode = "invalid_credentials" | "device_removed" | "main_server_exists" | "replace_mismatch" | "share_not_in_account";
+export type ErrorCode = "invalid_credentials" | "device_removed" | "main_server_exists" | "replace_mismatch" | "quota_exceeded" | "share_not_in_account";
 
 /** An error answered as `{"error": "...", "code"?: "..."}` with a status the OpenAPI file documents. */
 export class ApiError extends Error {
@@ -32,6 +32,12 @@ export class ApiError extends Error {
   }
   static notFound(message = "not found"): ApiError {
     return new ApiError(404, message);
+  }
+  static tooLarge(message: string): ApiError {
+    return new ApiError(413, message);
+  }
+  static tooMany(message = "too many requests"): ApiError {
+    return new ApiError(429, message);
   }
   static conflict(message: string, code?: ErrorCode): ApiError {
     return new ApiError(409, message, code);

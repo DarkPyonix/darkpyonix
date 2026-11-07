@@ -21,7 +21,7 @@ import type { Deps, Env } from "./env";
 import { callback, login, logout } from "./github";
 import { ApiError, SESSION_COOKIE, corsOrigin, getCookie, html, json, redirect } from "./http";
 import { clearAcmeChallenge, listNames, releaseName, reserveName, setAcmeChallenge } from "./names";
-import { createNotebook, listMine, listPublic, getNotebook, updateNotebook, deleteNotebook, pushVersion, readVersion, deleteVersion, readSource, readRun, purgeOrphans } from "./notebooks";
+import { createNotebook, listMine, listPublic, getNotebook, updateNotebook, deleteNotebook, pushVersion, readVersion, deleteVersion, readSource, readRun, purgeOrphans, reportNotebook, takeDownNotebook, restoreNotebook } from "./notebooks";
 import { linkPage } from "./pages";
 import { admit, presence } from "./relay";
 import { ashPage, publishShare, resolveShare, sharePage, unpublishShare } from "./shares";
@@ -135,6 +135,8 @@ export const ROUTES: Route[] = [
   route("/notebooks", { GET: listMine, POST: createNotebook }),
   route("/users/{github_login}/notebooks", { GET: listPublic }),
   route("/notebooks/{notebook_id}", { GET: getNotebook, PATCH: updateNotebook, DELETE: deleteNotebook }),
+  route("/notebooks/{notebook_id}/report", { POST: reportNotebook }),
+  route("/admin/notebooks/{notebook_id}/takedown", { POST: takeDownNotebook, DELETE: restoreNotebook }),
   route("/notebooks/{notebook_id}/versions", { POST: pushVersion }),
   route("/notebooks/{notebook_id}/versions/{version}", { GET: readVersion, DELETE: deleteVersion }),
   route("/notebooks/{notebook_id}/versions/{version}/source", { GET: readSource }),

@@ -561,7 +561,8 @@ async fn test_fr_a3_share_tokens_are_scoped_to_one_kernel_and_capabilities() {
     assert_eq!(r.status, 204);
     a.delete(&format!("{url}/{sid}")).await.error(404, "not_found");
     a.delete(&format!("{url}/not-a-share")).await.error(404, "not_found");
-    v.get("/api/manager").await.error(401, "unauthorized");
+    // A revoked share is told from an unknown token, as a reset manager token is.
+    v.get("/api/manager").await.error(401, "token_revoked");
 }
 
 #[tokio::test]

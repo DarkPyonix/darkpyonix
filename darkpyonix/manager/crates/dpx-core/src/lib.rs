@@ -110,6 +110,8 @@ pub struct AdoptRequest {
     pub label: Value,
     #[cfg(unix)]
     pub fd: std::os::fd::OwnedFd,
+    #[cfg(windows)]
+    pub socket: std::net::TcpStream,
 }
 
 /// Everything the HTTP layer needs from kernels.
