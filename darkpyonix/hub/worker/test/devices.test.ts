@@ -29,6 +29,11 @@ describe("device links", () => {
     };
     expect(list.devices.map((d) => d.endpoint_id).sort()).toEqual([a.endpointId, b.endpointId].sort());
     expect(list.devices.every((d) => d.online === false)).toBe(true);
+    // A key that is already registered cannot ask to join again.
+    for (const role of ["computer", "main_server"]) {
+      const again = await call(deps, "POST", "/device-links", { json: { endpoint_id: a.endpointId, name: "again", role } });
+      expect(again.status, role).toBe(409);
+    }
   });
 
   it("test_fr_h1_link_shows_code_and_polls_pending_until_approved", async () => {
@@ -228,6 +233,11 @@ describe("device links", () => {
     const list = (await (await call(deps, "GET", "/devices", { token })).json()) as { devices: { endpoint_id: string; role: string }[] };
     expect(list.devices.find((d) => d.endpoint_id === phone.endpointId)?.role).toBe("client");
     expect((await call(deps, "PUT", `/pkarr/${phone.z32}`, { body: await irohRecord(phone, "https://relay.darkpyonix.dev/", [], 1n) })).status).toBe(204);
+    // It resolves addresses of its account like any other device.
+    expect((await call(deps, "GET", `/pkarr/${phone.z32}`, { token })).status).toBe(200);
+    const addresses = await call(deps, "GET", `/devices/${phone.endpointId}/addresses`, { token });
+    expect(addresses.status).toBe(200);
+    expect(((await addresses.json()) as { relay_urls: string[] }).relay_urls).toEqual(["https://relay.darkpyonix.dev/"]);
     expect((await call(deps, "POST", "/shares", { token, json: { share_id: "s_00000000000000c1" } })).status).toBe(403);
     expect((await call(deps, "PUT", "/names/my-phone", { token })).status).toBe(403);
     const link = await startLink(deps, (await newDevice()).endpointId);
@@ -371,6 +381,10 @@ describe("device app (FR-H10)", () => {
     expect((await call(deps, "PATCH", `/devices/${a.endpointId}`, { token, json: { app: ember } })).status).toBe(200);
     const list = (await (await call(deps, "GET", "/devices", { cookie })).json()) as { devices: { app: unknown }[] };
     expect(list.devices[0].app).toEqual(ember);
+    // Another device of the account reads it from the list and from the device itself.
+    const peer = await linkDevice(deps, { cookie }, await newDevice());
+    const seen = (await (await call(deps, "GET", `/devices/${a.endpointId}`, { token: peer })).json()) as { app: unknown };
+    expect(seen.app).toEqual(ember);
     // services may be left out.
     const bare = await call(deps, "PATCH", `/devices/${a.endpointId}`, { token, json: { app: { kind: "ember", version: "1" } } });
     expect(((await bare.json()) as { app: unknown }).app).toEqual({ kind: "ember", version: "1", services: [] });

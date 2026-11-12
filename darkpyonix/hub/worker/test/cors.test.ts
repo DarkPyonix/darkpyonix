@@ -29,7 +29,7 @@ describe("FR-H13", () => {
     const { start, loc, done } = await login("/");
     expect(loc.searchParams.get("redirect_uri")).toBe("https://api.darkpyonix.dev/auth/callback");
     for (const cookie of [...start.headers.getSetCookie(), ...done.headers.getSetCookie()]) {
-      expect(cookie).not.toMatch(/domain=/i); expect(cookie).toMatch(/Path=\//i); expect(cookie).toMatch(/Secure/i); expect(cookie).toMatch(/HttpOnly/i); expect(cookie).toMatch(/SameSite=Lax/i);
+      expect(cookie).toMatch(/^__Host-dp_(oauth|session)=/); expect(cookie).not.toMatch(/domain=/i); expect(cookie).toMatch(/Path=\//i); expect(cookie).toMatch(/Secure/i); expect(cookie).toMatch(/HttpOnly/i); expect(cookie).toMatch(/SameSite=Lax/i);
     }
     expect(cookieValue(done, "__Host-dp_session")).toBeTruthy();
   });

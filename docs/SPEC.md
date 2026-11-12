@@ -705,7 +705,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 수용 기준: 응답에 ETag가 있고, 같은 ETag의 `If-None-Match`는 304, 다른 ETag는 바로 200입니다. 기다리는 중에 기기를 지우거나 이름을 바꾸면 200과 새 ETag가 오고, 아무 일 없으면 `wait` 뒤 304입니다. 기다리던 기기가 지워지면 401 `device_removed`입니다. 주소 게시는 ETag를 바꾸지 않고, `online` 변화는 바꿉니다. `wait`가 범위 밖이면 400입니다.
 - 테스트(`darkpyonix/hub/worker/test/notify.test.ts`): `test_fr_h9_device_list_has_an_etag_and_answers_304`, `test_fr_h9_long_poll_wakes_on_a_change`, `test_fr_h9_long_poll_times_out_with_304`, `test_fr_h9_waiting_device_that_is_removed_gets_device_removed`, `test_fr_h9_only_visible_changes_move_the_etag`, `test_fr_h9_wait_is_validated`
 
-### FR-H10 기기 앱 정보 — `Agreed` [provisional]
+### FR-H10 기기 앱 정보 — `Done` [provisional] (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 기기 목록만으로 "어느 기기가 ember 노드이고 무슨 버전이며 무엇을 제공하는지" 알 수 있게, 기기가 자기 앱 정보를 허브에 적습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - 기기는 `PATCH /devices/{자기 endpoint_id} {"app": {...}}`로 적고 `{"app": null}`로 지웁니다. **그 기기 자신만** 적을 수 있습니다(세션이나 메인 서버가 남의 `app`을 적으면 403). 기기 목록과 조회의 `Device.app`에 그대로 나옵니다(없으면 `null`).
 - 형식(엄격, 알 수 없는 필드는 400): `kind`(필수, `^[a-z][a-z0-9-]{0,31}$`, 예: `ember`), `version`(필수, `^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$`), `services`(선택, 기본 `[]`, 같은 형식의 이름 최대 16개, 중복 없음, 예: `["kernel-manager", "ash-host"]`).
@@ -738,7 +738,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 수용 기준(배포 후 점검 스크립트, ash CI의 배포 뒤 단계): `https://darkpyonix.dev/`, `/link?code=BCDF-GHJK`, `/new`가 200 `text/html`, `/n/n_<32 hex>`와 `/s/s_<16 hex>`가 404 `text/html`이고 본문이 `index.html`과 같으며, 모든 앱 HTML에 위 meta CSP와 referrer가 있습니다. `/dioxus-compose/`가 그 저장소의 가이드를 냅니다(메인 페이지가 가로채지 않음). `/.well-known/org.flathub.VerifiedApps.txt`는 200 `text/plain`입니다(FR-H7). 응답에 `Set-Cookie`가 없습니다. 메인 페이지를 다른 출처의 iframe에 넣으면 아무것도 그려지지 않고, 그 안에서 `/link` 승인을 보내도 401입니다. `https://api.darkpyonix.dev/config`는 200 JSON입니다.
 - 테스트(darkpyonix-ash): `test_fr_h12_front_routes_serve_the_app`, `test_fr_h12_guides_stay_on_project_sites`, `test_fr_h12_build_names_do_not_collide_with_pages_repos`, `test_fr_h12_front_sets_no_cookies`, `test_fr_h12_framed_front_renders_nothing_and_cannot_approve`
 
-### FR-H13 브라우저에서 API 부르기(CORS, 쿠키, OAuth) — `Agreed`
+### FR-H13 브라우저에서 API 부르기(CORS, 쿠키, OAuth) — `Done` (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 프런트와 API가 다른 호스트이므로 브라우저 경로를 정합니다.
 - **CORS.** 허용 출처는 정확히 `FRONT_URL`(`https://darkpyonix.dev`) 하나이고, 운영자가 `CORS_DEV_ORIGINS`(쉼표 구분, 예: `http://localhost:5173`)를 두면 그것도 더합니다 [provisional]. 허용 출처의 요청에는 `Access-Control-Allow-Origin: <그 출처>`, `Access-Control-Allow-Credentials: true`, `Vary: Origin`, `Access-Control-Expose-Headers: ETag`를 붙입니다. 사전 요청(`OPTIONS`)은 204와 `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE`, `Access-Control-Allow-Headers: Authorization, Content-Type, If-None-Match`, `Access-Control-Max-Age: 600`입니다. 그 밖의 출처(사용자 이름 서브도메인 `<name>.darkpyonix.dev`, 출처 `null` 포함)에는 CORS 헤더를 붙이지 않습니다. 기기 토큰을 쓰는 기기(ember, CLI)는 브라우저가 아니라 CORS와 무관합니다.
 - **쿠키.** `__Host-dp_session`과 `__Host-dp_oauth`는 `api.darkpyonix.dev`가 `Domain` 없이(`__Host-` 접두어 규칙) `Path=/; Secure; HttpOnly; SameSite=Lax`로 둡니다. 프런트는 쿠키를 읽지 못하고, 로그인 여부는 `GET /me`(401이면 로그아웃 상태)로 압니다. 프런트와 API는 같은 사이트(`darkpyonix.dev`)이므로 `SameSite=Lax` 쿠키가 `credentials: "include"` 요청에 실리고, 서드파티 쿠키 차단과 무관합니다.
@@ -747,7 +747,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 수용 기준: `Origin: https://darkpyonix.dev`의 사전 요청은 204와 위 헤더, 실제 요청은 그 출처를 그대로 돌려줍니다. `Origin: https://studio.darkpyonix.dev`나 `null`에는 `Access-Control-Allow-Origin`이 없고, 그 출처의 쿠키 쓰기는 403입니다. 로그인 콜백의 `Set-Cookie`에 `Domain`이 없고 이름이 `__Host-`로 시작합니다. 콜백은 `https://darkpyonix.dev/<return_to>`로 302하고, 바깥 `return_to`(`https://…`, `//evil`, `/\evil`)는 `https://darkpyonix.dev/`가 됩니다.
 - 테스트(`darkpyonix/hub/worker/test/cors.test.ts`): `test_fr_h13_cors_allows_only_the_front`, `test_fr_h13_preflight_lists_methods_and_headers`, `test_fr_h13_session_cookie_is_host_only_on_the_api`, `test_fr_h13_callback_returns_to_the_front`, `test_fr_h13_cookie_writes_from_user_subdomains_are_refused`
 
-### FR-H14 노트북 보관과 판 — `Agreed`
+### FR-H14 노트북 보관과 판 — `Done` (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 사용자 결정(2026-10-03): 허브는 "ash 노트북 호스팅까지" 합니다. 허브는 노트북을 보관하고 보여 줄 뿐 실행하지 않습니다(INTENT D15 개정).
 - **노트북.** `notebook_id`는 `n_<32 hex>`(128비트 난수)입니다. `unlisted` 링크(FR-H15)는 ID를 아는 것이 곧 권한이므로 추측할 수 없어야 합니다. 노트북은 계정 하나의 것이고 `title`(1~120자), `visibility`(FR-H15), `share_id`(FR-H17, 없으면 `null`), `latest_version`, `created_at`, `updated_at`, 만든 기기(`created_by`: 세션이면 `null`)를 가집니다.
 - **판(version).** 판은 바꿀 수 없는 스냅숏이고 노트북마다 1부터 하나씩 올라갑니다(지운 번호는 다시 쓰지 않음). 판 하나는
@@ -759,9 +759,9 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - **저장소.** 목록·권한·판 메타데이터는 D1(`notebooks`, `notebook_versions`), 본문은 비공개 R2 버킷(`darkpyonix-notebooks`, 키 `nb/<account_id>/<notebook_id>/<version>/source|run`)입니다. D1의 행·값 상한(약 2 MB)과 DB 크기 상한 때문에 본문을 D1에 두지 않습니다. 본문은 Worker를 거쳐서만 나갑니다(R2 공개 버킷 없음).
 - **읽기.** `GET /notebooks/{notebook_id}`(메타데이터와 판 목록), `GET /notebooks/{notebook_id}/versions/{version}`(판 메타데이터), `…/source`, `…/run`(본문). `{version}`에는 `latest`를 쓸 수 있습니다. 본문 응답은 `source`가 `text/plain; charset=utf-8`, `run`이 `application/json`이고, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Content-Disposition: attachment; filename=…`, `ETag: "<sha256>"`를 붙입니다. 그래서 주소창으로 열어도 문서로 실행되지 않습니다(NFR-H3). 캐시는 `private, max-age=60` [provisional]: 판은 바뀌지 않지만 공개 범위는 바뀔 수 있어서 공유 캐시에 오래 두지 않습니다.
 - 수용 기준: 노트북을 만들면 201과 `n_<32 hex>`, 판을 둘 올리면 1과 2, 동시에 둘 올려도 서로 다른 연속 번호입니다. 받은 `source`·`run`이 올린 바이트와 같고(`sha256`), `latest`가 가장 높은 판입니다. UTF-8이 아니거나 NUL이 있는 소스, 확장자가 틀린 이름, `nbformat`이 4가 아니거나 출력 형식이 틀린 실행 기록은 400입니다. `client` 기기 토큰은 403, 다른 계정은 404입니다. 본문 응답에 위 헤더가 있습니다.
-- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h14_create_and_push_versions`, `test_fr_h14_versions_are_numbered_once_under_concurrency`, `test_fr_h14_content_round_trips_with_sha256`, `test_fr_h14_rejects_malformed_source_and_run`, `test_fr_h14_client_devices_cannot_publish`, `test_fr_h14_content_responses_cannot_render_as_documents`
+- 테스트(`darkpyonix/hub/worker/test/notebooks.test.ts`): `test_fr_h14_create_and_push_versions`, `test_fr_h14_versions_are_numbered_once_under_concurrency`, `test_fr_h14_content_round_trips_with_sha256`, `test_fr_h14_rejects_malformed_source_and_run`, `test_fr_h14_client_devices_cannot_publish`, `test_fr_h14_other_accounts_cannot_read_or_push`, `test_fr_h14_content_responses_cannot_render_as_documents`
 
-### FR-H15 공개 범위 — `Agreed`
+### FR-H15 공개 범위 — `Done` (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 노트북의 `visibility`는 셋입니다. 기본은 가장 좁은 `private`입니다.
 
 | 값 | 누가 읽나 | 목록에 나오나 | 검색 엔진 |
