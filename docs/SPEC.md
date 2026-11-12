@@ -689,14 +689,14 @@ Flathub의 앱 ID `dev.darkpyonix.Ember`는 도메인 darkpyonix.dev로 검증�
 - 수용 기준: 토큰이 있으면 200 `text/plain`이고 본문은 앞뒤 공백을 뺀 토큰입니다. 없거나 공백뿐이면 404입니다. 실제 Flathub 검증은 배포 후 확인합니다.
 - 테스트(`darkpyonix/hub/worker/test/flathub.test.ts`): `test_fr_h7_verified_apps_file_serves_the_configured_token`, `test_fr_h7_verified_apps_file_is_absent_without_a_token`
 
-### FR-H8 허브 설정 발견 — `Agreed`
+### FR-H8 허브 설정 발견 — `Done` (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 클라이언트(ember, ash)가 릴레이 주소나 pkarr URL을 코드에 박아 두지 않도록, 허브가 자기 설정을 공개합니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - `GET /config`(인증 없음, `Cache-Control: public, max-age=300`)는 `{hub_version, relay_urls, pkarr_url, link_url}`를 냅니다. 판 번호(`api_version`)는 두지 않습니다(INTENT D16). `hub_version`은 배포된 빌드를 알리는 정보용 문자열이고 클라이언트는 이 값으로 분기하지 않습니다. `relay_urls`는 기기가 iroh `RelayMap`에 넣을 릴레이 목록(지금은 Worker 변수 `RELAY_URL` 하나), `pkarr_url`은 iroh `PkarrPublisher`/`PkarrResolver`에 줄 기준 URL(`<PUBLIC_URL>/pkarr`, 조회할 때는 `?token=<조회 토큰>`을 붙임, NFR-H2), `link_url`은 기기 링크 승인 페이지입니다.
 - 수용 기준: 인증 없이 200이고, 값이 Worker 변수(`PUBLIC_URL`, `RELAY_URL`, 개정 뒤에는 `API_URL`, `FRONT_URL`, `RELAY_URL`)를 따릅니다. 응답에 `api_version`이 없습니다.
 - 테스트(`darkpyonix/hub/worker/test/config.test.ts`): `test_fr_h8_config_names_relays_and_pkarr_url`, `test_fr_h8_config_follows_the_worker_vars`
 - **개정(2026-10-03 제안, 2026-10-05 승인, D15 개정).** `GET https://api.darkpyonix.dev/config`에 `api_url`(`https://api.darkpyonix.dev`)과 `front_url`(`https://darkpyonix.dev`)을 더합니다. `pkarr_url`은 `<API_URL>/pkarr`, `link_url`은 `<FRONT_URL>/link`입니다. Worker 변수 `PUBLIC_URL`은 `API_URL`과 `FRONT_URL` 둘로 나눕니다. 필드 추가라 기존 필드는 그대로입니다(판 번호는 두지 않습니다, INTENT D16). 메인 페이지 빌드에는 API 주소(`https://api.darkpyonix.dev`) 하나만 넣고, 릴레이·pkarr 주소는 실행 중에 이 응답에서 읽습니다. 그래서 릴레이를 옮겨도 메인 페이지를 다시 배포하지 않습니다.
 
-### FR-H9 기기 목록 변경 알림 — `Agreed` [provisional]
+### FR-H9 기기 목록 변경 알림 — `Done` [provisional] (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기는 하트비트 한 번 안에 끊긴다"(ember FR-N3)를 맞출 수 없었습니다(Ember FR-N2 연동 중 보고, 2026-10-03). 허브가 목록이 바뀐 것을 알려 줍니다.
 - **판(version)과 ETag.** 계정마다 기기 목록의 판 번호를 두고, 목록에 보이는 것이 바뀔 때마다 하나 올립니다: 기기 추가·되살림(FR-H11), 삭제, 이름·앱 정보 변경, `online` 변화. `last_seen`만 바뀌는 것(주소 게시, 릴레이 입장)은 판을 올리지 않습니다(5분마다 오는 게시가 모든 대기자를 깨우지 않도록). `GET /devices`는 `ETag: W/"v<판>"`을 붙입니다(약한 ETag: `last_seen`은 판에 들지 않음).
 - **조건부 요청.** `If-None-Match`가 지금 ETag와 같으면 304(본문 없음)입니다.
@@ -713,7 +713,7 @@ Ember는 기기 목록을 60초마다 다시 읽었고, 그래서 "지운 기기
 - 수용 기준: 기기가 적은 앱 정보가 같은 계정의 목록과 조회에 나오고, `null`로 지워집니다. 남이 적으면 403, 형식이 틀리거나 알 수 없는 필드면 400입니다.
 - 테스트(`darkpyonix/hub/worker/test/devices.test.ts`): `test_fr_h10_device_reports_its_app`, `test_fr_h10_only_the_device_writes_its_app`, `test_fr_h10_app_is_validated`
 
-### FR-H11 지운 키 다시 들이기 — `Agreed` [provisional]
+### FR-H11 지운 키 다시 들이기 — `Done` [provisional] (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 지운 키는 다시 등록할 수 없으므로(FR-H1), 실수로 지운 메인 서버는 새 키(새 엔드포인트 ID)를 만들어야 하고 그 키를 아는 모든 곳을 고쳐야 합니다. 그래서 **계정 주인만** 지운 키를 다시 들일 수 있게 합니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - 흐름: (1) 로그인한 브라우저 세션이 `POST /devices/{endpoint_id}/readmit`로 자기 계정에서 지운 키를 15분 동안 다시 받아들이겠다고 표시합니다. (2) 그 기기가 보통의 기기 링크(FR-H1)를 시작합니다. 표시가 살아 있는 동안만 그 키의 링크 요청이 409가 아닙니다. (3) 그 링크의 승인도 **같은 계정의 세션만** 할 수 있습니다(메인 서버 토큰, 다른 계정은 403). (4) 기기가 받으면 같은 기기 행이 되살아나고 기기 토큰과 조회 토큰은 새로 발급됩니다. 역할과 이름은 새 링크의 것이고 앱 정보는 비웁니다. `main_server`로 돌아오는 링크에는 메인 서버 하나 규칙(FR-H1)이 그대로 걸립니다. 계정에 다른 메인 서버가 있으면 `replace`로만 승인되고, 받으면 그 메인 서버가 지워지며 이름이 되살아난 기기로 옮겨 갑니다.
 - 지운 기기 목록: 다시 들일 키를 고르려면 그 엔드포인트 ID를 알아야 하므로, 로그인한 세션은 `GET /removed-devices`로 자기 계정에서 지운 기기를 봅니다. 항목마다 `endpoint_id`, 지울 때의 `name`과 `role`, `created_at`, `removed_at`, 그리고 다시 들이기 표시가 살아 있으면 그 만료(`readmit_until`, 아니면 `null`)가 나옵니다. 최근에 지운 것부터 100개까지입니다. 다시 들여 받은 기기는 이 목록에서 빠지고 기기 목록(`GET /devices`)에 나옵니다. 기기 토큰(메인 서버 것도)은 403입니다. 다시 들이기 자체가 세션만의 일이므로 목록도 세션에만 보입니다. 지운 기기의 이름과 역할은 계정 바깥에 드러나지 않습니다.
@@ -810,6 +810,24 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 구현 메모: 신고의 시간당 한도는 Workers Rate Limiting의 기간(10초·60초)으로 낼 수 없어 D1 `notebook_reports`를 세어 막습니다(주소는 SHA-256만 저장). 운영자 비밀이 설정되지 않으면 내리기는 항상 401입니다. 값은 `src/notebooks.ts`의 `LIMITS`와 `wrangler.toml`의 `[[ratelimits]]` 한곳에 모아 두었습니다.
 - 테스트(`darkpyonix/hub/worker/test/notebooks_abuse.test.ts`): `test_fr_h19_size_limits`, `test_fr_h19_request_size_limit`, `test_fr_h19_quotas`, `test_fr_h19_rate_limits`, `test_fr_h19_report_and_takedown`, `test_fr_h19_reports_need_a_public_or_unlisted_notebook_and_a_valid_reason`, `test_fr_h19_reports_are_rate_limited_per_address`
 
+### 허브에서 `Done`까지 남은 점검 (2026-11-13 감사, #21)
+아래 요구사항은 Worker와 릴레이 호스트의 시험으로 확인할 수 있는 수용 기준이 모두 통과하지만, 남은 기준이 배포된 허브나 다른 저장소의 작업을 필요로 해서 `Agreed`(FR-H3은 `Draft`)로 둡니다. 각 항목이 확인되면 그 요구사항의 상태를 같은 변경에서 올립니다.
+
+| 요구사항 | 남은 점검 | 필요한 것 |
+|---|---|---|
+| FR-H1 | 실제 iroh 엔드포인트(Rust `SecretKey::sign`)가 `darkpyonix-hub/v2/link\n<link_id>\n<challenge>`에 낸 서명으로 `POST /device-links/{link_id}/token`이 201 | darkpyonix-ember 전송 크레이트 연동 시험. 로컬 Worker(`wrangler dev`)로도 할 수 있어 배포는 필요 없음 |
+| FR-H2 | 두 실제 iroh 엔드포인트가 기본 `PkarrPublisher`/`PkarrResolver`(`<pkarr_url>?token=<조회 토큰>`)로 Worker를 거쳐 연결. Rust가 만든 패킷 바이트를 Worker 시험 벡터로 추가 | 배포된 Worker(또는 로컬 Worker)와 ember 연동 시험 |
+| FR-H3 | 릴레이 위치(PROJECT Q9) 확인. 두 등록 기기의 릴레이 전용 연결과 루프백 직접 경로, 지운 기기의 연결 끊김을 실제 Worker 입장 API로 확인. 루프백 처리량·왕복 지연과 ember NFR-N1의 QAD 켬/끔 직접 연결 비율을 측정해 기록 | Q9의 사용자 확인, 릴레이 호스트(VPS), 배포된 Worker, `RELAY_SHARED_SECRET` |
+| FR-H4 | 브라우저 ash가 손님 통행권으로 릴레이를 거쳐 공유를 연 기기에 붙음. 메인 페이지가 `/s/<share_id>`를 내기 시작하면 Worker의 `deprecated` 연산 `/s/{share_id}`, `/ash/`와 `test_fr_h4_viewer_pages_are_served`를 걷어 냄 | 릴레이 호스트, darkpyonix-ash의 공유 페이지(FR-H12) |
+| FR-H5 | 실제 `darkpyonix.dev` 존에서 메인 서버가 `PUT /names/{name}/acme-challenge`로 Let's Encrypt 스테이징 인증서를 받음 | `CF_API_TOKEN`(그 존의 `Zone → DNS → Edit`만), `CF_ZONE_ID`, 배포된 Worker |
+| FR-H6 | 실제 GitHub OAuth App으로 `https://api.darkpyonix.dev/auth/login` → 콜백 → `GET /me` 200 | GitHub OAuth App(콜백 `https://api.darkpyonix.dev/auth/callback`), `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, 배포된 Worker |
+| FR-H7 | `https://darkpyonix.dev/.well-known/org.flathub.VerifiedApps.txt`가 200 `text/plain`이고 Flathub 검증이 통과. 그 뒤 Worker의 `deprecated` 연산과 `flathub.test.ts`를 걷어 냄 | darkpyonix-ash 빌드와 Pages 배포, ash 저장소 변수 `FLATHUB_VERIFICATION_TOKEN` |
+| FR-H12 | 배포 후 점검 스크립트(FR-H12 수용 기준 전체)와 darkpyonix-ash 시험 `test_fr_h12_*` 5건. 메인 페이지가 `/link`를 내기 시작하면 Worker의 `deprecated` 연산 `/link`를 걷어 냄 | darkpyonix-ash의 메인 페이지 구현(지금 없음), 배포 키 `PAGES_DEPLOY_KEY` |
+| FR-H16 | darkpyonix-ash 시험 `test_fr_h16_*` 3건(지금 없음) | darkpyonix-ash의 노트북 보기 구현 |
+| FR-H17 | `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`: 토큰이 있는 노트북 링크가 기기의 매니저에 붙어 실행(`viewer3`), 토큰 없이는 읽기 전용 | 릴레이 호스트, darkpyonix-ash의 노트북 페이지, 전용 매니저가 도는 기기 |
+
+Worker 배포 자체에 필요한 것(사용자 준비물): Cloudflare 계정의 D1 데이터베이스(`wrangler.toml`의 `database_id`가 아직 자리표시값), R2 버킷 `darkpyonix-notebooks`, custom domain `api.darkpyonix.dev`, 비밀값 `GITHUB_CLIENT_ID`·`GITHUB_CLIENT_SECRET`·`RELAY_SHARED_SECRET`·`OPERATOR_SECRET`·`CF_API_TOKEN`·`CF_ZONE_ID`. 릴레이 호스트에는 `relay.darkpyonix.dev`의 DNS only A/AAAA 레코드, 그 이름의 TLS 인증서, 열린 TCP 443과 UDP 7842가 필요합니다.
+
 ## 11. 비기능 요구사항
 
 ### NFR-K1 인터프리터 범위 — `Done`
@@ -854,7 +872,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 테스트: `test_nfr_h1_relay_sees_only_ciphertext`(`darkpyonix/hub/server/tests/hub/nfr_h1.rs`). develop `1bff9b5`의 CI(Test 실행 42324439510, Hub server 작업)에서 통과했습니다.
   - 검증 범위: 릴레이(평문 HTTP) 앞에 바이트를 기록하는 TCP 프록시를 두고, 직접 경로를 끈(`clear_ip_transports`) iroh 엔드포인트 둘이 그 릴레이로만 통신합니다. 상대 끝단이 표식을 그대로 받고, 기록된 양방향 바이트에 표식이 없음을 확인합니다. 클라이언트→릴레이 방향의 WebSocket 프레임은 마스킹되므로 그 방향의 부재만으로는 증거가 되지 않고, 릴레이→클라이언트 방향(마스킹 없음)과 QUIC 암호화가 실질적 증거입니다. 허브 앞단 Cloudflare 프록시 구성은 이 테스트가 다루지 않습니다.
 
-### NFR-H2 토큰 노출 최소화 — `Agreed`
+### NFR-H2 토큰 노출 최소화 — `Done` (구현됨 #21, 수용 기준 전부를 Worker 시험이 확인: 로컬 `npm test` 118건 통과 2026-11-13)
 iroh의 기본 `PkarrResolver`는 헤더를 붙일 수 없어서 `GET /pkarr/{key}`의 자격 증명이 URL 쿼리(`?token=`)로 갑니다. URL은 로그·프록시·크래시 보고에 남기 쉬우므로 그 자리에 계정 권한이 있는 토큰을 두지 않습니다(Ember FR-N2 연동 중 보고, 2026-10-03).
 - **조회 토큰(`dpr_…`).** 기기 링크를 받을 때(`POST /device-links/{link_id}/token`의 201) 기기 토큰과 함께 `resolve_token`을 하나 받습니다. 조회 토큰은 같은 계정 기기의 `GET /pkarr/{key}`에만 쓰이고(쿼리 또는 `Authorization: Bearer`), 다른 연산에서는 자격 증명이 아닙니다(401). 해시로만 저장합니다. 기기는 `POST /me/resolve-token`(자기 기기 토큰, 헤더)으로 새 조회 토큰을 받을 수 있고, 그러면 이전 조회 토큰은 즉시 무효입니다(교체). 지운 기기의 조회 토큰은 401 `device_removed`입니다.
 - **쿼리의 기기 토큰은 받지 않습니다.** `?token=`에 기기 토큰(`dpd_…`)을 넣으면 401 `invalid_credentials`입니다. 기기 토큰과 세션은 헤더·쿠키로만 받습니다.
