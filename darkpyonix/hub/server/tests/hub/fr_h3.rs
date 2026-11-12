@@ -29,6 +29,22 @@ async fn test_fr_h3_relay_caches_admission_for_cache_secs() {
     drop((a, b, c));
 }
 #[tokio::test]
+async fn test_fr_h3_relay_refuses_an_endpoint_the_worker_does_not_admit() {
+    let hub = start_hub("refusal").await;
+    let key = SecretKey::generate();
+    let id = key.public().to_string();
+    // The stub admission API allows no token (a registered device) and "guest-pass" only.
+    let refused = connect(&hub, key.clone(), Some("forged")).await;
+    assert!(refused.is_err(), "an endpoint the Worker refuses must not get a relay connection");
+    assert_eq!(hub.calls.lock().unwrap().admissions[0], json!({"endpoint_id": id, "token": "forged"}));
+    // A refusal is not cached: the next attempt is asked about again, and refused again.
+    assert!(connect(&hub, key, Some("forged")).await.is_err());
+    assert_eq!(hub.calls.lock().unwrap().admissions.len(), 2);
+    // The endpoint never came online.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(hub.calls.lock().unwrap().presence.is_empty());
+}
+#[tokio::test]
 async fn test_fr_h4_guest_pass_admits_through_the_worker() {
     let hub = start_hub("guest").await;
     let key = SecretKey::generate();
