@@ -399,7 +399,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 테스트: Rust `test_fr_c2_cli_commands`, `test_fr_c2_second_run_exits_75_with_hint`, `test_fr_c2_run_follows_outputs_and_exits_0`, `test_fr_c2_run_error_exits_1_with_traceback`, `test_fr_c2_ctrl_c_interrupts_the_run_and_exits_130`, `test_fr_c2_second_ctrl_c_detaches_and_the_run_continues`, `test_fr_c2_detach_prints_the_run_id_and_does_not_follow`, `test_fr_c2_run_options_reach_the_api`, `test_fr_c2_logs_follow_replays_the_executing_run`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`), `test_fr_c2_every_command_parses`, `test_fr_c2_invalid_usage_is_rejected`(`darkpyonix/manager/crates/darkpyonix/src/args.rs`)
 - 상태 메모 (2026-10-03 감사): `attach`, 전용 매니저에서의 `share`, `manager` 하위 명령은 인자 파싱 시험만 있고 동작 시험은 없습니다.
 
-### FR-C3 PyPI 배포 — `Agreed` (INTENT D22, 이슈 #97, dry run 42039953595와 develop `b68d6ab`의 dry run 43278088730(2026-11-13)에서 5개 플랫폼 wheel과 any-wheel의 깨끗한 venv 설치·실행 통과, 실제 업로드는 소유자 승인 후 릴리스 때 확인)
+### FR-C3 PyPI 배포 — `Done` (INTENT D22, 이슈 #97, dry run 42039953595와 develop `b68d6ab`의 dry run 43278088730(2026-11-13)에서 5개 플랫폼 wheel과 any-wheel의 깨끗한 venv 설치·실행 통과, 릴리스 v0.3.0(`27ae87e`, 2026-11-05)의 게시 실행 42092276228이 5개 플랫폼 wheel, any-wheel, sdist를 PyPI에 올림)
 PyPI의 `darkpyonix`는 플랫폼마다 `darkpyonix` 명령(Rust 바이너리, 매니저 포함)이 들어 있는 휠로 나갑니다.
 - **플랫폼 휠.** `py3-none-<플랫폼>`: macOS arm64(`macosx_11_0_arm64`), macOS x86_64(`macosx_10_12_x86_64`, arm64 러너에서 `x86_64-apple-darwin` 교차 컴파일하고 같은 러너에서 Rosetta로 시험), Linux x86_64·aarch64(`manylinux_2_28`), Windows x64(`win_amd64`). 바이너리는 휠의 스크립트로 들어가 설치하면 PATH에 `darkpyonix`가 놓입니다. 커널과 런타임 API(`darkpyonix/kernel/`)도 같은 휠에 들어 있습니다.
 - **지원하지 않는 플랫폼.** musl Linux(Alpine 등)는 0.3.0에서 만들지 않으며 지원하지 않습니다(README에도 적음). 그 밖에 플랫폼 휠이 없는 곳(32비트, Windows arm64 등)을 위해 `py3-none-any` 휠과 sdist를 함께 냅니다. 이 둘은 커널과 런타임 API만 담고 매니저는 없습니다. 이 휠이 깔린 곳에서 `darkpyonix` 명령은 "이 플랫폼에서는 매니저를 지원하지 않는다"고 표준 오류에 쓰고 종료 코드 1로 끝납니다. 설치는 실패하지 않습니다.
@@ -412,7 +412,6 @@ PyPI의 `darkpyonix`는 플랫폼마다 `darkpyonix` 명령(Rust 바이너리, �
   5. `py3-none-any` 휠을 설치한 환경에서 `darkpyonix`가 위 안내와 종료 코드 1로 끝나고 `import darkpyonix`는 동작합니다.
   6. 릴리스 워크플로는 태그가 `v` + 버전과 다르거나 바이너리 `--version`이 패키지 버전과 다르면 올리지 않고, 업로드는 GitHub Release `published`일 때 신뢰 게시(OIDC)로만 합니다. 수동 실행(`workflow_dispatch`)과, 패키징 관련 경로를 바꾼 풀 리퀘스트(`pull_request`, `paths` 필터)는 빌드와 스모크 시험까지만 하고 올리지 않습니다.
 - 테스트: 위 1~5는 `publish-pypi.yml`의 플랫폼별 스모크 단계(`packaging/smoke.py`)가 증명합니다. 휠 구성(태그, 스크립트 포함, 대체 휠)은 `tests/test_fr_c3_packaging.py`가 가짜 바이너리로 확인합니다. 각 플랫폼에서 통과한 실행 기록을 여기에 붙인 뒤 `Done`으로 바꿉니다.
-- 상태 메모: 0.3.0 올림에서 Cargo 작업 공간 버전을 패키지 버전에 맞춥니다(별도 커밋).
 
 ## 9. 인증과 공유 (A)
 
