@@ -21,8 +21,9 @@ DarkPyonix kernel stack:
   (INTENT D10). A disposable HTTP front for kernels. It discovers running kernels, launches
   new ones, and serves the kernel access API to IDEs, agents and the shared notebook (ash); it
   does not host ash. It embeds the Python package sources from `darkpyonix/kernel/`.
-- `darkpyonix/hub/`: `darkpyonix.dev`. Rendezvous and relay for machine-to-machine
-  connections, HTTPS, and hosting of the official darkpyonix-ash viewer.
+- `darkpyonix/hub/`: `darkpyonix.dev`. Rendezvous (address directory) for machine-to-machine
+  connections, GitHub sign-in, HTTPS names, and hosting of the official darkpyonix-ash viewer.
+  It runs no relay; the user's own main server relays over letify-link (INTENT D23).
 
 The rest of the product lives in sibling repositories: `darkpyonix-ember` (IDE and agent
 workbench), `darkpyonix-ash` (shared WASM notebook), `vscode-darkpyonix`,
@@ -53,7 +54,7 @@ The root holds exactly these entries:
 - `darkpyonix.mermaid`: the class diagram of the object model.
 - `darkpyonix/`: the product code, exactly three folders: `kernel/` (the Python `darkpyonix`
   package: runtime API and kernel), `manager/` (Rust manager and CLI) and `hub/`
-  (`darkpyonix.dev`: Cloudflare Worker and relay host).
+  (`darkpyonix.dev`: Cloudflare Worker; the relay host is being removed, #129).
 - `docs/`: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT and the OpenAPI files.
 - `pyproject.toml`: the Python package and pytest configuration.
 - `tests/`: the Python test suite. `tests/conftest.py` links `darkpyonix/kernel` as
