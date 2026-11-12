@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "darkpyonix"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axum",
  "clap",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "dpx-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "dpx-kernel"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "dpx-core",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "dpx-server"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "axum",
