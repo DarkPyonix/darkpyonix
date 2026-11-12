@@ -36,9 +36,17 @@ export async function pkarrPut(request: Request, env: Env, deps: Deps, z32: stri
     .bind(endpointId, base64url(payload), ts)
     .run();
   if (result.meta.changes !== 1) throw ApiError.conflict("not newer than the stored packet");
-  await env.DB.prepare("UPDATE devices SET last_seen = ? WHERE endpoint_id = ?")
-    .bind(nowSecs(deps.nowMs()), endpointId)
-    .run();
+  // A fresh record makes the device online (FR-H1); only the flip moves the list version (FR-H9).
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE accounts SET devices_version = devices_version + 1 WHERE account_id =
+         (SELECT account_id FROM devices WHERE endpoint_id = ? AND revoked_at IS NULL AND online = 0)`,
+    ).bind(endpointId),
+    env.DB.prepare("UPDATE devices SET online = 1, last_seen = ? WHERE endpoint_id = ? AND revoked_at IS NULL").bind(
+      nowSecs(deps.nowMs()),
+      endpointId,
+    ),
+  ]);
   return noContent();
 }
 

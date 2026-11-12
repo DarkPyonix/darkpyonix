@@ -13,7 +13,6 @@ export default defineConfig({
           TEST_MIGRATIONS: await readD1Migrations(fileURLToPath(new URL("./migrations", import.meta.url))),
           GITHUB_CLIENT_ID: "Iv1.testclient",
           GITHUB_CLIENT_SECRET: "test-secret",
-          RELAY_SHARED_SECRET: "relay-secret",
         },
       },
     })),

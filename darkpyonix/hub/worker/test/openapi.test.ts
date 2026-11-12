@@ -1,7 +1,7 @@
 // CLAUDE.md: the OpenAPI file is the SPEC. Every operation this Worker serves answers, with no
 // credentials and an empty body, only with a status its documentation lists; and every route
-// the Worker has is documented. Operations with a path-level `servers` entry live on the relay
-// host (darkpyonix/hub/server) and are checked there. Paths marked `x-planned: true` are
+// the Worker has is documented. Operations with a path-level `servers` entry live on another
+// host and are skipped (none today: the hub runs no relay, FR-H3). Paths marked `x-planned: true` are
 // agreed in the SPEC but not served yet and are skipped.
 
 import { describe, expect, it } from "vitest";

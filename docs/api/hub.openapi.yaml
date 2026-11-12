@@ -2,10 +2,14 @@ openapi: 3.1.0
 info:
   title: DarkPyonix Hub API (api.darkpyonix.dev)
   version: 0.4.0
-  summary: GitHub accounts, device registry, address directory, share links, HTTPS names and hosted ash notebooks for DarkPyonix; the iroh relay on its own host.
+  summary: GitHub accounts, device registry, address directory, share links, HTTPS names and hosted ash notebooks for DarkPyonix. The hub runs no relay (INTENT D23).
   description: |
-    The hub connects a user's machines (the main server and its branch computers) and lets
-    shared notebooks reach a dedicated manager, **without seeing their traffic** (SPEC NFR-H1).
+    The hub is the rendezvous (an account-scoped pkarr address directory), the sign-in
+    (GitHub accounts and device registry) and the ash hosting for DarkPyonix. It never carries
+    traffic between machines (SPEC NFR-H1) and **runs no relay** (INTENT D23, SPEC FR-H3): the
+    transport between machines is letify-link, and the user's own main server relays and
+    observes public addresses (Ember INTENT D36, SPEC FR-N2). The hub stays within the
+    Cloudflare free tier.
 
     **Hosts** (SPEC §10, INTENT D15 and its 2026-10-03 amendment, approved 2026-10-05):
 
@@ -20,17 +24,12 @@ info:
       for metadata, a private R2 bucket for notebook content). It serves GitHub sign-in, the
       device registry, the address directory, share resolution, HTTPS names (ACME TXT through
       the Cloudflare DNS API) and hosted notebooks. It serves no HTML front.
-    - `https://relay.darkpyonix.dev` is the **relay host** (`darkpyonix/hub/server/`, the `iroh-relay`
-      server crate). Workers cannot accept UDP, and iroh's QUIC address discovery (QAD) needs
-      UDP 7842, so the relay runs where it can. Operations served there carry a path-level
-      `servers` entry. The relay asks the Worker whom to admit
-      (`/internal/relay/admit`), and the Worker tells the relay to drop removed devices
-      (`/admin/disconnect`).
 
-    The peer-to-peer transport is **iroh 1.x** (PROJECT Q1). A device *is* an iroh endpoint:
-    its id is the endpoint id, the lowercase hex of its ed25519 public key.
-    `PUT`/`GET /pkarr/{key}` is iroh's pkarr relay protocol, so the stock `PkarrPublisher`
-    and `PkarrResolver` work against `https://api.darkpyonix.dev/pkarr`.
+    A device *is* an ed25519 key: its id is the lowercase hex of its public key (the iroh
+    endpoint id and the letify-link node id are the same value). `PUT`/`GET /pkarr/{key}` is
+    iroh's pkarr relay protocol, so the stock `PkarrPublisher` and `PkarrResolver` work against
+    `https://api.darkpyonix.dev/pkarr`; letify-link address records and relay-offer mailboxes
+    (Ember FR-N2) travel in the same signed packets, which the hub checks but does not read.
 
     **Accounts (FR-H6).** An account is a GitHub user (its numeric user id). People sign in
     in a browser (`/auth/login`, OAuth authorization code with PKCE S256 and state) and get a
@@ -68,7 +67,7 @@ info:
     docs/FORMAT.md) and optionally one run record (`.ipynb` from `__runs__`). Visibility is
     `private`, `unlisted` or `public`. The hub stores and serves notebooks; it never runs
     them. A notebook may point at a share (`share_id`) so that a link with the share token in
-    its fragment opens the owner's live kernel through the relay.
+    its fragment opens the owner's live kernel (the browser path is PROJECT Q19, issue #130).
     **No versions.** Paths carry no version segment (INTENT D16, SPEC NFR-V1). The API only
     grows: fields, optional request fields, paths and error codes are added, never renamed,
     retyped or removed. Clients ignore fields they do not know. A replaced field or path stays,
@@ -98,8 +97,6 @@ tags:
     description: iroh endpoints joined to an account through device links (FR-H1).
   - name: Directory
     description: Signed iroh address records, iroh pkarr relay protocol (FR-H2).
-  - name: Relay
-    description: The iroh relay on relay.darkpyonix.dev, and the Worker callbacks it uses (FR-H3).
   - name: Shares
     description: Share links resolved to the hosting device (FR-H4). The share page itself is on the front.
   - name: Notebooks
@@ -109,7 +106,6 @@ tags:
 
 paths:
   /health:
-    x-relay-served: true
     get:
       tags: [System]
       operationId: getHubHealth
@@ -131,10 +127,12 @@ paths:
     get:
       tags: [System]
       operationId: getHubConfig
-      summary: Where the relays and the pkarr directory are (FR-H8)
+      summary: Where the API, the front and the pkarr directory are (FR-H8)
       description: |
-        Public and cacheable (5 minutes). Clients read their relay map and pkarr URL from here
-        instead of building them in. There is no API version (INTENT D16): the API only grows,
+        Public and cacheable (5 minutes). Clients read the pkarr URL and the front from here
+        instead of building them in. The hub runs no relay (INTENT D23): `relay_urls` is
+        deprecated and always empty; devices find their relay, the
+        account's main server, in its address record (Ember FR-N2). There is no API version (INTENT D16): the API only grows,
         and clients look for the fields they need. `hub_version` is informational.
       security: []
       responses:
@@ -152,8 +150,9 @@ paths:
                   relay_urls:
                     type: array
                     items: {type: string}
-                    description: iroh relays for the client's RelayMap.
-                    example: ["https://relay.darkpyonix.dev/"]
+                    deprecated: true
+                    description: "Deprecated (INTENT D23). Formerly the iroh relays for the client's RelayMap; always `[]`. Clients keep their own relay when it is empty."
+                    example: []
                   pkarr_url:
                     type: string
                     description: Base URL for iroh's PkarrPublisher and PkarrResolver (append `?token=<resolve token>` to resolve).
@@ -510,7 +509,7 @@ paths:
         An account has one main server (FR-H1, Ember INTENT D3). If it has one, approving a
         `main_server` link must name it in `replace`; the claim then removes it (its token gets
         401 `device_removed`, it is listed in `/removed-devices`, its shares and address
-        record go, its relay connections drop) and moves its names to the new main server, in
+        record go) and moves its names to the new main server, in
         one transaction.
       requestBody:
         required: true
@@ -648,7 +647,7 @@ paths:
     delete:
       tags: [Devices]
       operationId: removeDevice
-      summary: Remove a device; revokes its token and key, its names, shares and record, and drops its relay connections
+      summary: Remove a device; revokes its token and key, its names, shares and record
       description: |
         A signed-in session removes any device of the account. A main server's token removes
         `computer` and `client` devices and itself (an account has no other main server; one
@@ -816,141 +815,6 @@ paths:
         "404":
           description: Unknown key, another account's device, or nothing published.
 
-  # ------------------------------------------------------------------ relay (FR-H3)
-
-  /relay:
-    servers:
-      - url: https://relay.darkpyonix.dev
-    get:
-      tags: [Relay]
-      operationId: openRelay
-      summary: iroh relay (WebSocket upgrade, iroh relay protocol), on the relay host
-      description: |
-        Served by the `iroh-relay` crate on the relay host. The relay handshake proves the
-        client's endpoint id; the relay then asks `POST https://api.darkpyonix.dev/internal/relay/admit`
-        (with the auth token the client presented, if any) and may cache an allow for
-        `cache_secs`. Admitted: registered, non-removed devices; or any endpoint presenting
-        a valid guest relay pass from `GET /shares/{share_id}` as `Authorization: Bearer`
-        or `?token=`.
-      security: []
-      responses:
-        "101":
-          description: Switching Protocols.
-        "400":
-          description: Not a valid relay upgrade request.
-
-  /ping:
-    servers:
-      - url: https://relay.darkpyonix.dev
-    get:
-      tags: [Relay]
-      operationId: relayProbe
-      summary: HTTPS latency probe used by iroh's net report, on the relay host
-      security: []
-      responses:
-        "200":
-          description: Empty.
-
-  /generate_204:
-    servers:
-      - url: https://relay.darkpyonix.dev
-      - url: http://relay.darkpyonix.dev
-    get:
-      tags: [Relay]
-      operationId: captivePortalProbe
-      summary: Captive portal check used by iroh, on the relay host
-      description: "Echoes `X-Iroh-Challenge` as `X-Iroh-Response: response <challenge>`. Also served on plain HTTP port 80. QAD is QUIC on UDP 7842 of the same host (not HTTP)."
-      security: []
-      responses:
-        "204":
-          description: No content.
-
-  /admin/disconnect:
-    servers:
-      - url: https://relay.darkpyonix.dev
-    post:
-      tags: [Relay]
-      operationId: relayDisconnect
-      summary: The Worker tells the relay host to drop a removed device's connections
-      security:
-        - relaySecret: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [endpoint_id]
-              properties:
-                endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
-      responses:
-        "204":
-          description: Dropped (or it was not connected).
-        "400":
-          description: Malformed body.
-        "401":
-          description: Relay secret missing or wrong.
-
-  /internal/relay/admit:
-    post:
-      tags: [Relay]
-      operationId: relayAdmit
-      summary: The relay host asks whether to admit an endpoint
-      security:
-        - relaySecret: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [endpoint_id]
-              properties:
-                endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$", description: Proven by the relay handshake.}
-                token: {type: [string, "null"], description: The auth token the client presented, if any.}
-      responses:
-        "200":
-          description: The decision. Registered devices also get their `last_seen` updated.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [allow, cache_secs]
-                properties:
-                  allow: {type: boolean}
-                  kind: {type: string, enum: [device, guest]}
-                  reason: {type: string}
-                  cache_secs: {type: integer, description: How long the relay may reuse this answer for new connections (0 = do not cache).}
-        "400":
-          description: Malformed body.
-        "401":
-          description: Relay secret missing or wrong.
-
-  /internal/relay/presence:
-    post:
-      tags: [Relay]
-      operationId: relayPresence
-      summary: The relay host reports that an endpoint's first connection opened or its last one closed
-      security:
-        - relaySecret: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [endpoint_id, online]
-              properties:
-                endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
-                online: {type: boolean}
-      responses:
-        "204":
-          description: Recorded (ignored for unknown or removed endpoints).
-        "400":
-          description: Malformed body.
-        "401":
-          description: Relay secret missing or wrong.
-
   # ------------------------------------------------------------------ shares (FR-H4)
 
   /shares:
@@ -994,28 +858,31 @@ paths:
     get:
       tags: [Shares]
       operationId: resolveShare
-      summary: Resolve a share to its hosting device, with a guest relay pass
+      summary: Resolve a share to its hosting device
       security: []
       responses:
         "200":
-          description: How to reach the hosting device. ash dials `endpoint_id` via `relay_url` with `relay_token`.
+          description: |
+            The hosting device. How a browser reaches that device's dedicated manager without a
+            hub relay is PROJECT Q19 (issue #130); its address will be an added field. The guest
+            relay pass fields are deprecated (INTENT D23) and no longer sent.
           content:
             application/json:
               schema:
                 type: object
-                required: [share_id, endpoint_id, relay_url, relay_token, relay_token_expires_at]
+                required: [share_id, endpoint_id]
                 properties:
                   share_id: {type: string}
                   endpoint_id: {type: string, pattern: "^[0-9a-f]{64}$"}
-                  relay_url: {type: string, format: uri, description: "The device's published home relay, or https://relay.darkpyonix.dev/."}
-                  relay_token: {type: string, description: Guest relay pass (10 minutes).}
-                  relay_token_expires_at: {type: integer, description: Unix seconds.}
+                  relay_url: {type: string, format: uri, deprecated: true, description: "Deprecated (INTENT D23), no longer sent. Formerly the device's home relay."}
+                  relay_token: {type: string, deprecated: true, description: Deprecated (INTENT D23), no longer sent. Formerly a guest relay pass.}
+                  relay_token_expires_at: {type: integer, deprecated: true, description: Deprecated (INTENT D23), no longer sent. Unix seconds.}
         "404":
           description: Unknown or unpublished share, or its device was removed.
     delete:
       tags: [Shares]
       operationId: unpublishShare
-      summary: Remove a published share (its guest passes stop working)
+      summary: Remove a published share
       description: The hosting device's token, or account rights.
       responses:
         "204":
@@ -1547,10 +1414,6 @@ components:
       in: cookie
       name: __Host-dp_session
       description: Browser session after GitHub sign-in.
-    relaySecret:
-      type: http
-      scheme: bearer
-      description: The secret shared by the Worker and the relay host (`RELAY_SHARED_SECRET`).
     operatorSecret:
       type: http
       scheme: bearer
@@ -1560,7 +1423,7 @@ components:
       name: endpoint_id
       in: path
       required: true
-      description: iroh endpoint id, lowercase hex of the ed25519 public key.
+      description: Device id, lowercase hex of the ed25519 public key (the iroh endpoint id and the letify-link node id).
       schema: {type: string, pattern: "^[0-9a-f]{64}$"}
     ShareId:
       name: share_id
@@ -1604,8 +1467,8 @@ components:
         name: {type: string}
         role: {type: string, enum: [main_server, computer, client]}
         created_at: {type: integer, description: Unix seconds.}
-        last_seen: {type: [integer, "null"], description: Unix seconds of the last relay admission, presence report or address publish.}
-        online: {type: boolean, description: Connected to the relay host now, as it last reported.}
+        last_seen: {type: [integer, "null"], description: Unix seconds of the last accepted address publish (`PUT /pkarr`).}
+        online: {type: boolean, description: "Published an address record (`PUT /pkarr`) in the last 15 minutes (FR-H1, provisional)."}
         app:
           description: What the device says it runs (FR-H10); self-reported, a hint only.
           oneOf:
