@@ -129,6 +129,8 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 
 ### D15. 허브 API는 Cloudflare Workers, 릴레이는 UDP가 되는 호스트, 계정은 GitHub 로그인
 
+**개정(2026-11-13, D23).** 릴레이 부분은 D23이 대체합니다. 허브는 릴레이를 운영하지 않고(`relay.darkpyonix.dev`와 그 VPS 없음), 기기 사이 전송은 letify-link, 중계는 사용자의 메인 서버가 합니다. 아래의 릴레이·QAD·`darkpyonix/hub/server` 항목과 개정 표의 `relay.darkpyonix.dev` 행은 결정 당시의 기록으로 남깁니다.
+
 사용자 결정(2026-10-03): "dns는 클라우드 플레어고 허브 운영은 허브가 가볍다면 클라우드 플레어 워커를 쓰고 싶어. 계정 생성은 내가 분명히 OpenAI 로그인으로 한다고 했을 텐데?" 이어서 같은 날: "OpenAI 로그인은 엠버 서버에서 사용자가 자체적으로 하는걸로 하고 허브는 깃허브 로그인으로 하자." 그래서 허브(SPEC §10)를 이렇게 바꿉니다.
 
 - **허브 API는 Cloudflare Worker입니다(`darkpyonix/hub/worker/`).** 허브가 하는 일 대부분은 서명 검증 한 번과 작은 행 몇 개를 읽고 쓰는 HTTP 요청입니다(기기 10대면 하루 수천 건). 이 정도면 Workers로 충분히 가볍고, DNS가 이미 Cloudflare라 ACME TXT 게시(FR-H5)도 같은 계정의 API 토큰 하나로 됩니다. 이 Worker는 `api.darkpyonix.dev`에 붙고, ash는 루트(`darkpyonix.dev`)의 메인 페이지가 냅니다(아래 개정).
@@ -162,7 +164,7 @@ Claude Code, Codex, Antigravity, OMP는 각자의 동작을 그대로 쓰고, Da
 - **브라우저 세션은 API 호스트에 있습니다.** 세션 쿠키는 `api.darkpyonix.dev`가 호스트 전용(`__Host-`)으로 두고, 메인 페이지는 자격 증명을 실은 CORS 요청으로 API를 부릅니다. 두 호스트는 같은 사이트(site)라 `SameSite=Lax` 쿠키가 그대로 실리고, 서드파티 쿠키 차단에 걸리지 않습니다. GitHub OAuth 콜백도 API 호스트(`https://api.darkpyonix.dev/auth/callback`)이고, 끝나면 메인 페이지의 경로로 돌아옵니다(SPEC FR-H13).
 - **노트북 본문은 R2, 목록과 권한은 D1입니다.** D1의 행·값 상한(약 2 MB)과 데이터베이스 크기 때문에 실행 기록(`.ipynb`, 출력 포함 수 MiB)을 D1에 넣을 수 없습니다. 본문은 Worker 뒤의 비공개 R2 버킷에 두고, 접근 판단은 언제나 Worker가 합니다. 본문을 R2 공개 버킷이나 별도 호스트에서 직접 내지 않습니다. 비공개 노트북의 권한 검사를 우회하게 되기 때문입니다(SPEC FR-H14).
 - **남의 노트북 내용은 메인 페이지 출처에서 실행하지 않습니다.** 저장된 출력의 `text/html`·스크립트와 ash가 브라우저에서 돌리는 코드는 남이 쓴 것입니다. 메인 페이지 출처(`https://darkpyonix.dev`)는 API에 자격 증명을 실을 수 있으므로, 그 내용은 출처가 없는(opaque) 샌드박스 iframe에서만 돌립니다(SPEC NFR-H3). 그 iframe을 별도 등록 도메인(사용자 콘텐츠 도메인)에서 띄울지는 열린 질문입니다(PROJECT Q18).
-- **노트북 호스팅은 커널 호스팅이 아닙니다.** 허브는 노트북을 보관하고 보여 줄 뿐 코드를 실행하지 않습니다. 살아 있는 커널은 언제나 사용자의 기기에 있고, 노트북 페이지가 공유 토큰(URL 조각)으로 그 기기의 전용 매니저에 릴레이·P2P로 붙습니다(FR-H4, FR-H17). 허브는 그 토큰을 보지 않습니다.
+- **노트북 호스팅은 커널 호스팅이 아닙니다.** 허브는 노트북을 보관하고 보여 줄 뿐 코드를 실행하지 않습니다. 살아 있는 커널은 언제나 사용자의 기기에 있고, 노트북 페이지가 공유 토큰(URL 조각)으로 그 기기의 전용 매니저에 릴레이·P2P로 붙습니다(FR-H4, FR-H17). 허브는 그 토큰을 보지 않습니다. (2026-11-13 D23: 허브 릴레이가 없어져, 브라우저가 그 매니저에 닿는 길은 PROJECT Q19에서 정합니다.)
 ### D16. REST 경로에 버전을 넣지 않습니다
 
 사용자 결정(2026-10-03): "REST API의 버저닝은 죄악이야". 매니저 API(`/api/v1/...`)와 허브 API(`/v1/...`, `/internal/v1/...`, `/admin/v1/...`)에서 버전 조각을 뺍니다. 매니저는 `/api/kernels`, 허브는 `/devices`, `/config`, `/internal/relay/admit`, `/admin/disconnect`처럼 씁니다.
@@ -244,6 +246,25 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 - **x86_64 macOS 휠은 교차 컴파일하고 Rosetta로 시험합니다.** Intel 러너는 쓰지 않습니다(리더 결정). arm64 러너에서 `x86_64-apple-darwin`으로 빌드하고, 같은 러너에서 `arch -x86_64`로 x86_64 파이썬에 설치해 스모크 시험을 합니다.
 - **커널과 런타임 API는 표준 라이브러리 전용이고 설치 없이 소스에서 실행됩니다(§2, NFR-K2).** 이 결정은 그 둘을 건드리지 않습니다. 훅과 대체 스크립트는 `packaging/`에 두고 휠에만 들어갑니다.
 
+### D23. 허브는 릴레이를 운영하지 않습니다. 기기 사이 전송은 letify-link이고, 중계는 사용자의 메인 서버가 합니다
+
+사용자 결정(2026-11-13): "릴레이 내가 운영 안할건데? 돈 없어. letify-link로는 부족해?" Ember는 같은 결정을 먼저 내렸습니다(darkpyonix-ember `docs/INTENT.md` D36, 사용자 2026-10-30: "Ember에 relay가 필요하면 main server가 그 역할을 하면 됩니다. main server는 관리하는 기기이고, 위치가 바뀌지 않습니다. 각 기기는 main server와 홀펀칭으로 연결합니다. 기기끼리 직결이 안 될 때는 main server가 중계합니다. 그래서 relay.darkpyonix.dev 같은 별도 relay VPS를 운영할 필요가 없어집니다."). 이 저장소의 허브 문서를 그 결정에 맞춥니다.
+
+- **`relay.darkpyonix.dev`는 없습니다.** 허브는 릴레이, QAD(QUIC 주소 발견), STUN을 운영하지 않고, 그것을 돌릴 VPS나 Cloudflare Container도 두지 않습니다. `darkpyonix/hub/server/`(iroh-relay 호스트)는 배포하지 않으며 걷어 냅니다(#129). Worker가 릴레이를 위해 가진 것(입장 판정 `/internal/relay/admit`, presence `/internal/relay/presence`, 릴레이에 보내는 `/admin/disconnect`, 손님 릴레이 통행권, `/config`의 `relay_urls` 값)은 OpenAPI에 `deprecated`로 남기고 코드와 함께 지웁니다(INTENT D16: 옛것은 `deprecated`로 표시한 뒤 지움).
+- **기기 사이 전송은 letify-link입니다.** Rust 크레이트 `letify-link`(DarkPyonix/letify, 명세 초안 DarkPyonix/letify#76): Noise IK 세션을 TCP 서브플로와 UDP 위에 얹고, TCP 홀펀칭, TCP와 UDP 사이 경로 이동, 자체 스트림 다중화, 버전 협상을 합니다. 중계는 어느 노드든 맡을 수 있는 역할(`relay` 기능)입니다. ed25519 노드 키를 그대로 쓰므로 허브의 "ed25519 공개 키 하나 = 기기"(기기 ID 형식, FR-H1)는 바뀌지 않습니다. 이 저장소는 전송을 구현하지 않고, 어떤 전송을 쓰는지는 Ember SPEC(FR-N2, FR-N5)이 정합니다.
+- **중계와 공인 주소 발견은 사용자의 메인 서버(전용 매니저가 도는 상시 켜진 기기, ember server)가 합니다.** 각 기기는 메인 서버와 홀펀칭으로 연결하고, 기기끼리 직결이 안 되면 메인 서버가 암호문을 중계합니다. 그래서 메인 서버는 모든 기기에서 닿을 수 있어야 합니다(공인 IP, 포트 포워딩, UPnP 또는 PCP, Ember D36).
+- **darkpyonix.dev에 남는 것은 셋입니다.** (1) 랑데부: 계정 범위의 pkarr 주소 디렉터리(FR-H2). letify-link의 주소 레코드와 중계 제안 우편함도 이 서명 패킷에 실립니다. (2) 로그인: GitHub 계정과 기기 등록(FR-H1, FR-H6). (3) ash 호스팅: 메인 페이지(GitHub Pages)와 노트북 보관(FR-H12~H19). 공유 해석(FR-H4)과 이름·ACME TXT(FR-H5)는 (1)~(3)을 돕는 작은 API로 그대로 둡니다.
+- **모두 Cloudflare 무료 한도 안에서 돕니다.** Workers Free, D1·R2의 무료 한도, DNS. 유료 플랜(Workers Paid)을 전제로 한 설계는 하지 않습니다. 그래서 요청 수가 기기 수에 비례해 빠르게 느는 기능(예: 짧은 주기의 우편함 폴링)은 무료 한도로 계산해 SPEC에 적습니다(#132).
+
+대가와 처리:
+
+- **중계 처리량은 메인 서버의 업로드 대역이 상한입니다.** 직결이 안 되고 메인 서버에도 닿지 못하는 기기 쌍은 길이 없습니다. 공용 예비 릴레이는 없습니다(Ember D36).
+- **브라우저는 letify-link를 말하지 못합니다.** ash(브라우저)는 Noise over TCP/UDP를 열 수 없으므로, 공유 링크(FR-H4, FR-H17)가 NAT 뒤의 전용 매니저에 어떻게 닿을지 새로 정해야 합니다. 옛 설계는 브라우저 iroh가 손님 통행권으로 허브 릴레이를 거쳤습니다. 그 길은 이 결정으로 없어지고, 대신할 길은 사용자 결정 전입니다(PROJECT Q19, #130). 그때까지 FR-H4와 FR-H17의 브라우저 연결 부분은 `Draft`입니다.
+- **다른 기기의 CLI·IDE가 전용 매니저에 닿는 길**(Ember 없이 `darkpyonix` CLI만 쓰는 경우)도 정해야 합니다(PROJECT Q20, #131). Ember가 있으면 ember server와 node가 자기 전송 위로 매니저 HTTP API를 부릅니다(ARCHITECTURE §6).
+- **기기의 `online` 표시는 릴레이가 알려 주지 않습니다.** 릴레이 presence가 없어지므로 허브의 `online`은 주소 레코드 게시 시각으로 정합니다(SPEC FR-H1) [provisional].
+
+이 결정이 대체하는 것: D15의 "릴레이는 UDP를 받는 곳에 둡니다", "`darkpyonix/hub/server`는 릴레이 호스트로 남깁니다", "Durable Objects는 … 릴레이를 Container로 옮길 때만"의 릴레이 부분, D15 개정 표의 `relay.darkpyonix.dev` 행과 "노트북 페이지가 … 릴레이·P2P로 붙습니다", PROJECT Q9(릴레이를 VPS에 둘지 Container에 둘지)와 Q1 리더 권장 중 "darkpyonix.dev가 iroh-relay를 운영"하는 부분. D15의 나머지(Workers, TypeScript, D1, GitHub 로그인, 호스트 역할 분담)는 그대로입니다.
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
@@ -272,6 +293,7 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 | workers-rs로 허브 API 작성 | wasm 빌드 도구와 큰 번들, 덜 성숙한 D1 바인딩. iroh에서 재사용할 부분이 작습니다(D15) |
 | 주소 디렉터리를 키마다 Durable Object로 | D1의 조건부 upsert 한 문장으로 "더 새 것만"이 원자적입니다. 객체를 늘릴 이유가 없습니다(D15) |
 | 릴레이는 Cloudflare Container, QAD만 따로 VPS | iroh에서 QAD는 릴레이 목록의 항목마다 붙어서 QAD 호스트도 릴레이 항목이 되고 릴레이를 돌려야 합니다. VPS를 없애지 못하면서 구성만 둘이 됩니다(SPEC FR-H3) |
+| 허브가 릴레이를 운영(`relay.darkpyonix.dev`, VPS의 iroh-relay + QAD, 또는 Cloudflare Container, 2026-11-13까지의 D15와 SPEC FR-H3) | 사용자 결정(2026-11-13): "릴레이 내가 운영 안할건데? 돈 없어. letify-link로는 부족해?" VPS나 Container를 돈 들여 운영·감시해야 하고, Ember는 이미 메인 서버를 릴레이로 정했습니다(Ember D36). 중계는 사용자의 메인 서버가 합니다(D23) |
 | 루트 `darkpyonix.dev`에 허브 API와 ash를 함께(D15 처음 안) | 사용자 결정(2026-10-03): 동적 기능은 서브도메인, 루트는 그것을 띄우는 메인 페이지. API는 `api.darkpyonix.dev`로 옮깁니다(D15 개정) |
 | 프로젝트 가이드를 `docs.darkpyonix.dev`로 옮기고 루트를 Workers 정적 자산으로(D15 개정의 첫 제안) | 사용자 지적(2026-10-03): "darkpyonix.dev/는 메인 페이지고 darkpyonix.dev/dioxus-compose는 가이드인거잖아." 시키지 않은 이동이었습니다. 가이드 주소가 바뀌고 apex DNS를 옮겨야 하며, 루트가 정적이라 Workers가 더 줄 것이 헤더와 200 상태뿐입니다. 그 둘은 meta CSP, 쿠키 `SameSite`, `404.html`로 대신합니다(D15 개정) |
 | 조직 사이트 저장소가 ash 릴리스를 받아 자체 워크플로로 배포 | 저장소 둘에 워크플로 둘이 생기고 트리거(repository_dispatch)를 이어야 합니다. ash CI가 빌드 결과를 바로 커밋하는 쪽이 비밀값 하나, 파이프라인 하나입니다(D15 개정) |
