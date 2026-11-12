@@ -54,7 +54,7 @@ The root holds exactly these entries:
 - `darkpyonix.mermaid`: the class diagram of the object model.
 - `darkpyonix/`: the product code, exactly three folders: `kernel/` (the Python `darkpyonix`
   package: runtime API and kernel), `manager/` (Rust manager and CLI) and `hub/`
-  (`darkpyonix.dev`: Cloudflare Worker; the relay host is being removed, #129).
+  (`darkpyonix.dev`: the Cloudflare Worker).
 - `docs/`: INTENT, SPEC, ARCHITECTURE, PROTOCOL, FORMAT and the OpenAPI files.
 - `pyproject.toml`: the Python package and pytest configuration.
 - `tests/`: the Python test suite. `tests/conftest.py` links `darkpyonix/kernel` as
