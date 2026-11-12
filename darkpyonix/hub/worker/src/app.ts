@@ -15,6 +15,7 @@ import {
   removeDevice,
   rotateResolveToken,
   updateDevice,
+  expireOnline,
 } from "./devices";
 import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
 import type { Deps, Env } from "./env";
@@ -193,6 +194,7 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
 export async function cleanup(env: Env, nowMs: number): Promise<void> {
   const now = nowSecs(nowMs);
   await purgeOrphans(env, nowMs);
+  await expireOnline(env, now);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM oauth_transactions WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM device_links WHERE expires_at < ?").bind(now),

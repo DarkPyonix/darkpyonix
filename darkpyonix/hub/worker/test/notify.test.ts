@@ -3,8 +3,6 @@
 import { describe, expect, it } from "vitest";
 import { call, irohRecord, linkDevice, makeDeps, newDevice, signIn } from "./helpers";
 
-const RELAY_SECRET = "relay-secret";
-
 async function account(id: number, overrides: Parameters<typeof makeDeps>[0] = {}) {
   const deps = makeDeps(overrides);
   const cookie = await signIn(deps, { id, login: "owner" });
@@ -87,19 +85,42 @@ describe("device list notification", () => {
 
   it("test_fr_h9_only_visible_changes_move_the_etag", async () => {
     const { deps, a, tokenA } = await account(205);
+    // The first record flips `online` (FR-H1); later ones only move `last_seen`.
+    expect((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: await irohRecord(a, "https://relay.example/", [], 8n) })).status).toBe(204);
     const first = await etagOf(deps, tokenA);
-    expect((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: await irohRecord(a, "https://relay.darkpyonix.dev/", [], 9n) })).status).toBe(204);
+    expect((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: await irohRecord(a, "https://relay.example/", [], 9n) })).status).toBe(204);
     expect(await etagOf(deps, tokenA)).toBe(first);
-    const presence = (online: boolean) =>
-      call(deps, "POST", "/internal/relay/presence", { token: RELAY_SECRET, json: { endpoint_id: a.endpointId, online } });
-    expect((await presence(true)).status).toBe(204);
-    const online = await etagOf(deps, tokenA);
-    expect(online).not.toBe(first);
-    expect((await presence(true)).status).toBe(204); // no change in online
-    expect(await etagOf(deps, tokenA)).toBe(online);
     const app = await call(deps, "PATCH", `/devices/${a.endpointId}`, { token: tokenA, json: { app: { kind: "ember", version: "1" } } });
     expect(app.status).toBe(200);
-    expect(await etagOf(deps, tokenA)).not.toBe(online);
+    expect(await etagOf(deps, tokenA)).not.toBe(first);
+  });
+
+  it("test_fr_h1_online_follows_address_record_freshness", async () => {
+    let clock = 1_800_000_000_000;
+    const { deps, a, tokenA } = await account(207, { nowMs: () => clock });
+    const view = async () => {
+      const response = await call(deps, "GET", `/devices/${a.endpointId}`, { token: tokenA });
+      return ((await response.json()) as { online: boolean }).online;
+    };
+    const first = await etagOf(deps, tokenA);
+    expect(await view()).toBe(false);
+    // An accepted address record makes the device online and moves the list version.
+    expect((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: await irohRecord(a, "https://relay.example/", [], 1n) })).status).toBe(204);
+    expect(await view()).toBe(true);
+    const online = await etagOf(deps, tokenA);
+    expect(online).not.toBe(first);
+    // Another record while online changes nothing visible.
+    clock += 5 * 60_000;
+    expect((await call(deps, "PUT", `/pkarr/${a.z32}`, { body: await irohRecord(a, "https://relay.example/", [], 2n) })).status).toBe(204);
+    expect(await etagOf(deps, tokenA)).toBe(online);
+    // Still online 15 minutes after the last record; offline after that, with a new version.
+    clock += 15 * 60_000;
+    expect(await view()).toBe(true);
+    expect(await etagOf(deps, tokenA)).toBe(online);
+    clock += 1000;
+    const stale = await etagOf(deps, tokenA);
+    expect(stale).not.toBe(online);
+    expect(await view()).toBe(false);
   });
 
   it("test_fr_h9_wait_is_validated", async () => {

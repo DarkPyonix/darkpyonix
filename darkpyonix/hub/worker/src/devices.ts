@@ -128,6 +128,26 @@ export function bumpDevicesVersion(env: Env, accountId: string): D1PreparedState
   return env.DB.prepare("UPDATE accounts SET devices_version = devices_version + 1 WHERE account_id = ?").bind(accountId);
 }
 
+/** A device is `online` while its last accepted address record is this recent (FR-H1, provisional). */
+export const ONLINE_WINDOW_SECS = 15 * 60;
+
+/**
+ * Marks devices offline whose last address record is older than ONLINE_WINDOW_SECS, bumping
+ * the list version of each account that changes (FR-H1, FR-H9). One account, or all (cron).
+ */
+export async function expireOnline(env: Env, now: number, accountId?: string): Promise<void> {
+  const cutoff = now - ONLINE_WINDOW_SECS;
+  const scope = accountId === undefined ? "" : " AND account_id = ?";
+  const args = accountId === undefined ? [cutoff] : [cutoff, accountId];
+  const stale = `online = 1 AND revoked_at IS NULL AND (last_seen IS NULL OR last_seen < ?)${scope}`;
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE accounts SET devices_version = devices_version + 1 WHERE account_id IN (SELECT account_id FROM devices WHERE ${stale})`,
+    ).bind(...args),
+    env.DB.prepare(`UPDATE devices SET online = 0 WHERE ${stale}`).bind(...args),
+  ]);
+}
+
 async function devicesVersion(env: Env, accountId: string): Promise<number> {
   const row = await env.DB.prepare("SELECT devices_version FROM accounts WHERE account_id = ?")
     .bind(accountId)
@@ -452,12 +472,14 @@ export async function listDevices(request: Request, env: Env, deps: Deps): Promi
   const wait = rawWait === null ? 0 : /^\d{1,2}$/.test(rawWait) ? Number(rawWait) : -1;
   let p = await principal(request, env, nowSecs(deps.nowMs()));
   if (wait < 0 || wait > MAX_WAIT_SECS) throw ApiError.badRequest(`wait must be an integer from 0 to ${MAX_WAIT_SECS}`);
+  await expireOnline(env, nowSecs(deps.nowMs()), p.accountId);
   const ifNoneMatch = request.headers.get("if-none-match");
   const version = await devicesVersion(env, p.accountId);
   if (ifNoneMatches(ifNoneMatch, etagFor(version))) {
     let changed = false;
     for (let round = 0; round < Math.ceil((wait * 1000) / WAIT_POLL_MS) && !changed; round++) {
       await deps.sleep(WAIT_POLL_MS);
+      await expireOnline(env, nowSecs(deps.nowMs()), p.accountId);
       changed = (await devicesVersion(env, p.accountId)) !== version;
     }
     if (!changed) return new Response(null, { status: 304, headers: { etag: etagFor(version) } });
@@ -488,7 +510,9 @@ export async function accountDevice(env: Env, p: Principal, endpointId: string):
 }
 
 export async function getDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
-  const p = await principal(request, env, nowSecs(deps.nowMs()));
+  const now = nowSecs(deps.nowMs());
+  const p = await principal(request, env, now);
+  await expireOnline(env, now, p.accountId);
   return json(200, deviceJson(await accountDevice(env, p, endpointId)));
 }
 
