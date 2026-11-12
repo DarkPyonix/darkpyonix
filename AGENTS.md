@@ -114,7 +114,7 @@ Never introduce anything that violates these. If a task seems to require it, sto
 2. Where inside:
    - worktrees: `.claude/worktrees/<name>/` (ignored by git);
    - throwaway work, probes, downloads, test run directories: `.scratch/<name>/` (ignored);
-   - Rust build output: `darkpyonix/manager/target/` and `darkpyonix/hub/server/target/` (ignored);
+   - Rust build output: `darkpyonix/manager/target/` (ignored);
    - experiments worth keeping: ask first (see "Repository root"); there is no top-level
      `experiments/` folder.
 3. The one exception is what the product itself writes at run time on a user's machine
