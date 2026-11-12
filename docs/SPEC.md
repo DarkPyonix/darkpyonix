@@ -828,7 +828,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 
 **사용자 준비물(2026-11-13, INTENT D23 뒤).** 허브 운영에 드는 것은 Cloudflare와 GitHub 두 곳뿐이고, 둘 다 무료입니다. 릴레이 VPS, 그 DNS 레코드·인증서, UDP 포트는 더는 필요 없습니다.
 
-1. **Cloudflare(무료 플랜)**: `darkpyonix.dev` 존(이미 있음), 그 존에 Worker custom domain `api.darkpyonix.dev`, D1 데이터베이스 하나(`wrangler.toml`의 `database_id`가 아직 자리표시값), R2 버킷 `darkpyonix-notebooks`, 그리고 API 토큰 둘: 배포용(`wrangler deploy`가 쓰는 Workers·D1·R2 편집 권한)과 Worker 비밀값 `CF_API_TOKEN`(그 존의 `Zone → DNS → Edit`만, FR-H5). 존 ID는 Worker 비밀값 `CF_ZONE_ID`로 넣습니다. **알려 둘 것: Cloudflare는 R2를 켤 때 무료 한도 안에서도 결제 수단 등록을 요구합니다.** 결제 수단을 두지 않으려면 노트북 보관(FR-H14~H19)을 R2 없이 할 방법을 따로 정해야 합니다(사용자 확인 필요).
+1. **Cloudflare(무료 플랜)**: `darkpyonix.dev` 존(이미 있음), 그 존에 Worker custom domain `api.darkpyonix.dev`, D1 데이터베이스 하나(`wrangler.toml`의 `database_id`가 아직 자리표시값), R2 버킷 `darkpyonix-notebooks`, 그리고 API 토큰 둘: 배포용(`wrangler deploy`가 쓰는 Workers·D1·R2 편집 권한)과 Worker 비밀값 `CF_API_TOKEN`(그 존의 `Zone → DNS → Edit`만, FR-H5). 존 ID는 Worker 비밀값 `CF_ZONE_ID`로 넣습니다. **알려 둘 것: Cloudflare는 R2를 켤 때 무료 한도 안에서도 결제 수단 등록을 요구합니다.** 결제 수단을 두지 않으려면 노트북 보관(FR-H14~H19)을 R2 없이 할 방법을 따로 정해야 합니다(PROJECT Q21, 사용자 확인 대기).
 2. **GitHub OAuth App**: 콜백 `https://api.darkpyonix.dev/auth/callback`, Worker 비밀값 `GITHUB_CLIENT_ID`·`GITHUB_CLIENT_SECRET`(FR-H6).
 
 그 밖의 Worker 비밀값 `OPERATOR_SECRET`은 계정이 아니라 사용자가 만드는 무작위 값입니다. `RELAY_SHARED_SECRET`은 필요 없습니다(#129에서 지움). 이 저장소 밖의 준비물(darkpyonix-ash의 배포 키 `PAGES_DEPLOY_KEY`, ash 저장소 변수 `FLATHUB_VERIFICATION_TOKEN`)은 GitHub와 Flathub 안의 무료 설정이고, 메인 서버의 포트 포워딩(Ember D36)은 사용자 각자의 공유기 설정이지 허브 운영 비용이 아닙니다.

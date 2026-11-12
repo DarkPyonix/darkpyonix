@@ -29,19 +29,19 @@ flowchart LR
   end
 
   FRONT["darkpyonix.dev/ (메인 페이지, GitHub Pages)<br/>랜딩 + ash 웹 앱"]
-  HUB["hub: api.darkpyonix.dev (Cloudflare Worker)<br/>계정·기기·주소·공유·이름·노트북 보관<br/>+ relay.darkpyonix.dev (iroh 릴레이·QAD)"]
+  HUB["hub: api.darkpyonix.dev (Cloudflare Worker, 무료 한도)<br/>랑데부(pkarr 주소)·GitHub 로그인·기기·공유·이름·노트북 보관<br/>중계 없음 (INTENT D23)"]
 
   EMBER -- "HTTPS (P2P 터널 위)" --> ES
   IDE -- "워크벤치" --> VSC
   IDE -- "노트북 확장: HTTP/SSE" --> EM
   ASH -. "darkpyonix.dev에서 받음" .- FRONT
   ASH -- "API (CORS)" --> HUB
-  ASH -- "공유 토큰 (릴레이·P2P)" --> DM
+  ASH -- "공유 토큰 (길은 PROJECT Q19)" --> DM
   ES --- CLIS
   CLIS -- 래핑된 셸 명령 --> NODE
-  ES <-. P2P 터널 .-> NODE
-  ES -. 시그널링 .-> HUB
-  NODE -. 시그널링 .-> HUB
+  ES <-. "letify-link (메인 서버가 중계)" .-> NODE
+  ES -. 랑데부 .-> HUB
+  NODE -. 랑데부 .-> HUB
   NODE --> EM
   EM -- DKP/1 --> K1
   EM -- DKP/1 --> K2
@@ -53,7 +53,7 @@ flowchart LR
 | **kernel** | 이 저장소 `darkpyonix/kernel/`의 비공개 모듈(`_server.py` 등)과 `__main__.py`(`python -m darkpyonix`) | 파일 하나에 묶인 실행 프로세스. 표준 라이브러리만 씁니다 |
 | **manager** | 이 저장소 `darkpyonix/manager`(Rust) | 커널을 찾고 띄우는 HTTP 앞단. 임시/전용 두 모드 |
 | **runtime API** | 이 저장소 `darkpyonix/kernel/`(빌드가 import 이름 `darkpyonix`로 매핑) | 노트북 파일이 `import darkpyonix`로 쓰는 API |
-| **hub** | 이 저장소 `darkpyonix/hub/worker/`, `darkpyonix/hub/server/` | api.darkpyonix.dev(Cloudflare Worker): GitHub 계정, 기기 등록, iroh 주소 디렉터리, 공유 해석, HTTPS 이름, 노트북 보관(D1 + R2). relay.darkpyonix.dev(Rust): iroh 릴레이와 QUIC 주소 발견(INTENT D15와 그 개정, §7) |
+| **hub** | 이 저장소 `darkpyonix/hub/worker/` | api.darkpyonix.dev(Cloudflare Worker, 무료 한도): GitHub 계정, 기기 등록, pkarr 주소 디렉터리(랑데부), 공유 해석, HTTPS 이름, 노트북 보관(D1 + R2). 릴레이는 운영하지 않습니다(INTENT D23). 옛 릴레이 호스트 `darkpyonix/hub/server/`는 배포하지 않고 걷어 냅니다(#129) |
 | **메인 페이지** | `darkpyonix-ash` | darkpyonix.dev 루트: 랜딩과 ash 웹 앱. ash CI가 빌드해 조직 GitHub Pages 사이트(`DarkPyonix.github.io`)에 올립니다. 정적 파일만 내고 위 API를 부릅니다(SPEC FR-H12) |
 | ember server / ember node / 클라이언트 | `darkpyonix-ember` | 대화 우선 워크벤치, 셸 래핑, 컴퓨터 전환, A2A, 원격 브라우저 |
 | ash | `darkpyonix-ash` | Starboard 포크. darkpyonix.dev 메인 페이지로 배포됩니다. 호스팅한 노트북을 커널 없이 보여 주고, 공유 토큰으로 공유된 커널에 접근합니다 |
@@ -61,7 +61,7 @@ flowchart LR
 | IDE 창 워크벤치 | `darkpyonix-ember` (`proxy/`) | 각 컴퓨터의 VS Code 서버를 감싸서 냅니다 |
 | 테마 | `vscode-darkpyonix-theme` | 불사조 디자인 테마 |
 
-클라이언트와 ember server 사이, ember server와 각 컴퓨터 사이는 모두 P2P 터널(darkpyonix.dev가 홀펀칭을 돕고 실패하면 중계) 위의 HTTPS입니다. 에이전트 셸 래핑과 머신 이동의 세부(트랜스크립트, 무효화, A2A)는 ember 문서가 정의합니다. 이 문서는 그 경계에서 커널 스택이 무엇을 제공하는지만 다룹니다(§6).
+클라이언트와 ember server 사이, ember server와 각 컴퓨터 사이는 모두 letify-link 터널 위의 HTTPS입니다(Ember INTENT D36). 기기는 darkpyonix.dev의 pkarr 디렉터리에서 서로의 주소와 중계 제안을 찾고(랑데부), 메인 서버와 홀펀칭으로 연결합니다. 기기끼리 직결이 안 되면 사용자의 메인 서버가 암호문을 중계합니다. darkpyonix.dev는 중계하지 않습니다(INTENT D23). 에이전트 셸 래핑과 머신 이동의 세부(트랜스크립트, 무효화, A2A)는 ember 문서가 정의합니다. 이 문서는 그 경계에서 커널 스택이 무엇을 제공하는지만 다룹니다(§6).
 
 ## 2. 한 컴퓨터 안: 커널과 매니저
 
@@ -200,7 +200,7 @@ experiments/
 ```mermaid
 flowchart LR
   ASH2["ash (브라우저)<br/>darkpyonix.dev/s/&lt;share&gt;#&lt;token&gt;"] -->|GET /shares/&lt;share&gt;| HUB2["api.darkpyonix.dev"]
-  ASH2 -->|릴레이(손님 통행권) 또는 홀펀칭| DM2["dedicated manager<br/>(메인 서버 또는 지부)"]
+  ASH2 -->|"길은 PROJECT Q19 (허브 릴레이 없음)"| DM2["dedicated manager<br/>(메인 서버 또는 지부)"]
   DM2 -->|능력: read·history·execute·edit·manage| K3["kernel"]
 ```
 
@@ -209,7 +209,8 @@ flowchart LR
 - 권한 검사는 매니저만 합니다. 커널은 매니저가 넘긴 능력 집합으로 보낼 내용만 거릅니다(INTENT D5).
 - 협업 동기화는 2025 WebSocket(`/api/ws/kernels/{kernel_id}`)이고, 매니저가 검사한 뒤 커널에 넘깁니다(INTENT D19, SPEC FR-S9). 구현됨(#49).
 - 전용 매니저는 2025 비밀번호 인증을 그대로 씁니다. 비밀번호와 마스터 토큰은 매니저마다 하나입니다(`/api/auth…`, SPEC FR-A4). 커널 접근 토큰(초기, 로그인, 공유)은 커널이 들고 있고, 매니저는 제어 채널로 커널에 확인을 요청합니다. 그래서 어느 매니저로 들어와도 통합니다. 커널이 종료돼도 남으며 파일이 지워지면 지워집니다(INTENT D17, SPEC FR-A5·FR-A6·FR-K10, 구현 대기 #48).
-- 허브는 연결을 이어 줄 뿐이고, 내용은 끝단 사이에서 암호화합니다(SPEC NFR-H1).
+- 허브는 주소를 찾아 줄 뿐 트래픽의 경로에 있지 않고, 내용은 끝단 사이에서 암호화합니다(SPEC NFR-H1, INTENT D23).
+- 브라우저는 letify-link를 말하지 못하므로, 브라우저 ash가 NAT 뒤의 전용 매니저에 닿는 길은 사용자 결정 전입니다(PROJECT Q19, #130). 다른 기기의 CLI·IDE는 지금 Ember의 전송을 거쳐 매니저에 닿습니다(§6). Ember 없이 닿는 길은 PROJECT Q20(#131)입니다.
 
 ## 6. ember와의 경계
 
@@ -227,14 +228,13 @@ ember server는 지부의 매니저 HTTP API를 터널 너머에서 그대로 �
 
 ## 7. darkpyonix.dev 호스트 배치
 
-INTENT D15 개정(2026-10-03 제안, 2026-10-05 승인): 동적 기능은 서브도메인, 루트는 그것을 띄우는 정적 메인 페이지입니다. 프로젝트 가이드는 지금처럼 `darkpyonix.dev/<저장소>/`에 있습니다.
+INTENT D15 개정(2026-10-03 제안, 2026-10-05 승인): 동적 기능은 서브도메인, 루트는 그것을 띄우는 정적 메인 페이지입니다. 별도 릴레이 호스트는 두지 않습니다(INTENT D23, 2026-11-13). 프로젝트 가이드는 지금처럼 `darkpyonix.dev/<저장소>/`에 있습니다.
 
 | 호스트 | 내는 것 | 구현 위치 | 배포 |
 |---|---|---|---|
 | `darkpyonix.dev/` | 메인 페이지: 랜딩, ash 웹 앱(`/n/<id>`, `/s/<id>#<token>`, `/link`, `/new`), 렌더러 `/sandbox/`, Flathub 검증 파일 | darkpyonix-ash 웹 빌드 | 조직 GitHub Pages `DarkPyonix/DarkPyonix.github.io`(`main` 루트). ash CI가 배포 키로 빌드 결과를 커밋. 동적 경로는 `404.html` 앱, CSP는 meta |
 | `darkpyonix.dev/<저장소>/` | 프로젝트 가이드(예: `/dioxus-compose/`) | 각 저장소 | 각 저장소의 GitHub Pages 프로젝트 사이트 |
-| `api.darkpyonix.dev` | 허브 API: 로그인, 기기, 주소 디렉터리(pkarr), 공유 해석, 이름·ACME TXT, 설정, 노트북 보관, 릴레이 입장 판정 | `darkpyonix/hub/worker/`(TypeScript) | Cloudflare Worker custom domain, D1(메타데이터), R2(노트북 본문, 비공개), Cron |
-| `relay.darkpyonix.dev` | iroh 릴레이, QAD(UDP 7842) | `darkpyonix/hub/server/`(Rust) | VPS, DNS only(SPEC FR-H3) |
+| `api.darkpyonix.dev` | 허브 API: 로그인, 기기, 주소 디렉터리(pkarr, 랑데부), 공유 해석, 이름·ACME TXT, 설정, 노트북 보관 | `darkpyonix/hub/worker/`(TypeScript) | Cloudflare Worker custom domain(무료 플랜), D1(메타데이터), R2(노트북 본문, 비공개), Cron |
 | `<name>.darkpyonix.dev` | 사용자 메인 서버 | 사용자의 ember server | 사용자 기기, 인증서는 ACME DNS-01(SPEC FR-H5) |
 
 ```mermaid
@@ -246,9 +246,8 @@ flowchart LR
   B -->|"CORS + __Host-dp_session"| A["api.darkpyonix.dev<br/>Worker"]
   A --- D1[("D1<br/>계정·기기·공유·노트북 메타데이터")]
   A --- R2[("R2 (비공개)<br/>노트북 본문")]
-  B -->|"손님 통행권"| R["relay.darkpyonix.dev"]
-  R -->|입장 판정| A
-  R <-->|암호문| M["사용자 기기의<br/>전용 매니저"]
+  B -.->|"공유 토큰 (길은 PROJECT Q19)"| M["사용자 기기의<br/>전용 매니저"]
+  M <-->|"letify-link (메인 서버가 중계)"| MS["사용자의 메인 서버"]
   G["GitHub OAuth"] -->|/auth/callback| A
 ```
 
@@ -272,7 +271,7 @@ sequenceDiagram
   A-->>C: 201 {version: 1}
   V->>A: GET /notebooks/n_… , …/versions/latest/source, …/run
   A-->>V: 메타데이터, 본문 (nosniff, CSP sandbox)
-  Note over V: FORMAT으로 셀 분할, FR-R4 규칙으로 출력 맵핑<br/>HTML 출력은 샌드박스 iframe. 커널·릴레이 없음
+  Note over V: FORMAT으로 셀 분할, FR-R4 규칙으로 출력 맵핑<br/>HTML 출력은 샌드박스 iframe. 커널·기기 없음
 ```
 
 ### 7.2 라이브 커널로 열기
@@ -281,13 +280,11 @@ sequenceDiagram
 sequenceDiagram
   participant V as 브라우저 (darkpyonix.dev/n/<id>#<token>)
   participant A as api.darkpyonix.dev
-  participant R as relay.darkpyonix.dev
   participant M as 주인 기기의 전용 매니저
 
   V->>A: GET /notebooks/n_… (share_id 확인)
   V->>A: GET /shares/s_…
-  A-->>V: endpoint_id, relay_url, 손님 통행권
-  V->>R: 통행권으로 입장 (R → A 입장 판정)
-  V->>M: iroh 연결 + 공유 토큰 (허브는 토큰을 보지 않음)
-  M-->>V: 권한(viewer1~admin)에 따라 문서·실행 (SPEC FR-A3)
+  A-->>V: endpoint_id (공유를 연 기기)
+  V->>M: 공유 토큰으로 매니저에 연결 (길은 PROJECT Q19, 허브는 토큰을 보지 않음)
+  M-->>V: 토큰의 능력(read·history·execute·edit·manage)에 따라 문서·실행 (SPEC FR-A3)
 ```
