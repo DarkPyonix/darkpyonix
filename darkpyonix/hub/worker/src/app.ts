@@ -17,7 +17,7 @@ import {
   updateDevice,
   expireOnline,
 } from "./devices";
-import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
+import { deviceAddresses, pkarrGet, pkarrPut, pkarrWatch, WATCH_MAX_KEYS, WATCH_MAX_WAIT_SECS } from "./directory";
 import type { Deps, Env } from "./env";
 import { callback, login, logout } from "./github";
 import { ApiError, SESSION_COOKIE, corsOrigin, getCookie, html, json, redirect } from "./http";
@@ -63,6 +63,7 @@ function config(_request: Request, env: Env): Response {
       relay_urls: [],
       pkarr_url: `${env.API_URL}/pkarr`,
       link_url: `${env.FRONT_URL}/link`,
+      pkarr_watch: { max_keys: WATCH_MAX_KEYS, max_wait: WATCH_MAX_WAIT_SECS },
     },
     { "cache-control": "public, max-age=300" },
   );
@@ -124,6 +125,8 @@ export const ROUTES: Route[] = [
   route("/removed-devices", { GET: listRemovedDevices }),
   // FR-H2 directory
   route("/devices/{endpoint_id}/addresses", { GET: deviceAddresses }),
+  // Before `/pkarr/{key}`: "watch" is not a z32 key, so the two never collide.
+  route("/pkarr/watch", { GET: pkarrWatch }),
   route("/pkarr/{key}", { PUT: pkarrPut, GET: pkarrGet }),
   // FR-H4 shares
   route("/shares", { POST: publishShare }),

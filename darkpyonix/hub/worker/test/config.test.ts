@@ -16,6 +16,7 @@ describe("config", () => {
       relay_urls: [],
       pkarr_url: "https://api.darkpyonix.dev/pkarr",
       link_url: "https://darkpyonix.dev/link",
+      pkarr_watch: { max_keys: 32, max_wait: 25 },
     });
   });
 
