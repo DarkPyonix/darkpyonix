@@ -302,9 +302,17 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
         });
     // `?token=` only on the events stream (EventSource cannot set headers).
     let token = bearer.or_else(|| if is_events_path(&path) || is_ws_path(&path) { query_token(req.uri()) } else { None });
-    let found = match st.auth.lookup(token.as_deref()) {
+    let mut looked_up = st.auth.lookup(token.as_deref());
+    // A revoked database share only speaks for its own kernel: on another kernel's route the token
+    // is answered like an unknown one, so it does not tell that the token ever existed.
+    if let auth::Lookup::Revoked(Some(owner)) = &looked_up {
+        if path_kernel_id(&path).is_some_and(|k| k != owner) {
+            looked_up = auth::Lookup::Unknown;
+        }
+    }
+    let found = match looked_up {
         auth::Lookup::Found(p) => Some(p),
-        auth::Lookup::Revoked => {
+        auth::Lookup::Revoked(_) => {
             return ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "token_revoked", "the token has been revoked")
                 .into_response()
         }
@@ -551,7 +559,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
             let svc = TowerToHyperService::new(svc);
             let watcher = graceful.watcher();
             let acceptor = acceptor.clone();
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             let (hand_state, hand_activity) = (state.clone(), activity.clone());
             tokio::spawn(async move {
                 let builder = auto::Builder::new(TokioExecutor::new());
@@ -565,7 +573,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
                     }
                     None => {
                         // FR-M6: stream requests on plain TCP go to the kernel by descriptor.
-                        #[cfg(unix)]
+                        #[cfg(any(unix, windows))]
                         let Some(stream) = handoff::intercept(stream, &hand_state, &hand_activity).await else {
                             return;
                         };

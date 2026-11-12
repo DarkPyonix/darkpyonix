@@ -104,10 +104,13 @@ jobs:
         shell: pwsh
         run: |
           # The real-pipe tests must run on Windows; a skip there is a failure.
-          python -m pytest -rs -p no:cacheprovider tests/test_fr_a1_windows_pipe.py tests/test_nfr_k2_stdlib_only.py 2>&1 | Tee-Object -FilePath pytest-win.log
+          python -m pytest -rs -p no:cacheprovider tests/test_fr_a1_windows_pipe.py tests/test_fr_k9_windows_handoff.py tests/test_nfr_k2_stdlib_only.py 2>&1 | Tee-Object -FilePath pytest-win.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (Select-String -Path pytest-win.log -Pattern "needs a Windows named pipe") {
             Write-Error "real Windows pipe tests were skipped"; exit 1
+          }
+          if (Select-String -Path pytest-win.log -Pattern "SKIPPED.*k9") {
+            Write-Error "the Windows handoff test was skipped"; exit 1
           }
 
   rust-windows:
@@ -124,6 +127,36 @@ jobs:
           workspaces: darkpyonix/manager
       - name: Named-pipe client (FR-A1; #80)
         run: cargo test -p dpx-kernel test_fr_a1
+      - name: Socket handoff builds on Windows (FR-K9; #47)
+        run: cargo test -p dpx-kernel -p dpx-server --no-run
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Stream handoff end to end, manager killed (FR-M6, FR-K9; #121)
+        shell: pwsh
+        run: |
+          # A real manager and a real kernel: the stream must outlive the manager. A test that did
+          # not run is a failure.
+          $env:DPX_TEST_PYTHON = (Get-Command python).Source
+          cargo test -p darkpyonix --test handoff -- --nocapture 2>&1 | Tee-Object -FilePath handoff-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path handoff-win.log -Pattern "test_fr_m6_plain_stream_survives_manager_kill ... ok")) {
+            Write-Error "the Windows handoff test did not run"; exit 1
+          }
+      - name: WebSocket over TLS pump on Windows (FR-S9, FR-M6; #49)
+        shell: pwsh
+        run: |
+          $env:DPX_TEST_PYTHON = (Get-Command python).Source
+          cargo test -p dpx-server --test ws_tls -- --nocapture 2>&1 | Tee-Object -FilePath ws-tls-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path ws-tls-win.log -Pattern "test_fr_s9_ws_over_tls_http1_upgrade_exchanges_frames_and_closes ... ok")) {
+            Write-Error "the Windows ws_tls test did not run"; exit 1
+          }
+          cargo test -p darkpyonix --test ws_tls_real -- --nocapture 2>&1 | Tee-Object -FilePath ws-tls-real-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path ws-tls-real-win.log -Pattern "test_fr_s9_ws_over_tls_real_kernel_history_typing_and_revocation ... ok")) {
+            Write-Error "the Windows ws_tls_real test did not run"; exit 1
+          }
 
   hub-worker:
     name: Hub worker
@@ -139,6 +172,7 @@ jobs:
           cache: npm
           cache-dependency-path: darkpyonix/hub/worker/package-lock.json
       - run: npm ci
+      - run: npm run typecheck
       - run: npm test
 
   hub-server:

@@ -135,10 +135,10 @@ pub fn build_request(uri: &Uri, headers: &HeaderMap) -> Vec<u8> {
 
 // ------------------------------------------------------------------ plain TCP: SCM_RIGHTS
 
-#[cfg(unix)]
-pub use unix::{intercept, pump_response};
+#[cfg(any(unix, windows))]
+pub use platform::{intercept, pump_response};
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub async fn pump_response(
     _st: &std::sync::Arc<crate::api::AppState>,
     _plan: crate::api::HandoffPlan,
@@ -149,8 +149,9 @@ pub async fn pump_response(
     Err(crate::error::ApiError::internal("stream handoff needs Unix sockets"))
 }
 
-#[cfg(unix)]
-mod unix {
+#[cfg(any(unix, windows))]
+mod platform {
+    #[cfg(unix)]
     use std::os::fd::OwnedFd;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -161,7 +162,13 @@ mod unix {
     use dpx_core::AdoptRequest;
     use serde_json::json;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpStream, UnixStream};
+    use tokio::net::TcpStream;
+    #[cfg(unix)]
+    use tokio::net::UnixStream;
+    #[cfg(unix)]
+    type PumpSocket = UnixStream;
+    #[cfg(windows)]
+    type PumpSocket = TcpStream;
 
     use super::{build_request, find, parse_head, token_of, Handoff, MAX_HEAD};
     use crate::auth::Lookup;
@@ -216,7 +223,7 @@ mod unix {
                 },
                 None => return Some(stream),
             },
-            Lookup::Revoked => return Some(stream),
+            Lookup::Revoked(_) => return Some(stream),
         };
         let plan = match plan_handoff(
             st,
@@ -243,10 +250,13 @@ mod unix {
         let dup = std_stream.try_clone().ok()?;
         let req = AdoptRequest {
             kind: plan.kind.as_str().to_string(),
-            transport: "fd".into(),
+            transport: if cfg!(windows) { "share" } else { "fd" }.into(),
             request: build_request(&parsed.uri, &parsed.headers),
             label: plan.label,
+            #[cfg(unix)]
             fd: OwnedFd::from(dup),
+            #[cfg(windows)]
+            socket: dup,
         };
         if let Err(e) = st.backend.adopt(&plan.kernel_id, req).await {
             use std::io::Write;
@@ -300,7 +310,7 @@ mod unix {
     }
 
     struct PumpState {
-        sock: UnixStream,
+        sock: PumpSocket,
         first: Option<Vec<u8>>,
         shutdown: tokio::sync::watch::Receiver<bool>,
     }
@@ -321,19 +331,32 @@ mod unix {
                 "WebSocket sync needs an HTTP/1.1 upgrade; HTTP/2 (RFC 8441) is not supported, use HTTP/1.1",
             ));
         }
-        let (ours, theirs) =
-            std::os::unix::net::UnixStream::pair().map_err(|e| ApiError::internal(format!("socket pair: {e}")))?;
+        #[cfg(unix)]
+        let (ours, theirs) = std::os::unix::net::UnixStream::pair()
+            .map_err(|e| ApiError::internal(format!("socket pair: {e}")))?;
+        #[cfg(windows)]
+        let (ours, theirs) = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0")
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            let ours = std::net::TcpStream::connect(listener.local_addr().map_err(|e| ApiError::internal(e.to_string()))?)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            let (theirs, _) = listener.accept().map_err(|e| ApiError::internal(e.to_string()))?;
+            (ours, theirs)
+        };
         ours.set_nonblocking(true).map_err(|e| ApiError::internal(e.to_string()))?;
         let req = AdoptRequest {
             kind: plan.kind.as_str().to_string(),
             transport: "pump".into(),
             request: build_request(uri, headers),
             label: plan.label,
+            #[cfg(unix)]
             fd: OwnedFd::from(theirs),
+            #[cfg(windows)]
+            socket: theirs,
         };
         st.backend.adopt(&plan.kernel_id, req).await?;
         let mut sock =
-            UnixStream::from_std(ours).map_err(|e| ApiError::internal(format!("socket pair: {e}")))?;
+            PumpSocket::from_std(ours).map_err(|e| ApiError::internal(format!("socket pair: {e}")))?;
         let limit = if plan.kind == HandoffKind::Wait { PUMP_WAIT_TIMEOUT } else { PUMP_HEAD_TIMEOUT };
         let head = tokio::time::timeout(limit, read_response_head(&mut sock))
             .await

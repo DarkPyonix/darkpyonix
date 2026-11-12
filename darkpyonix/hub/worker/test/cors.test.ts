@@ -29,7 +29,7 @@ describe("FR-H13", () => {
     const { start, loc, done } = await login("/");
     expect(loc.searchParams.get("redirect_uri")).toBe("https://api.darkpyonix.dev/auth/callback");
     for (const cookie of [...start.headers.getSetCookie(), ...done.headers.getSetCookie()]) {
-      expect(cookie).not.toMatch(/domain=/i); expect(cookie).toMatch(/Path=\//i); expect(cookie).toMatch(/Secure/i); expect(cookie).toMatch(/HttpOnly/i); expect(cookie).toMatch(/SameSite=Lax/i);
+      expect(cookie).toMatch(/^__Host-dp_(oauth|session)=/); expect(cookie).not.toMatch(/domain=/i); expect(cookie).toMatch(/Path=\//i); expect(cookie).toMatch(/Secure/i); expect(cookie).toMatch(/HttpOnly/i); expect(cookie).toMatch(/SameSite=Lax/i);
     }
     expect(cookieValue(done, "__Host-dp_session")).toBeTruthy();
   });
@@ -43,6 +43,26 @@ describe("FR-H13", () => {
     for (const origin of ["https://studio.darkpyonix.dev", "null"]) {
       expect((await call(deps, "POST", "/auth/logout", { cookie, origin })).status).toBe(403);
       expect((await call(deps, "POST", "/link-codes/BCDF-GHJK", { cookie, origin, json: { approve: true } })).status).toBe(403);
+    }
+  });
+  it("test_nfr_h3_null_origin_gets_no_cors", async () => {
+    const deps = makeDeps(); const cookie = await signIn(deps, { id: 133, login: "cors" });
+    for (const origin of ["null", "https://studio.darkpyonix.dev"]) {
+      for (const [method, path] of [["GET", "/config"], ["OPTIONS", "/me"]]) {
+        const r = await call(deps, method, path, { origin });
+        for (const [name] of r.headers) expect(name.toLowerCase().startsWith("access-control-")).toBe(false);
+      }
+      expect((await call(deps, "POST", "/auth/logout", { cookie, origin })).status).toBe(403);
+    }
+  });
+  it("test_nfr_h3_sandboxed_frame_api_call_is_unauthorized_and_unreadable", async () => {
+    // What a script in the opaque-origin renderer frame sends: Origin: null and, under
+    // SameSite=Lax, no session cookie. The API answers 401 without opening CORS to it.
+    const deps = makeDeps();
+    for (const path of ["/me", "/notebooks", "/devices"]) {
+      const r = await call(deps, "GET", path, { origin: "null" });
+      expect(r.status).toBe(401);
+      for (const [name] of r.headers) expect(name.toLowerCase().startsWith("access-control-")).toBe(false);
     }
   });
 });

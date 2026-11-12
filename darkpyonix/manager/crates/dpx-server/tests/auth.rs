@@ -238,6 +238,203 @@ async fn test_fr_a6_verify_reports_validity_and_revocation() {
     s.admin().get(&format!("/api/kernels/{kid}/tokens/{share_tok}/verify")).await.error(401, "token_revoked");
 }
 
+/// A share made with `POST /shares` lives in the manager database, but to a client it is the same
+/// thing as a share token issued by the kernel, so `verify` has to accept it too.
+#[tokio::test]
+async fn test_fr_a6_verify_accepts_manager_db_shares() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("a.py");
+    let (other, _) = s.kernel("b.py");
+    let a = s.admin();
+    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read", "history"]})).await;
+    assert_eq!(c.status, 201, "{}", c.text);
+    let tok = c.body["token"].as_str().unwrap().to_string();
+    let sid = c.body["share_id"].as_str().unwrap().to_string();
+    let verify = format!("/api/kernels/{kid}/tokens/{tok}/verify");
+
+    // The share's own token and the master token both read it back, with the share's capabilities.
+    for api in [s.with_token(&tok), s.admin()] {
+        let r = api.get(&verify).await;
+        assert_eq!(r.status, 200, "{}", r.text);
+        assert_eq!(r.body["valid"], true);
+        assert_eq!(r.body["kernel_id"], kid.as_str());
+        assert_eq!(r.body["capabilities"], json!(["read", "history"]));
+        assert_eq!(r.body["blacklisted"], false);
+    }
+    // A token of another kernel is refused, with the same answer as an unknown token.
+    s.admin().get(&format!("/api/kernels/{other}/tokens/{tok}/verify")).await.error(401, "unauthorized");
+    s.with_token(&tok).get(&format!("/api/kernels/{other}/tokens/{tok}/verify")).await.error(404, "not_found");
+    s.admin().get(&format!("/api/kernels/{kid}/tokens/nope/verify")).await.error(401, "unauthorized");
+
+    // Revoked: the share is gone from the list, and both verify and use say token_revoked.
+    assert_eq!(a.delete(&format!("/api/kernels/{kid}/shares/{sid}")).await.status, 204);
+    a.get(&verify).await.error(401, "token_revoked");
+    s.with_token(&tok).get(&format!("/api/kernels/{kid}")).await.error(401, "token_revoked");
+    let listed = a.get(&format!("/api/kernels/{kid}/shares")).await.body["shares"].clone();
+    assert!(listed.as_array().unwrap().iter().all(|x| x["share_id"] != sid.as_str()), "{listed}");
+    // A revoked token of another kernel does not tell that it ever existed.
+    a.get(&format!("/api/kernels/{other}/tokens/{tok}/verify")).await.error(401, "unauthorized");
+}
+
+#[tokio::test]
+async fn test_fr_a6_verify_refuses_an_expired_db_share() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("a.py");
+    let c = s
+        .admin()
+        .post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"], "expires_at": "2000-01-01T00:00:00Z"}))
+        .await;
+    assert_eq!(c.status, 201, "{}", c.text);
+    let tok = c.body["token"].as_str().unwrap();
+    s.admin().get(&format!("/api/kernels/{kid}/tokens/{tok}/verify")).await.error(401, "unauthorized");
+}
+
+fn store_in(dir: &std::path::Path) -> dpx_server::auth::ShareStore {
+    dpx_server::auth::ShareStore::open(&dir.join("manager.db")).unwrap()
+}
+
+#[test]
+fn test_fr_a6_db_share_store_opens_a_database_of_the_old_schema() {
+    use dpx_server::auth::{sha256_hex, DbShare};
+    let dir = scratch("shares");
+    let path = dir.join("manager.db");
+    {
+        // The `shares` table exactly as releases before the revoked-share records created it.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE shares (share_id TEXT PRIMARY KEY, kernel_id TEXT NOT NULL, permission TEXT NOT NULL,
+                 label TEXT, created_at TEXT NOT NULL, expires_at TEXT, expires_unix INTEGER,
+                 token_sha256 TEXT NOT NULL UNIQUE);",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO shares VALUES ('s_old', 'k_00000000000000000001', 'read+history', NULL, '2026-01-01T00:00:00Z', NULL, NULL, ?1)",
+            [sha256_hex("old-token")],
+        )
+        .unwrap();
+    }
+    // Two stores opened one after the other on the same file neither fail nor change what is stored.
+    let first = dpx_server::auth::ShareStore::open(&path).unwrap();
+    let second = dpx_server::auth::ShareStore::open(&path).unwrap();
+    for store in [&first, &second] {
+        match store.db_row("old-token") {
+            DbShare::Live(p) => assert_eq!(p.kernel_id.as_deref(), Some("k_00000000000000000001")),
+            _ => panic!("the share made before the upgrade must still authenticate"),
+        }
+    }
+    assert!(first.revoke("k_00000000000000000001", "s_old").unwrap());
+    assert!(matches!(second.db_row("old-token"), DbShare::Revoked { .. }));
+}
+
+#[test]
+fn test_fr_a6_a_revoked_db_share_cannot_come_back_with_an_older_binary() {
+    use dpx_server::auth::{sha256_hex, Caps, DbShare};
+    let dir = scratch("shares");
+    let store = store_in(&dir);
+    let kid = "k_00000000000000000002";
+    let (share, token) = store.create(kid, Caps::from_names(&["read"]).unwrap(), None, None).unwrap();
+    assert!(store.revoke(kid, &share.share_id).unwrap());
+    assert!(!store.revoke(kid, &share.share_id).unwrap(), "a second revoke finds nothing");
+    assert!(matches!(store.db_row(&token), DbShare::Revoked { kernel_id } if kernel_id == kid));
+    // An older binary reads only `shares` and looks tokens up by hash: the token must not be there.
+    let raw = rusqlite::Connection::open(dir.join("manager.db")).unwrap();
+    let live: i64 = raw
+        .query_row("SELECT COUNT(*) FROM shares WHERE token_sha256 = ?1", [sha256_hex(&token)], |r| r.get(0))
+        .unwrap();
+    assert_eq!(live, 0);
+    assert!(store.list(kid).unwrap().is_empty(), "a revoked share is not listed");
+}
+
+#[test]
+fn test_fr_a6_revoked_db_share_records_are_forgotten_after_ninety_days() {
+    use dpx_server::auth::{sha256_hex, DbShare};
+    let dir = scratch("shares");
+    let path = dir.join("manager.db");
+    drop(store_in(&dir));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        for (id, token, age_days) in [("s_old", "old-token", 91), ("s_new", "new-token", 89)] {
+            c.execute(
+                "INSERT INTO shares_revoked VALUES (?1, 'k_00000000000000000003', ?2, ?3)",
+                rusqlite::params![id, sha256_hex(token), now - age_days * 24 * 3600],
+            )
+            .unwrap();
+        }
+    }
+    let store = dpx_server::auth::ShareStore::open(&path).unwrap();
+    assert!(matches!(store.db_row("old-token"), DbShare::Unknown));
+    assert!(matches!(store.db_row("new-token"), DbShare::Revoked { .. }));
+}
+
+#[tokio::test]
+async fn test_fr_a6_a_revoked_db_share_of_another_kernel_is_unauthorized() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("a.py");
+    let (other, _) = s.kernel("b.py");
+    let a = s.admin();
+    let c = a.post(&format!("/api/kernels/{kid}/shares"), json!({"capabilities": ["read"]})).await;
+    let tok = c.body["token"].as_str().unwrap().to_string();
+    let sid = c.body["share_id"].as_str().unwrap().to_string();
+    assert_eq!(a.delete(&format!("/api/kernels/{kid}/shares/{sid}")).await.status, 204);
+    let v = s.with_token(&tok);
+    // On its own kernel, and on a route that names no kernel, it is known to be revoked.
+    v.get(&format!("/api/kernels/{kid}")).await.error(401, "token_revoked");
+    v.get("/api/manager").await.error(401, "token_revoked");
+    // On another kernel's route it looks like any token that kernel does not know.
+    v.get(&format!("/api/kernels/{other}")).await.error(401, "unauthorized");
+    v.get(&format!("/api/kernels/{other}/events")).await.error(401, "unauthorized");
+}
+
+#[test]
+fn test_fr_a6_db_share_store_moves_revoked_rows_of_a_development_database() {
+    use dpx_server::auth::{sha256_hex, DbShare};
+    let dir = scratch("shares");
+    let path = dir.join("manager.db");
+    {
+        // Development builds kept a revoked share in `shares` and marked it with `revoked_at`.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE shares (share_id TEXT PRIMARY KEY, kernel_id TEXT NOT NULL, permission TEXT NOT NULL,
+                 label TEXT, created_at TEXT NOT NULL, expires_at TEXT, expires_unix INTEGER,
+                 token_sha256 TEXT NOT NULL UNIQUE, revoked_at TEXT);",
+        )
+        .unwrap();
+        for (id, token, revoked) in [("s_live", "live-token", None), ("s_gone", "gone-token", Some("2026-11-04T00:00:00Z"))] {
+            c.execute(
+                "INSERT INTO shares VALUES (?1, 'k_00000000000000000004', 'read', NULL, '2026-11-01T00:00:00Z', NULL, NULL, ?2, ?3)",
+                rusqlite::params![id, sha256_hex(token), revoked],
+            )
+            .unwrap();
+        }
+    }
+    let store = dpx_server::auth::ShareStore::open(&path).unwrap();
+    assert!(matches!(store.db_row("live-token"), DbShare::Live(_)));
+    assert!(matches!(store.db_row("gone-token"), DbShare::Revoked { .. }), "a revoked share must not come back to life");
+    let listed = store.list("k_00000000000000000004").unwrap();
+    assert_eq!(listed.iter().map(|x| x.share_id.as_str()).collect::<Vec<_>>(), vec!["s_live"]);
+    // Opening again changes nothing.
+    let again = dpx_server::auth::ShareStore::open(&path).unwrap();
+    assert!(matches!(again.db_row("gone-token"), DbShare::Revoked { .. }));
+}
+
+#[test]
+fn test_fr_a6_two_stores_can_revoke_at_the_same_time() {
+    use dpx_server::auth::Caps;
+    let dir = scratch("shares");
+    let kid = "k_00000000000000000005";
+    let a = std::sync::Arc::new(store_in(&dir));
+    let b = std::sync::Arc::new(store_in(&dir));
+    let caps = Caps::from_names(&["read"]).unwrap();
+    let ids: Vec<String> = (0..40).map(|_| a.create(kid, caps, None, None).unwrap().0.share_id).collect();
+    let (left, right) = ids.split_at(20);
+    let (left, right) = (left.to_vec(), right.to_vec());
+    let t1 = { let a = a.clone(); std::thread::spawn(move || left.iter().all(|id| a.revoke(kid, id).unwrap())) };
+    let t2 = { let b = b.clone(); std::thread::spawn(move || right.iter().all(|id| b.revoke(kid, id).unwrap())) };
+    assert!(t1.join().unwrap() && t2.join().unwrap(), "no revoke may fail or be lost");
+    assert!(a.list(kid).unwrap().is_empty());
+}
+
 // ------------------------------------------------------------------ attempt limit (FR-A4, #87)
 
 /// Two free attempts, then a 300 ms lock that doubles with every further failure.

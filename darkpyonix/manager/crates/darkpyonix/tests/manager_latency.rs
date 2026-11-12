@@ -244,8 +244,10 @@ async fn test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99() {
     reaper.add(k["pid"].as_u64().unwrap() as u32);
     let kid = k["kernel_id"].as_str().unwrap().to_string();
 
-    let mut sse = m
-        .http
+    // A stream is handed to the kernel only when it is the first request of a connection, so the
+    // subscriber uses a client of its own instead of the keep-alive connection of the REST calls.
+    let subscriber = reqwest::Client::builder().pool_max_idle_per_host(0).build().unwrap();
+    let mut sse = subscriber
         .get(format!("{}/api/kernels/{kid}/events", m.url))
         .bearer_auth(&m.token)
         .send()
@@ -267,7 +269,17 @@ async fn test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99() {
     let mut lat: Vec<Duration> = Vec::new();
     let mut finished = false;
     let deadline = Instant::now() + Duration::from_secs(60);
+    let mut manager_stopped = false;
     while !finished && lat.len() < NFR_M2_LINES {
+        // A handed-off stream belongs to the kernel: once 20 lines have arrived the manager is
+        // stopped, and the rest must still arrive. A stream the manager relays would end here.
+        if !manager_stopped && lat.len() >= 20 {
+            if let Some(h) = m.handle.take() {
+                h.shutdown();
+                tokio::time::timeout(Duration::from_secs(10), h.wait()).await.expect("manager stops");
+            }
+            manager_stopped = true;
+        }
         let left = deadline.saturating_duration_since(Instant::now());
         let chunk = tokio::time::timeout(left, sse.chunk())
             .await
@@ -308,7 +320,8 @@ async fn test_nfr_m2_output_reaches_an_sse_subscriber_within_100_ms_p99() {
     drop(sse);
     m.stop().await;
 
-    assert_eq!(lat.len(), NFR_M2_LINES, "every printed line arrives");
+    assert!(manager_stopped, "the manager was stopped while the stream was open");
+    assert_eq!(lat.len(), NFR_M2_LINES, "every printed line arrives, also after the manager stopped");
     lat.sort();
     eprintln!(
         "MEASURE NFR-M2 print -> SSE subscriber, {} lines: p50 {:?} p99 {:?} max {:?}",
