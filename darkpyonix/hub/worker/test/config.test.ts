@@ -1,10 +1,10 @@
-// FR-H8: clients discover the relays and the pkarr directory instead of building them in.
+// FR-H8: clients discover the pkarr directory instead of building it in. FR-H3: no hub relay.
 
 import { describe, expect, it } from "vitest";
 import { call, makeDeps } from "./helpers";
 
 describe("config", () => {
-  it("test_fr_h8_config_names_relays_and_pkarr_url", async () => {
+  it("test_fr_h8_config_names_the_pkarr_url", async () => {
     const response = await call(makeDeps(), "GET", "/config");
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
@@ -13,7 +13,7 @@ describe("config", () => {
       hub_version: expect.any(String),
       api_url: "https://api.darkpyonix.dev",
       front_url: "https://darkpyonix.dev",
-      relay_urls: ["https://relay.darkpyonix.dev/"],
+      relay_urls: [],
       pkarr_url: "https://api.darkpyonix.dev/pkarr",
       link_url: "https://darkpyonix.dev/link",
     });
@@ -21,14 +21,18 @@ describe("config", () => {
 
   it("test_fr_h8_config_follows_the_worker_vars", async () => {
     const response = await call(makeDeps(), "GET", "/config", {
-      env: { API_URL: "https://api.example", FRONT_URL: "https://front.example", RELAY_URL: "https://relay.example/" },
+      env: { API_URL: "https://api.example", FRONT_URL: "https://front.example" },
     });
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.api_url).toBe("https://api.example");
     expect(body.front_url).toBe("https://front.example");
-    expect(body.relay_urls).toEqual(["https://relay.example/"]);
     expect(body.pkarr_url).toBe("https://api.example/pkarr");
     expect(body.link_url).toBe("https://front.example/link");
+  });
+
+  it("test_fr_h3_config_advertises_no_relay", async () => {
+    const body = (await (await call(makeDeps(), "GET", "/config")).json()) as { relay_urls: unknown };
+    expect(body.relay_urls).toEqual([]);
   });
 
   it("test_nfr_v1_versioned_hub_path_is_not_served", async () => {

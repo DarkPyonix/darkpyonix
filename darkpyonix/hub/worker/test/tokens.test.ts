@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import wranglerToml from "../wrangler.toml?raw";
 import { call, irohRecord, linkDeviceTokens, makeDeps, newDevice, signIn } from "./helpers";
 
-const RELAY = "https://relay.darkpyonix.dev/";
+const RELAY = "https://relay.example/";
 
 async function setup(id: number) {
   const deps = makeDeps();

@@ -39,12 +39,12 @@ describe("z-base-32 keys", () => {
 describe("signed packets", () => {
   it("test_fr_h2_verifies_an_iroh_style_record_and_decodes_addresses", async () => {
     const device = await newDevice();
-    const payload = await irohRecord(device, "https://relay.darkpyonix.dev/", ["192.0.2.1:4433", "[2001:db8::1]:4433"], 1_790_000_000_000_000n);
+    const payload = await irohRecord(device, "https://relay.example/", ["192.0.2.1:4433", "[2001:db8::1]:4433"], 1_790_000_000_000_000n);
     const verified = await verifyRelayPayload(device.publicKey, payload);
     expect(verified).not.toBeNull();
     expect(verified!.timestampUs).toBe(1_790_000_000_000_000n);
     expect(endpointAddresses(device.z32, verified!.answers)).toEqual({
-      relayUrls: ["https://relay.darkpyonix.dev/"],
+      relayUrls: ["https://relay.example/"],
       directAddresses: ["192.0.2.1:4433", "[2001:db8::1]:4433"],
     });
   });
@@ -52,7 +52,7 @@ describe("signed packets", () => {
   it("test_fr_h2_rejects_a_tampered_or_foreign_packet", async () => {
     const device = await newDevice();
     const other = await newDevice();
-    const payload = await irohRecord(device, "https://relay.darkpyonix.dev/", [], 1n);
+    const payload = await irohRecord(device, "https://relay.example/", [], 1n);
     const tampered = payload.slice();
     tampered[tampered.length - 1] ^= 1;
     expect(await verifyRelayPayload(device.publicKey, tampered)).toBeNull();
