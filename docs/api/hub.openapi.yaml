@@ -158,6 +158,13 @@ paths:
                     description: Base URL for iroh's PkarrPublisher and PkarrResolver (append `?token=<resolve token>` to resolve).
                     example: "https://api.darkpyonix.dev/pkarr"
                   link_url: {type: string, example: "https://darkpyonix.dev/link", description: The device approval page on the front.}
+                  pkarr_watch:
+                    type: object
+                    description: "Limits of `GET /pkarr/watch` (FR-H2, #132). Clients key on its presence: when it is absent the hub has no watch, and clients poll `GET /pkarr/{key}`."
+                    required: [max_keys, max_wait]
+                    properties:
+                      max_keys: {type: integer, example: 32, description: Most keys in one watch.}
+                      max_wait: {type: integer, example: 25, description: "Longest `wait`, in seconds."}
 
   /.well-known/org.flathub.VerifiedApps.txt:
     get:
@@ -749,6 +756,75 @@ paths:
           description: No valid session or device token.
         "404":
           description: No such device in the caller's account, or it has published nothing yet.
+
+  /pkarr/watch:
+    get:
+      tags: [Directory]
+      operationId: watchAddressRecords
+      summary: Long-poll the account's address records for changes (FR-H2, #132)
+      description: |
+        Returns the records of the listed keys whose stored pkarr timestamp (the signed
+        microsecond value at bytes 64..72 of the relay payload) is greater than the matching
+        `since`. Answers at once when one already is; otherwise waits up to `wait` seconds and
+        answers as soon as one changes. Needs a device token or a session in the header; the
+        `?token=` resolve token is not accepted here (NFR-H2). Concurrent watches of one caller
+        run side by side; there is no "one in flight" rule. Limits are in `GET /config`
+        `pkarr_watch`. The path is not a z32 key, so it does not collide with `/pkarr/{key}`.
+      parameters:
+        - name: keys
+          in: query
+          required: true
+          description: 1 to `max_keys` distinct z-base-32 keys, comma-separated; each a device of the caller's account.
+          schema: {type: string}
+        - name: since
+          in: query
+          required: true
+          description: One timestamp (µs) per key, comma-separated, same order; `0` for "nothing yet".
+          schema: {type: string}
+        - name: wait
+          in: query
+          required: false
+          description: Seconds to wait for a change, 0 to `max_wait`; default 0.
+          schema: {type: integer, minimum: 0, maximum: 25, default: 0}
+      responses:
+        "200":
+          description: The changed records only.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records]
+                properties:
+                  records:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, timestamp, packet]
+                      properties:
+                        key: {type: string, description: The z32 key.}
+                        timestamp: {type: integer, description: The packet's timestamp in microseconds.}
+                        packet: {type: string, description: "Standard base64 of the exact `PUT /pkarr/{key}` body (the bytes `GET /pkarr/{key}` returns)."}
+        "204":
+          description: Nothing changed within `wait`.
+        "400":
+          description: Malformed key, `keys` and `since` of different lengths, more than `max_keys` or duplicate keys, a bad `since`, or `wait` out of range.
+        "401":
+          description: No valid device token or session; `code` is `device_removed` when the caller's device is removed, also while it waits.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "404":
+          description: Some keys are not live devices of the caller's account; `keys` lists them (it does not say whether a key is foreign or unknown).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, keys]
+                properties:
+                  error: {type: string, const: not_found}
+                  keys: {type: array, items: {type: string}}
+        "429":
+          description: Too many watches (about 6 per minute per device token, or per account for a session).
 
   /pkarr/{key}:
     parameters:
