@@ -172,9 +172,6 @@ describe("device links", () => {
       (await call(deps, "POST", "/device-links", { json: { endpoint_id: device.endpointId, name: "again", role: "computer" } })).status,
     ).toBe(409);
     await Promise.all(deps.pending);
-    expect(deps.github.relayCalls).toEqual([
-      { url: "https://relay.darkpyonix.dev/admin/disconnect", body: { endpoint_id: device.endpointId } },
-    ]);
   });
 
   it("test_fr_h1_removed_device_token_is_told_apart_from_a_bad_token", async () => {
@@ -232,12 +229,12 @@ describe("device links", () => {
     const token = await linkDevice(deps, { token: main }, phone, "client", "phone");
     const list = (await (await call(deps, "GET", "/devices", { token })).json()) as { devices: { endpoint_id: string; role: string }[] };
     expect(list.devices.find((d) => d.endpoint_id === phone.endpointId)?.role).toBe("client");
-    expect((await call(deps, "PUT", `/pkarr/${phone.z32}`, { body: await irohRecord(phone, "https://relay.darkpyonix.dev/", [], 1n) })).status).toBe(204);
+    expect((await call(deps, "PUT", `/pkarr/${phone.z32}`, { body: await irohRecord(phone, "https://relay.example/", [], 1n) })).status).toBe(204);
     // It resolves addresses of its account like any other device.
     expect((await call(deps, "GET", `/pkarr/${phone.z32}`, { token })).status).toBe(200);
     const addresses = await call(deps, "GET", `/devices/${phone.endpointId}/addresses`, { token });
     expect(addresses.status).toBe(200);
-    expect(((await addresses.json()) as { relay_urls: string[] }).relay_urls).toEqual(["https://relay.darkpyonix.dev/"]);
+    expect(((await addresses.json()) as { relay_urls: string[] }).relay_urls).toEqual(["https://relay.example/"]);
     expect((await call(deps, "POST", "/shares", { token, json: { share_id: "s_00000000000000c1" } })).status).toBe(403);
     expect((await call(deps, "PUT", "/names/my-phone", { token })).status).toBe(403);
     const link = await startLink(deps, (await newDevice()).endpointId);
@@ -337,10 +334,6 @@ describe("one main server per account (FR-H1, Ember INTENT D3)", () => {
     await Promise.all(deps.pending);
     expect(deps.memoryDns.records.size).toBe(0);
     expect((await call(deps, "GET", "/shares/s_00000000000000d3")).status).toBe(404);
-    expect(deps.github.relayCalls).toContainEqual({
-      url: "https://relay.darkpyonix.dev/admin/disconnect",
-      body: { endpoint_id: oldDevice.endpointId },
-    });
     expect((await call(deps, "PUT", "/names/myhome/acme-challenge", { token, json: { values: [DIGEST] } })).status).toBe(204);
   });
 

@@ -15,6 +15,7 @@ import {
   removeDevice,
   rotateResolveToken,
   updateDevice,
+  expireOnline,
 } from "./devices";
 import { deviceAddresses, pkarrGet, pkarrPut } from "./directory";
 import type { Deps, Env } from "./env";
@@ -23,7 +24,6 @@ import { ApiError, SESSION_COOKIE, corsOrigin, getCookie, html, json, redirect }
 import { clearAcmeChallenge, listNames, releaseName, reserveName, setAcmeChallenge } from "./names";
 import { createNotebook, listMine, listPublic, getNotebook, updateNotebook, deleteNotebook, pushVersion, readVersion, deleteVersion, readSource, readRun, purgeOrphans, reportNotebook, takeDownNotebook, restoreNotebook } from "./notebooks";
 import { linkPage } from "./pages";
-import { admit, presence } from "./relay";
 import { ashPage, publishShare, resolveShare, sharePage, unpublishShare } from "./shares";
 import { hashToken, normalizeUserCode, nowSecs } from "./util";
 
@@ -51,7 +51,7 @@ async function health(): Promise<Response> {
   return json(200, { status: "ok", version: VERSION });
 }
 
-/** `GET /config` (FR-H8): where the relays and the pkarr directory are. No API version (D16). */
+/** `GET /config` (FR-H8): where the pkarr directory is. No API version (D16). */
 function config(_request: Request, env: Env): Response {
   return json(
     200,
@@ -59,7 +59,8 @@ function config(_request: Request, env: Env): Response {
       hub_version: VERSION,
       api_url: env.API_URL,
       front_url: env.FRONT_URL,
-      relay_urls: [env.RELAY_URL],
+      // The hub runs no relay (FR-H3, INTENT D23); kept in the contract (D16), always empty.
+      relay_urls: [],
       pkarr_url: `${env.API_URL}/pkarr`,
       link_url: `${env.FRONT_URL}/link`,
     },
@@ -124,9 +125,6 @@ export const ROUTES: Route[] = [
   // FR-H2 directory
   route("/devices/{endpoint_id}/addresses", { GET: deviceAddresses }),
   route("/pkarr/{key}", { PUT: pkarrPut, GET: pkarrGet }),
-  // FR-H3 relay host callbacks
-  route("/internal/relay/admit", { POST: admit }),
-  route("/internal/relay/presence", { POST: presence }),
   // FR-H4 shares
   route("/shares", { POST: publishShare }),
   route("/shares/{share_id}", { GET: resolveShare, DELETE: unpublishShare }),
@@ -193,10 +191,10 @@ export async function handle(request: Request, env: Env, deps: Deps): Promise<Re
 export async function cleanup(env: Env, nowMs: number): Promise<void> {
   const now = nowSecs(nowMs);
   await purgeOrphans(env, nowMs);
+  await expireOnline(env, now);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM oauth_transactions WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM device_links WHERE expires_at < ?").bind(now),
-    env.DB.prepare("DELETE FROM relay_passes WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now),
   ]);
 }

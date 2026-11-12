@@ -17,10 +17,6 @@ export interface Env {
   CORS_DEV_ORIGINS?: string;
   /** DNS zone for `<name>.<zone>`, e.g. `darkpyonix.dev`. */
   ZONE: string;
-  /** The relay devices and guests dial, e.g. `https://relay.darkpyonix.dev/` (SPEC FR-H3). */
-  RELAY_URL: string;
-  /** Base URL of the relay host's admin API (disconnect on removal), e.g. `https://relay.darkpyonix.dev`. */
-  RELAY_ADMIN_URL?: string;
 
   /** GitHub OAuth App client id (SPEC FR-H6). */
   GITHUB_CLIENT_ID?: string;
@@ -28,9 +24,6 @@ export interface Env {
   GITHUB_CLIENT_SECRET?: string;
   /** Optional: comma-separated numeric GitHub user ids allowed to create accounts. Empty = anyone. */
   GITHUB_ALLOWED_IDS?: string;
-
-  /** Secret. Shared by this Worker and the relay host: /internal/relay/* and the relay's admin API. */
-  RELAY_SHARED_SECRET?: string;
 
   /** Secret. Cloudflare API token limited to Zone → DNS → Edit on ZONE (SPEC FR-H5). */
   CF_API_TOKEN?: string;
@@ -49,7 +42,7 @@ export interface Env {
 
 /** What tests replace: the network, the clock and the DNS provider. */
 export interface Deps {
-  /** Outbound HTTP (GitHub, the relay admin API). */
+  /** Outbound HTTP (GitHub). */
   fetch: typeof fetch;
   /** Unix milliseconds. */
   nowMs: () => number;

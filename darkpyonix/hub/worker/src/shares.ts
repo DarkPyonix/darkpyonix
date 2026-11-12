@@ -1,13 +1,9 @@
 // Share links and the ash viewer (SPEC FR-H4).
 
-import { storedAddresses } from "./directory";
 import type { Deps, Env } from "./env";
 import { ApiError, html, json, noContent, principal, readJson, requireDevice } from "./http";
 import { sharePlaceholderPage } from "./pages";
-import { SHARE_ID_RE, hashToken, newToken, nowSecs } from "./util";
-
-/** How long a guest relay pass is valid. */
-export const RELAY_PASS_TTL_SECS = 600;
+import { SHARE_ID_RE, nowSecs } from "./util";
 
 interface ShareHost {
   endpoint_id: string;
@@ -46,29 +42,11 @@ export async function publishShare(request: Request, env: Env, deps: Deps): Prom
   return json(201, { share_id: shareId, url: `${env.FRONT_URL}/s/${shareId}` });
 }
 
-/** `GET /shares/{share_id}`: public. Returns the host and a fresh guest relay pass. */
-export async function resolveShare(_request: Request, env: Env, deps: Deps, shareId: string): Promise<Response> {
+/** `GET /shares/{share_id}`: public. Returns the hosting device (no relay pass: the hub runs no relay, FR-H3). */
+export async function resolveShare(_request: Request, env: Env, _deps: Deps, shareId: string): Promise<Response> {
   const host = await shareHost(env, shareId);
   if (!host) throw ApiError.notFound();
-  let relayUrl = env.RELAY_URL;
-  try {
-    relayUrl = (await storedAddresses(env, host.endpoint_id)).relayUrls[0] ?? env.RELAY_URL;
-  } catch {
-    // Nothing published yet: dial through our relay.
-  }
-  const now = nowSecs(deps.nowMs());
-  const token = newToken("dpg_");
-  const expiresAt = now + RELAY_PASS_TTL_SECS;
-  await env.DB.prepare("INSERT INTO relay_passes (token_hash, share_id, expires_at) VALUES (?, ?, ?)")
-    .bind(await hashToken(token), shareId, expiresAt)
-    .run();
-  return json(200, {
-    share_id: shareId,
-    endpoint_id: host.endpoint_id,
-    relay_url: relayUrl,
-    relay_token: token,
-    relay_token_expires_at: expiresAt,
-  });
+  return json(200, { share_id: shareId, endpoint_id: host.endpoint_id });
 }
 
 /** `DELETE /shares/{share_id}`: the hosting device, or the account (session / main server). */

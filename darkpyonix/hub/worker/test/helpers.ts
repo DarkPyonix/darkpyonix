@@ -19,12 +19,10 @@ export interface FakeGitHub {
   revoked: string[];
   /** Calls the hub made, as "METHOD url". */
   calls: string[];
-  /** Calls to the relay admin API. */
-  relayCalls: { url: string; body: unknown }[];
 }
 
 export function makeDeps(overrides: Partial<Deps> = {}): Deps & { github: FakeGitHub; memoryDns: MemoryDns; pending: Promise<unknown>[] } {
-  const github: FakeGitHub = { codes: new Map(), revoked: [], calls: [], relayCalls: [] };
+  const github: FakeGitHub = { codes: new Map(), revoked: [], calls: [] };
   const tokens = new Map<string, { id: number; login: string }>();
   const memoryDns = new MemoryDns();
   const pending: Promise<unknown>[] = [];
@@ -54,10 +52,6 @@ export function makeDeps(overrides: Partial<Deps> = {}): Deps & { github: FakeGi
     if (url.startsWith("https://api.github.com/applications/") && request.method === "DELETE") {
       const body = (await request.json()) as { access_token: string };
       github.revoked.push(body.access_token);
-      return new Response(null, { status: 204 });
-    }
-    if (url.startsWith("https://relay.darkpyonix.dev/admin/")) {
-      github.relayCalls.push({ url, body: await request.json() });
       return new Response(null, { status: 204 });
     }
     return new Response("unexpected fetch in test", { status: 599 });

@@ -1,25 +1,21 @@
 # darkpyonix.dev hub API on Cloudflare Workers (SPEC §10, INTENT D15).
-# The iroh relay is NOT here: it runs on the relay host (relay.darkpyonix.dev, darkpyonix/hub/server).
+# The hub runs no relay (SPEC FR-H3, INTENT D23).
 name = "darkpyonix-hub"
 main = "src/index.ts"
 compatibility_date = "2026-08-15"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 
-# The API host only. `relay.darkpyonix.dev` is a DNS-only (grey cloud) record to the relay host,
-# and `<name>.darkpyonix.dev` names are not routed to this Worker.
+# The API host only. `<name>.darkpyonix.dev` names are not routed to this Worker.
 routes = [{ pattern = "api.darkpyonix.dev", custom_domain = true }]
 
 [vars]
 API_URL = "https://api.darkpyonix.dev"
 FRONT_URL = "https://darkpyonix.dev"
 ZONE = "darkpyonix.dev"
-RELAY_URL = "https://relay.darkpyonix.dev/"
-RELAY_ADMIN_URL = "https://relay.darkpyonix.dev"
 GITHUB_ALLOWED_IDS = ""
 # Secrets (wrangler secret put <NAME>), never in this file:
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET   GitHub OAuth App (FR-H6)
-#   RELAY_SHARED_SECRET                      shared with the relay host (FR-H3)
 #   OPERATOR_SECRET                          notebook takedowns (FR-H19)
 #   CF_API_TOKEN, CF_ZONE_ID                 Zone -> DNS -> Edit on darkpyonix.dev only (FR-H5)
 
@@ -77,23 +73,9 @@ enabled = true
 enabled = true
 invocation_logs = false
 
-# Expired OAuth transactions, device links, relay passes and sessions.
+# Expired OAuth transactions, device links and sessions; stale `online` flags (FR-H1).
 [triggers]
 crons = ["17 * * * *"]
 
-# No Durable Objects today: D1 gives every atomic step the hub needs (single-use rows with
-# DELETE ... RETURNING, "only if newer" upserts). If the NFR-N1 measurement lets the relay
-# move to Cloudflare Containers (SPEC FR-H3, option B), it is added here:
-#
-# [[containers]]
-# class_name = "IrohRelay"
-# image = "../server/Dockerfile.relay"
-# max_instances = 1
-#
-# [[durable_objects.bindings]]
-# name = "RELAY"
-# class_name = "IrohRelay"
-#
-# [[migrations]]
-# tag = "v1"
-# new_sqlite_classes = ["IrohRelay"]
+# No Durable Objects: D1 gives every atomic step the hub needs (single-use rows with
+# DELETE ... RETURNING, "only if newer" upserts).

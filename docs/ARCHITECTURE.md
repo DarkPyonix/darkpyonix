@@ -53,7 +53,7 @@ flowchart LR
 | **kernel** | 이 저장소 `darkpyonix/kernel/`의 비공개 모듈(`_server.py` 등)과 `__main__.py`(`python -m darkpyonix`) | 파일 하나에 묶인 실행 프로세스. 표준 라이브러리만 씁니다 |
 | **manager** | 이 저장소 `darkpyonix/manager`(Rust) | 커널을 찾고 띄우는 HTTP 앞단. 임시/전용 두 모드 |
 | **runtime API** | 이 저장소 `darkpyonix/kernel/`(빌드가 import 이름 `darkpyonix`로 매핑) | 노트북 파일이 `import darkpyonix`로 쓰는 API |
-| **hub** | 이 저장소 `darkpyonix/hub/worker/` | api.darkpyonix.dev(Cloudflare Worker, 무료 한도): GitHub 계정, 기기 등록, pkarr 주소 디렉터리(랑데부), 공유 해석, HTTPS 이름, 노트북 보관(D1 + R2). 릴레이는 운영하지 않습니다(INTENT D23). 옛 릴레이 호스트 `darkpyonix/hub/server/`는 배포하지 않고 걷어 냅니다(#129) |
+| **hub** | 이 저장소 `darkpyonix/hub/worker/` | api.darkpyonix.dev(Cloudflare Worker, 무료 한도): GitHub 계정, 기기 등록, pkarr 주소 디렉터리(랑데부), 공유 해석, HTTPS 이름, 노트북 보관(D1 + R2). 릴레이는 운영하지 않습니다(INTENT D23). 옛 릴레이 호스트는 #129에서 걷어 냈습니다 |
 | **메인 페이지** | `darkpyonix-ash` | darkpyonix.dev 루트: 랜딩과 ash 웹 앱. ash CI가 빌드해 조직 GitHub Pages 사이트(`DarkPyonix.github.io`)에 올립니다. 정적 파일만 내고 위 API를 부릅니다(SPEC FR-H12) |
 | ember server / ember node / 클라이언트 | `darkpyonix-ember` | 대화 우선 워크벤치, 셸 래핑, 컴퓨터 전환, A2A, 원격 브라우저 |
 | ash | `darkpyonix-ash` | Starboard 포크. darkpyonix.dev 메인 페이지로 배포됩니다. 호스팅한 노트북을 커널 없이 보여 주고, 공유 토큰으로 공유된 커널에 접근합니다 |
