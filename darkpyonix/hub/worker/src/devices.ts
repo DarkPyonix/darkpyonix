@@ -442,7 +442,6 @@ export async function claimLink(request: Request, env: Env, deps: Deps, linkId: 
   if (replaced && old) {
     // The new main server proves the names again with its own key.
     await Promise.all(oldNames.map(({ name }) => clearNameRecords(env, deps, name)));
-    deps.waitUntil(disconnectFromRelay(env, deps, old));
   }
   const device = await env.DB.prepare("SELECT * FROM devices WHERE endpoint_id = ? AND token_hash = ?")
     .bind(link.endpoint_id, tokenHash)
@@ -606,18 +605,6 @@ export async function listRemovedDevices(request: Request, env: Env, deps: Deps)
   );
 }
 
-/** Tells the relay host to drop a removed device's connections (best effort; SPEC FR-H3). */
-async function disconnectFromRelay(env: Env, deps: Deps, endpointId: string): Promise<void> {
-  if (!env.RELAY_ADMIN_URL || !env.RELAY_SHARED_SECRET) return;
-  await deps
-    .fetch(`${env.RELAY_ADMIN_URL}/admin/disconnect`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${env.RELAY_SHARED_SECRET}`, "content-type": "application/json" },
-      body: JSON.stringify({ endpoint_id: endpointId }),
-    })
-    .catch(() => undefined);
-}
-
 export async function removeDevice(request: Request, env: Env, deps: Deps, endpointId: string): Promise<Response> {
   const now = nowSecs(deps.nowMs());
   // A device may always leave by itself; removing another device needs account rights. There
@@ -641,6 +628,5 @@ export async function removeDevice(request: Request, env: Env, deps: Deps, endpo
     env.DB.prepare("DELETE FROM records WHERE endpoint_id = ?").bind(endpointId),
   ]);
   for (const { name } of names) deps.waitUntil(clearNameRecords(env, deps, name));
-  deps.waitUntil(disconnectFromRelay(env, deps, endpointId));
   return noContent();
 }

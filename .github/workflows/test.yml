@@ -175,23 +175,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  hub-server:
-    name: Hub server
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: darkpyonix/hub/server
-    env:
-      CARGO_TERM_COLOR: always
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: darkpyonix/hub/server
-      - name: Test
-        run: cargo test --all-targets
-
   shell:
     name: Shell tests
     runs-on: ubuntu-latest

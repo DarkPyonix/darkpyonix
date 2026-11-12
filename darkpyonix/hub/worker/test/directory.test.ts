@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { base64url } from "../src/util";
 import { call, irohRecord, linkDevice, linkDeviceTokens, makeDeps, newDevice, signIn } from "./helpers";
 
-const RELAY = "https://relay.darkpyonix.dev/";
+const RELAY = "https://relay.example/";
 
 describe("address directory", () => {
   it("test_fr_h2_publish_and_resolve_like_stock_iroh", async () => {

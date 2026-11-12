@@ -58,7 +58,7 @@
     <h2 id="roles">What it does <span class="pill planned">planned <a href="https://github.com/DarkPyonix/darkpyonix/issues/21">#21</a></span></h2>
     <ul>
       <li><strong>Sign-in</strong> with GitHub, and a list of your devices.</li>
-      <li><strong>Rendezvous and relay</strong> between machines: a direct connection through NAT when possible, a relay otherwise.</li>
+      <li><strong>Rendezvous</strong> between machines: an address directory. The hub runs no relay; your main server relays.</li>
       <li><strong>Share links</strong> that open a shared kernel in ash.</li>
       <li><strong>HTTPS names</strong> for a dedicated manager.</li>
       <li><strong>Hosting ash</strong>, the shared notebook.</li>
@@ -74,7 +74,6 @@
           <tr><td><code>darkpyonix.dev/</code></td><td>The main page and the ash web app, built by <code>darkpyonix-ash</code>.</td></tr>
           <tr><td><code>darkpyonix.dev/&lt;repo&gt;/</code></td><td>Project guides such as this one. They do not move.</td></tr>
           <tr><td><code>api.darkpyonix.dev</code></td><td>The hub API: sign-in, devices, address directory, shares, names.</td></tr>
-          <tr><td><code>relay.darkpyonix.dev</code></td><td>The relay for machine-to-machine connections.</td></tr>
         </tbody>
       </table>
     </div>
