@@ -88,7 +88,7 @@ darkpyonix/kernel/                       the `darkpyonix` Python package (stdlib
                                          `python -m darkpyonix`)
 darkpyonix/manager/                      the manager and the darkpyonix CLI (Rust workspace)
 darkpyonix/hub/worker/                   darkpyonix.dev hub API (Cloudflare Worker, TypeScript)
-darkpyonix/hub/server/                   relay.darkpyonix.dev iroh relay host (Rust)
+darkpyonix/hub/server/                   former iroh relay host, not deployed; removal in #129 (INTENT D23)
 docs/                                    design documents and the user guide
 tests/                                   Python test suite
 ```
