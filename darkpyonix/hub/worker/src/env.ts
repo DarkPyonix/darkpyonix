@@ -32,6 +32,8 @@ export interface Env {
 
   /** Optional Workers rate limiter for unauthenticated writes. */
   WRITE_LIMITER?: RateLimiter;
+  /** FR-H2 pkarr watches per device token (or session account) per minute. */
+  WATCH_LIMITER?: RateLimiter;
   /** FR-H19 per-minute limiters: notebook uploads and creation per account, anonymous reads per address. */
   PUSH_LIMITER?: RateLimiter;
   CREATE_LIMITER?: RateLimiter;

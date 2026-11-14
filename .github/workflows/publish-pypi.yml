@@ -16,15 +16,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-  # Dry run from a branch: workflow_dispatch only exists for workflows on the default branch.
-  # A pull request that touches packaging builds and smoke-tests everything; the publish job
-  # below is release-only, so a pull request never uploads.
-  pull_request:
-    paths:
-      - "packaging/**"
-      - ".github/workflows/publish-pypi.yml"
-      - "pyproject.toml"
-      - "darkpyonix/manager/**"
 
 permissions:
   contents: read

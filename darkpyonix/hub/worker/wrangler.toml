@@ -46,6 +46,12 @@ name = "WRITE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 30, period = 60 }
 
+# FR-H2 pkarr watches (GET /pkarr/watch), per device token (or session account) per minute.
+[[ratelimits]]
+name = "WATCH_LIMITER"
+namespace_id = "1005"
+simple = { limit = 6, period = 60 }
+
 # FR-H19 notebook limits, per minute (Workers Rate Limiting periods are 10 or 60 seconds).
 # Keys: account id for uploads and creation, client address for anonymous reads.
 [[ratelimits]]
