@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: dev-ci
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
