@@ -834,7 +834,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 | FR-H16 | darkpyonix-ash 시험 `test_fr_h16_*` 3건(지금 없음) | darkpyonix-ash의 노트북 보기 구현 |
 | FR-H17 | `test_fr_h17_notebook_link_with_token_reaches_the_live_kernel`: 토큰이 있는 노트북 링크가 기기의 매니저에 붙어 실행(`execute`), 토큰 없이는 읽기 전용 | Q19의 사용자 결정(#130), darkpyonix-ash의 노트북 페이지, 전용 매니저가 도는 기기 |
 
-**살아 있는 허브 점검(#21).** 배포한 허브(또는 로컬 `wrangler dev`)가 기기 쪽 계약을 지키는지는 스크립트 하나로 봅니다: `darkpyonix/hub/worker`에서 `npm run check:live -- [--url <API 주소>]`(기본 `https://api.darkpyonix.dev`, Node 22 이상, 의존성 없음). 사람이 할 일은 화면에 나온 링크를 열어 GitHub로 로그인하고 코드를 승인하는 한 번뿐입니다. 스크립트는 한 번 쓰고 버리는 ed25519 키를 만들어 `client` 역할(권한이 가장 좁음)로 들어가고, 끝나면 그 기기를 스스로 지웁니다. 지운 키는 계정의 지운 기기 목록(FR-H11)에 한 줄 남습니다. 단계는 순서대로 다음과 같고, 하나가 틀리면 거기서 멈추고 종료 코드 1입니다(이미 받은 기기 토큰이 있으면 기기는 그래도 지웁니다).
+**살아 있는 허브 점검(#21).** 배포한 허브(또는 로컬 `wrangler dev`)가 기기 쪽 계약을 지키는지는 스크립트 하나로 봅니다: `darkpyonix/hub/worker`에서 `npm run check:live -- [--url <API 주소>]`(기본 `https://api.darkpyonix.dev`, Node 22 이상, 의존성 없음). 사람이 할 일은 화면에 나온 링크를 열어 GitHub로 로그인하고 코드를 승인하는 한 번뿐입니다. 메인 페이지가 `/link`를 내기 전에는(FR-H12) 스크립트가 함께 보여 주는 API 호스트의 `/link?code=…`(Worker의 `deprecated` 페이지)를 엽니다. 스크립트는 한 번 쓰고 버리는 ed25519 키를 만들어 `client` 역할(권한이 가장 좁음)로 들어가고, 끝나면 그 기기를 스스로 지웁니다. 지운 키는 계정의 지운 기기 목록(FR-H11)에 한 줄 남습니다. 단계는 순서대로 다음과 같고, 하나가 틀리면 거기서 멈추고 종료 코드 1입니다(이미 받은 기기 토큰이 있으면 기기는 그래도 지웁니다).
 
 | 단계 | 확인하는 것 | 요구사항 |
 |---|---|---|
@@ -847,7 +847,7 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 | `watch` | `/config`에 `pkarr_watch`가 있으면 `since=0`의 감시가 그 레코드를 200으로, `since=<그 타임스탬프>&wait=1`은 204 | FR-H2 |
 | `remove` | 자기 기기 토큰의 `DELETE /devices/{endpoint_id}`가 204, 그 뒤 같은 토큰은 401 `device_removed` | FR-H1 |
 
-- 수용 기준: 이 저장소의 Worker를 상대로 스크립트가 모든 단계를 통과합니다. 조회가 다른 바이트를 돌려주는 허브에서는 `resolve`에서 멈추고 실패를 알리며, 그래도 기기는 지웁니다. 실제 `https://api.darkpyonix.dev`에서 통과하는 것은 배포 후 확인합니다(#141).
+- 수용 기준: 이 저장소의 Worker를 상대로 스크립트가 모든 단계를 통과합니다(Worker 시험 안에서, 그리고 Node 22의 명령줄로 로컬 `wrangler dev`에 대해 2026-11-20 통과). 조회가 다른 바이트를 돌려주는 허브에서는 `resolve`에서 멈추고 실패를 알리며, 그래도 기기는 지웁니다. 실제 `https://api.darkpyonix.dev`에서 통과하는 것은 배포 후 확인합니다(#141).
 - 테스트(`darkpyonix/hub/worker/test/live_check.test.ts`): `test_hub_live_check_passes_against_the_worker`, `test_hub_live_check_stops_at_the_failing_step_and_removes_its_device`
 
 **사용자 준비물(2026-11-13, INTENT D23 뒤).** 허브 운영에 드는 것은 Cloudflare와 GitHub 두 곳뿐이고, 둘 다 무료입니다. 릴레이 VPS, 그 DNS 레코드·인증서, UDP 포트는 더는 필요 없습니다.
