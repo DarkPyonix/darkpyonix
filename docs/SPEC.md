@@ -603,7 +603,7 @@ INTENT D19, PROTOCOL §5. 사용자 결정: "원 설계대로 복구". `GET /api
 
 **인증 모델.** 계정은 GitHub 사용자입니다(FR-H6). 사람은 브라우저에서 GitHub로 로그인해 `api.darkpyonix.dev`의 호스트 전용 세션 쿠키(`__Host-dp_session`)를 받고(프런트는 자격 증명을 실은 CORS 요청으로 씁니다, FR-H13), 기기는 기기 링크(FR-H1)로 계정에 들어와 기기 토큰을 받습니다. "계정 권한"은 로그인한 세션 또는 그 계정의 `main_server` 기기 토큰입니다. 단, `main_server` 역할을 들이는 승인(메인 서버 바꾸기 포함, FR-H1)은 세션만 할 수 있습니다. 토큰과 세션 ID는 SHA-256 해시로만 저장하고, GitHub 액세스 토큰은 사용자 정보를 한 번 읽은 뒤 바로 폐기(revoke)하며 저장하지 않습니다. 쿠키로 인증한 쓰기 요청은 `Origin`이 프런트(`https://darkpyonix.dev`)가 아니면 403입니다(FR-H13). 사용자 이름 서브도메인(`<name>.darkpyonix.dev`, FR-H5)은 같은 사이트이지만 남의 서버이므로 신뢰하지 않습니다. 자격 증명 오류(401)의 본문은 `{"error": <설명>, "code": <코드>}`이고, `code`는 `device_removed`(지운 기기의 토큰. 다시 시도해도 소용없으니 기기는 토큰을 버리고 사용자에게 알립니다) 또는 `invalid_credentials`(없거나 모르는 토큰·세션)입니다. 상태 코드는 둘 다 401입니다. 410은 자원이 사라졌다는 뜻이지 자격 증명이 틀렸다는 뜻이 아니고, 401을 유지하면 "401이면 다시 인증"하는 기존 클라이언트가 그대로 동작합니다(FR-H1). OpenAI 로그인("Sign in with ChatGPT")과 ChatGPT 플랜 사용은 허브 기능이 아니고, 사용자가 직접 띄운 ember server가 합니다(PROJECT Q2).
 
-### FR-H1 기기 등록 — `Agreed`
+### FR-H1 기기 등록 — `Done` [provisional] (구현됨 #21, #129. 수용 기준 전부를 Worker 시험이 확인하고, 실제 기기 키의 서명은 Rust 벡터로 확인: 로컬 `npm test` 133건 통과 2026-11-20)
 기기는 자기 ed25519 공개 키(iroh 엔드포인트 ID, letify-link 노드 ID와 같은 값)로 계정에 들어옵니다. 흐름은 OAuth 기기 인증(RFC 8628) 모양에 키 소유 증명을 더한 **기기 링크**입니다.
 1. 기기가 `POST /device-links {endpoint_id, name, role}`로 요청하고 `link_id`, 사용자 코드(`BCDF-GHJK` 형식, 모음 없는 20글자), 챌린지, 만료(15분)를 받습니다.
 2. 사람이 `https://darkpyonix.dev/link?code=<사용자 코드>`(프런트 페이지, FR-H12)를 열어 GitHub로 로그인한 상태에서 기기 이름·역할·엔드포인트 ID를 확인하고 승인하거나 거절합니다(`POST /link-codes/{user_code} {"approve": bool}`). 같은 계정의 메인 서버도 기기 토큰으로 승인할 수 있어서, 새 컴퓨터는 브라우저 없이 메인 서버(ember server)를 거쳐 들어올 수 있습니다. `computer` 기기 토큰으로는 승인할 수 없습니다(403). **`main_server` 역할을 요청한 링크는 로그인한 브라우저 세션만 승인할 수 있습니다.** 메인 서버의 기기 토큰으로 그런 링크를 승인하면 403이고(거절은 됩니다), 그래서 새어 나간 메인 서버 토큰 하나로 계정 권한을 가진 기기를 더 만들 수 없습니다. 사용자 코드는 짧으므로 코드 조회와 결정은 계정당 분당 30번으로 제한합니다(429). 링크 요청도 주소당 분당 30번입니다.
@@ -821,12 +821,11 @@ INTENT D15 개정의 사용자 결정(2026-10-03): "동적 기능은 서브 도�
 - 테스트(`darkpyonix/hub/worker/test/notebooks_abuse.test.ts`): `test_fr_h19_size_limits`, `test_fr_h19_request_size_limit`, `test_fr_h19_quotas`, `test_fr_h19_rate_limits`, `test_fr_h19_report_and_takedown`, `test_fr_h19_reports_need_a_public_or_unlisted_notebook_and_a_valid_reason`, `test_fr_h19_reports_are_rate_limited_per_address`
 
 ### 허브에서 `Done`까지 남은 점검 (2026-11-13 감사, #21)
-아래 요구사항은 Worker와 릴레이 호스트의 시험으로 확인할 수 있는 수용 기준이 모두 통과하지만, 남은 기준이 배포된 허브나 다른 저장소의 작업을 필요로 해서 `Agreed`로 둡니다(FR-H3은 #129로 `Done`이 되어 표에서 뺐습니다). 각 항목이 확인되면 그 요구사항의 상태를 같은 변경에서 올립니다.
+아래 요구사항은 Worker와 릴레이 호스트의 시험으로 확인할 수 있는 수용 기준이 모두 통과하지만, 남은 기준이 배포된 허브나 다른 저장소의 작업을 필요로 해서 `Agreed`로 둡니다(FR-H3은 #129로, FR-H1은 Rust가 만든 서명 벡터로 `Done`이 되어 표에서 뺐습니다). 각 항목이 확인되면 그 요구사항의 상태를 같은 변경에서 올립니다.
 
 | 요구사항 | 남은 점검 | 필요한 것 |
 |---|---|---|
-| FR-H1 | 실제 기기 키(Rust `SecretKey::sign`)가 `darkpyonix-hub/v2/link\n<link_id>\n<challenge>`에 낸 서명으로 `POST /device-links/{link_id}/token`이 201 | darkpyonix-ember 전송 크레이트 연동 시험. 로컬 Worker(`wrangler dev`)로도 할 수 있어 배포는 필요 없음 |
-| FR-H2 | 두 실제 기기(letify-link 기본, iroh 백엔드는 한 릴리스 동안)가 `<pkarr_url>?token=<조회 토큰>`로 Worker를 거쳐 서로를 찾고 연결. Rust가 만든 패킷 바이트를 Worker 시험 벡터로 추가. 무료 한도 안의 요청 예산(#132) | 배포된 Worker(또는 로컬 Worker)와 ember 연동 시험 |
+| FR-H2 | 두 실제 기기(letify-link 기본, iroh 백엔드는 한 릴리스 동안)가 `<pkarr_url>?token=<조회 토큰>`로 Worker를 거쳐 서로를 찾고 연결(Rust가 만든 패킷 바이트는 `test_fr_h2_rust_made_packet_is_stored_and_served_byte_for_byte`가 확인함). 배포한 허브에서 살아 있는 허브 점검(아래) 통과. 무료 한도 안의 요청 예산(#132) | 배포된 Worker(또는 로컬 Worker)와 ember 연동 시험 |
 | FR-H4 | 브라우저 ash가 공유를 연 기기의 전용 매니저에 붙음(길은 Q19). 메인 페이지가 `/s/<share_id>`를 내기 시작하면 Worker의 `deprecated` 연산 `/s/{share_id}`, `/ash/`와 `test_fr_h4_viewer_pages_are_served`를 걷어 냄 | Q19의 사용자 결정(#130), darkpyonix-ash의 공유 페이지(FR-H12) |
 | FR-H5 | 실제 `darkpyonix.dev` 존에서 메인 서버가 `PUT /names/{name}/acme-challenge`로 Let's Encrypt 스테이징 인증서를 받음 | `CF_API_TOKEN`(그 존의 `Zone → DNS → Edit`만), `CF_ZONE_ID`, 배포된 Worker |
 | FR-H6 | 실제 GitHub OAuth App으로 `https://api.darkpyonix.dev/auth/login` → 콜백 → `GET /me` 200 | GitHub OAuth App(콜백 `https://api.darkpyonix.dev/auth/callback`), `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, 배포된 Worker |
