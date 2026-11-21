@@ -26,8 +26,8 @@ DarkPyonix kernel stack:
   It runs no relay; the user's own main server relays over letify-link (INTENT D23).
 
 The rest of the product lives in sibling repositories: `darkpyonix-ember` (IDE and agent
-workbench), `darkpyonix-ash` (shared WASM notebook), `vscode-darkpyonix`,
-`vscode-darkpyonix-theme`, `intellij-darkpyonix`. `docs/ARCHITECTURE.md` shows how they fit.
+workbench, which also carries the notebook renderer extensions for VS Code and IntelliJ) and
+`darkpyonix-ash` (shared WASM notebook). `docs/ARCHITECTURE.md` shows how they fit.
 
 Documents:
 

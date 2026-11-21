@@ -20,7 +20,7 @@
 **제외 (다른 저장소)**
 - 대화 우선 워크벤치, 셸 래핑, 컴퓨터 전환, A2A, 원격 브라우저: `darkpyonix-ember`
 - 공유 노트북 UI: `darkpyonix-ash`
-- 편집기 확장: `vscode-darkpyonix`, `intellij-darkpyonix`, `vscode-darkpyonix-theme`
+- 편집기 확장(VS Code·IntelliJ 노트북 렌더러): `darkpyonix-ember` 안에 있습니다
 - 에이전트 하네스(INTENT D13)
 - Android·iOS의 노트북 실행 경로(앱 안의 미리 정한 프로세스, INTENT D20): Ember 모바일 앱
 
@@ -38,13 +38,13 @@ dioxus-compose와 같은 SDD + TDD입니다. 규칙은 [AGENTS.md](AGENTS.md)에
 | M1 | 커널 코어 | 2026-10-06 | FR-K1~K8, FR-X1~X5, FR-R1~R4, FR-D1, FR-D2(2026-10-03 사용자 지시로 등록 파일 없음), FR-F1, FR-A1, PR-1~4, NFR-K1·K2 | M0 |
 | M2 | 매니저·CLI·런타임 API | 2026-10-10 | FR-M1~M3·M5, FR-C1~C2, FR-F2~F6, FR-A2, FR-R5, FR-X6, NFR-K3·K4, NFR-M1~M3 | M1 |
 | M3 | 전용 매니저와 공유 | 2026-10-13 | FR-M4, FR-A3, ash가 공유 토큰으로 커널에 붙는 시연 | M2 |
-| M3b | 노트북 렌더러 확장 | 2026-10-16 | `vscode-darkpyonix`(Ember 기본 설치)와 `intellij-darkpyonix`가 `.py`/`.pynb` 셀을 그리고, 매니저 API로 `__runs__`의 최근 실행 기록을 셀에 맞춰 보여 줌(FR-R4). 실행·중지와 SSE 실시간 출력. VS Code 먼저, IntelliJ 다음. 코드는 확장 저장소에 있고 여기서는 추적만 함 | M2 |
+| M3b | 노트북 렌더러 확장 | 2026-10-16 | Ember 안의 VS Code 확장(Ember 기본 설치)과 IntelliJ 확장이 `.py`/`.pynb` 셀을 그리고, 매니저 API로 `__runs__`의 최근 실행 기록을 셀에 맞춰 보여 줌(FR-R4). 실행·중지와 SSE 실시간 출력. VS Code 먼저, IntelliJ 다음. 코드는 `darkpyonix-ember`에 있고 여기서는 추적만 함(#22) | M2 |
 | M4 | 허브 | 2026-10-18 | FR-H1~H7, NFR-H1. 허브 API는 Cloudflare Worker(`darkpyonix/hub/worker/`, 무료 한도), 계정은 GitHub 로그인(FR-H6). 허브는 릴레이를 운영하지 않습니다(INTENT D23, 2026-11-13): 기기 사이 전송은 letify-link, 중계는 사용자의 메인 서버(Ember D36). FR-H3은 릴레이 걷어 내기(#129)로 끝나고, 브라우저 공유의 길은 Q19(#130). 사용자 준비물: Cloudflare 존·API 토큰(그 위의 D1·R2 무료 자원, R2는 결제 수단 등록 필요: Q21), GitHub OAuth App | Q1(Ember D36으로 letify-link), Q19, Ember M5와 함께 |
 
 **10월 셋째 주 범위에서 뺀 것과 이유**
 - (변수 체크포인트·복원은 범위가 아닙니다. 변수는 실행 기록에 남은 코드로 재현합니다. INTENT 1.2 D.)
 
-`vscode-darkpyonix`와 `intellij-darkpyonix`가 매니저 API에 붙는 작업은 M2 이후에 시작할 수 있습니다. ember는 M1~M4가 커널 API에 의존하지 않습니다(Ember 구현 담당 확인).
+Ember 안의 렌더러 확장이 매니저 API에 붙는 작업은 M2 이후에 시작할 수 있습니다. ember는 M1~M4가 커널 API에 의존하지 않습니다(Ember 구현 담당 확인).
 
 ## 열린 질문
 
