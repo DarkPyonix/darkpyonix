@@ -1,0 +1,16 @@
+# Generates test/vectors/rust.json: bytes made by the Rust code a real device runs (stock iroh
+# key and pkarr packet), so the Worker tests check them as they are (SPEC FR-H1, FR-H2).
+# Not part of any build. Regenerate by hand:
+#   CARGO_TARGET_DIR=<repo>/.scratch/hub-vectors-target cargo run --manifest-path Cargo.toml > ../rust.json
+[package]
+name = "darkpyonix-hub-vectors"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+iroh-base = { version = "1.5.0", default-features = false, features = ["key", "relay"] }
+iroh-dns = "1.5.0"

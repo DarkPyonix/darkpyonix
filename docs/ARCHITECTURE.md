@@ -57,9 +57,8 @@ flowchart LR
 | **메인 페이지** | `darkpyonix-ash` | darkpyonix.dev 루트: 랜딩과 ash 웹 앱. ash CI가 빌드해 조직 GitHub Pages 사이트(`DarkPyonix.github.io`)에 올립니다. 정적 파일만 내고 위 API를 부릅니다(SPEC FR-H12) |
 | ember server / ember node / 클라이언트 | `darkpyonix-ember` | 대화 우선 워크벤치, 셸 래핑, 컴퓨터 전환, A2A, 원격 브라우저 |
 | ash | `darkpyonix-ash` | Starboard 포크. darkpyonix.dev 메인 페이지로 배포됩니다. 호스팅한 노트북을 커널 없이 보여 주고, 공유 토큰으로 공유된 커널에 접근합니다 |
-| 노트북 렌더러 | `vscode-darkpyonix`, `intellij-darkpyonix` | `.py`/`.pynb` 셀 표시와 실행 기록 맵핑. 그 컴퓨터의 매니저에 붙습니다 |
+| 노트북 렌더러 | `darkpyonix-ember` (VS Code·IntelliJ 확장) | `.py`/`.pynb` 셀 표시와 실행 기록 맵핑. 그 컴퓨터의 매니저에 붙습니다 |
 | IDE 창 워크벤치 | `darkpyonix-ember` (`proxy/`) | 각 컴퓨터의 VS Code 서버를 감싸서 냅니다 |
-| 테마 | `vscode-darkpyonix-theme` | 불사조 디자인 테마 |
 
 클라이언트와 ember server 사이, ember server와 각 컴퓨터 사이는 모두 letify-link 터널 위의 HTTPS입니다(Ember INTENT D36). 기기는 darkpyonix.dev의 pkarr 디렉터리에서 서로의 주소와 중계 제안을 찾고(랑데부), 메인 서버와 홀펀칭으로 연결합니다. 기기끼리 직결이 안 되면 사용자의 메인 서버가 암호문을 중계합니다. darkpyonix.dev는 중계하지 않습니다(INTENT D23). 에이전트 셸 래핑과 머신 이동의 세부(트랜스크립트, 무효화, A2A)는 ember 문서가 정의합니다. 이 문서는 그 경계에서 커널 스택이 무엇을 제공하는지만 다룹니다(§6).
 
