@@ -576,36 +576,11 @@ z = 3
 """
 
 
-def _load(path, monkeypatch):
-    """The real parser once #8 lands; until then a hand-built document of SOURCE's shape."""
-    try:
-        return dpformat.load(path)
-    except NotImplementedError:
-        pass
-
-    def fake_load(p):
-        text = open(p, encoding="utf-8").read()
-        parts = text.split("# %% [code]\n")
-        cells = [dpformat.Cell(0, "preamble", parts[0], source_sha256=sha(parts[0]))]
-        for i, body in enumerate(parts[1:], 1):
-            meta, cid = {}, None
-            if body.startswith("# @id:"):
-                line, body = body.split("\n", 1)
-                cid = json.loads(line.split(":", 1)[1])
-                meta = {"id": cid}
-            cells.append(dpformat.Cell(i, "code", body, raw_type="code", metadata=meta,
-                                       source_sha256=sha(body), id=cid))
-        return dpformat.NotebookDocument(p, cells, sha(text))
-
-    monkeypatch.setattr(dpformat, "load", fake_load)
-    return fake_load(path)
-
-
-def test_fr_r4_document_maps_latest_outputs_and_marks_stale(scratch, monkeypatch):
+def test_fr_r4_document_maps_latest_outputs_and_marks_stale(scratch):
     path = os.path.join(scratch, "train.py")
     with open(path, "w") as f:
         f.write(SOURCE)
-    doc = _load(path, monkeypatch)
+    doc = dpformat.load(path)
     store = runs.RunStore(path, kernel_id_for(path))
 
     old = make_run(path, run_id="20261003-100000-0001")
@@ -663,11 +638,10 @@ def test_fr_r4_document_maps_latest_outputs_and_marks_stale(scratch, monkeypatch
     assert all("outputs" not in c for c in viewer["cells"])
 
 
-def test_fr_r4_document_without_runs(scratch, monkeypatch):
+def test_fr_r4_document_without_runs(scratch):
     path = os.path.join(scratch, "fresh.py")
     with open(path, "w") as f:
         f.write(SOURCE)
-    _load(path, monkeypatch)
     got = document.build_document(path)
     assert got["latest_run"] is None
     assert all(c["outputs"] == [] and c["stale"] is False for c in got["cells"])

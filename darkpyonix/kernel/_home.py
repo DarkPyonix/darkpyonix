@@ -95,10 +95,6 @@ def locks_dir() -> str:
     return subdir("locks")
 
 
-def managers_dir() -> str:
-    return subdir("managers")
-
-
 def write_private(path: str, data: bytes) -> None:
     """Atomically write ``data`` to ``path`` with mode 0600."""
     tmp = "%s.%s.tmp" % (path, secrets.token_hex(4))
@@ -106,17 +102,6 @@ def write_private(path: str, data: bytes) -> None:
     try:
         os.write(fd, data)
         os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
-
-
-def write_public(path: str, data: bytes) -> None:
-    """Atomically write ``data`` to ``path`` with mode 0644 (no secrets)."""
-    tmp = "%s.%s.tmp" % (path, secrets.token_hex(4))
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    try:
-        os.write(fd, data)
     finally:
         os.close(fd)
     os.replace(tmp, path)
