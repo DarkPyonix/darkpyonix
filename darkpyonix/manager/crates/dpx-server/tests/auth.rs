@@ -206,9 +206,37 @@ async fn test_fr_a6_initial_token_has_no_limit_and_works_through_any_manager() {
     assert_eq!(other.with_token(&a).get(&format!("/api/kernels/{kid}")).await.status, 200);
     // ... but only for its own kernel.
     let (kid2, _) = s.kernel("b.py");
-    other.with_token(&a).get(&format!("/api/kernels/{kid2}")).await.error(401, "unauthorized");
+    other.with_token(&a).get(&format!("/api/kernels/{kid2}")).await.error(404, "not_found");
     // It names a kernel in every path it works on, so it cannot start kernels or read by path.
-    s.with_token(&a).post("/api/kernels", json!({"path": "/x.py"})).await.error(401, "unauthorized");
+    s.with_token(&a).post("/api/kernels", json!({"path": "/x.py"})).await.error(403, "forbidden");
+}
+
+#[tokio::test]
+async fn test_fr_a6_kernel_token_is_404_on_another_kernel_and_403_without_one() {
+    // Owner decision 2026-11-23: kernel tokens carry `dpk_`, and only such a token is looked
+    // for among the running kernels.
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("a.py");
+    let (kid2, _) = s.kernel("b.py");
+    let t = s.anon().post(&format!("/api/kernels/{kid}/tokens/initial"), json!({})).await;
+    let token = t.body["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("dpk_"), "{token}");
+    let k = s.with_token(&token);
+    assert_eq!(k.get(&format!("/api/kernels/{kid}")).await.status, 200);
+    k.get(&format!("/api/kernels/{kid2}")).await.error(404, "not_found");
+    k.get(&format!("/api/kernels/{kid2}/runs")).await.error(404, "not_found");
+    k.post("/api/kernels", json!({"path": "/x.py"})).await.error(403, "forbidden");
+    k.get("/api/documents?path=/x.py").await.error(403, "forbidden");
+    // Unknown tokens stay 401 and cost no kernel round trips: without the prefix nobody is
+    // asked, and with it but held by no kernel the answer is the same.
+    let before = s.backend.calls_of(&kid2, "tokens.verify").len();
+    let before_other = s.backend.calls_of(&kid, "tokens.verify").len();
+    s.with_token("not-a-kernel-token").get(&format!("/api/kernels/{kid2}")).await.error(401, "unauthorized");
+    s.with_token("not-a-kernel-token").post("/api/kernels", json!({"path": "/x.py"})).await.error(401, "unauthorized");
+    assert_eq!(s.backend.calls_of(&kid2, "tokens.verify").len(), before + 1, "only the named kernel is asked");
+    assert_eq!(s.backend.calls_of(&kid, "tokens.verify").len(), before_other, "no other kernel is asked");
+    s.with_token("dpk_nobody").get(&format!("/api/kernels/{kid2}")).await.error(401, "unauthorized");
+    s.with_token("dpk_nobody").post("/api/kernels", json!({"path": "/x.py"})).await.error(401, "unauthorized");
 }
 
 #[tokio::test]
