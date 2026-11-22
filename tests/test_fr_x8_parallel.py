@@ -279,14 +279,24 @@ def test_fr_x10_failure_waits_for_siblings_then_raises():
 
 
 def test_fr_x10_fail_fast_cancels_siblings():
+    """FR-X10: after the first failure the siblings are cancelled or interrupted.
+
+    The bound is on what fail_fast does, from the failure until ``run_parallel`` returns, and
+    it is below the 1 s grace ``_stop_threads`` gives a thread: a worker that only stops when
+    the grace runs out fails it. Start-up is not timed (#157): while the CPU-bound worker
+    holds the GIL, the loop's 10 ms polls take tens to hundreds of milliseconds to see it has
+    started, and that depends on the machine, not on fail_fast.
+    """
     coro_cancelled = False
     thread_interrupted = False
     thread_started = threading.Event()
+    marks = {}
 
     async def fast_fail():
         while not thread_started.is_set():
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.03)
+        marks["fail"] = time.monotonic()
         raise RuntimeError("fast boom")
 
     async def long_coro():
@@ -306,15 +316,21 @@ def test_fr_x10_fail_fast_cancels_siblings():
             while True:
                 n += 1
         except KeyboardInterrupt:
+            marks["interrupted"] = time.monotonic()
             thread_interrupted = True
             raise
 
     t0 = time.monotonic()
     with pytest.raises(ParallelError) as info:
         run_parallel(fast_fail(), long_coro(), long_thread, fail_fast=True)
-    elapsed = time.monotonic() - t0
+    end = time.monotonic()
 
-    assert elapsed < 1.5, "fail_fast took too long: %.2fs" % elapsed
+    phases = "start-up %.3fs, failure to worker interrupt %s, failure to return %.3fs" % (
+        marks["fail"] - t0,
+        "%.3fs" % (marks["interrupted"] - marks["fail"]) if "interrupted" in marks else "never",
+        end - marks["fail"],
+    )
+    assert end - marks["fail"] < 0.9, "fail_fast waited out the thread grace: " + phases
     assert len(info.value.errors) == 1
     assert info.value.errors[0][0] == 0
     assert isinstance(info.value.errors[0][1], RuntimeError)
