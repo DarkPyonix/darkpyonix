@@ -472,7 +472,8 @@ impl KernelBackend for FakeBackend {
                     .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
                     .unwrap_or_default();
                 let share_id = (kind == "share").then(|| format!("s_{n:016x}"));
-                let token = format!("kt_{}_{n}", &kernel_id[2..10]);
+                // The kernel's own format: `dpk_` + random (SPEC FR-A6).
+                let token = format!("dpk_{}_{n}", &kernel_id[2..10]);
                 list.push(FakeToken { token: token.clone(), kind, capabilities: caps, share_id: share_id.clone(), revoked: false });
                 Ok(match share_id {
                     Some(id) => json!({"token": token, "share_id": id}),

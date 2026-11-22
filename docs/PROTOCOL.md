@@ -367,9 +367,10 @@ SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그
   - 초기 토큰: 매니저가 `tokens.issue {kind: "initial", capabilities: [다섯 모두]}`를 보내고 받은 `token`을 응답합니다.
   - 커널 로그인: 매니저가 자기 비밀번호를 확인한 뒤(SPEC FR-A4) `tokens.issue {kind: "login", capabilities: [다섯 모두]}`를 보냅니다.
   - 공유 발급: `tokens.issue {kind: "share", capabilities, label?, expires_at?}`. 커널이 `share_id`를 정합니다.
-  - 요청마다 확인: 매니저는 클라이언트가 낸 토큰이 마스터 토큰이나 매니저 공유 토큰(`manager.db`)이 아니면 `tokens.verify {token}`을 보냅니다. `valid`이면 `capabilities`로 권한을 검사합니다(SPEC FR-A3). `revoked`이면 `401 token_revoked`입니다.
+  - 요청마다 확인: 매니저는 클라이언트가 낸 토큰이 마스터 토큰이나 매니저 공유 토큰(`manager.db`)이 아니면 `tokens.verify {token}`을 보냅니다. URL이 지목한 커널이 모르는 토큰이 `dpk_`로 시작하면 떠 있는 다른 커널들에도 묻고, 주인이 있으면 `404`(다른 커널 경로) 또는 `403`(커널을 지목하지 않는 경로)으로 답합니다(SPEC FR-A6). `valid`이면 `capabilities`로 권한을 검사합니다(SPEC FR-A3). `revoked`이면 `401 token_revoked`입니다.
   - 철회: `tokens.revoke {share_id}`. 커널은 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫습니다(§3.7.4와 같은 일).
-- **영속화.** 커널은 토큰 값을 두지 않고 SHA-256 해시, `kind`, `capabilities`, `share_id`, `label`, `created_at`, `expires_at`, `revoked_at`만 둡니다. 토큰은 `secrets.token_urlsafe(32)`이라 소금 없는 SHA-256으로 충분하고, 비교는 `hmac.compare_digest`입니다. 쓸 때는 임시 파일에 쓰고 `os.replace`로 바꿉니다. 거둔 토큰은 거둔 표시로 남깁니다(2025 `blacklisted`).
+- **형식.** 토큰은 `dpk_` + `secrets.token_urlsafe(32)`입니다(오너 결정 2026-11-23). 접두어는 매니저가 커널 접근 토큰을 알아보는 데만 씁니다.
+- **영속화.** 커널은 토큰 값을 두지 않고 SHA-256 해시, `kind`, `capabilities`, `share_id`, `label`, `created_at`, `expires_at`, `revoked_at`만 둡니다. 토큰의 난수 부분이 `secrets.token_urlsafe(32)`이라 소금 없는 SHA-256으로 충분하고, 비교는 `hmac.compare_digest`입니다. 쓸 때는 임시 파일에 쓰고 `os.replace`로 바꿉니다. 거둔 토큰은 거둔 표시로 남깁니다(2025 `blacklisted`).
 - **저장소 위치 [provisional].** `<노트북 옆 __runs__/파일이름/>tokens.json`(런타임 홈이 아니라 실행 기록 폴더, 권한 0600). 커널만 읽고 쓰고, 노트북 파일 옆에 있어 커널이 꺼져도 남고 홈이 달라도 같은 파일의 토큰입니다. 커널은 0.5초마다 자기 파일이 있는지 보고, 지워진 것을 알아채면 저장소를 지웁니다(SPEC FR-S5 감시와 별개의 스레드). 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 커널이 꺼져 있는 동안 파일이 지워졌다 같은 경로에 다시 만들어지면 옛 토큰이 되살아납니다(알려진 한계, 사용자 확인 대기).
 - **스트림 닫기 연결점.** `TokenStore(close_streams=...)`가 `tokens.revoke`의 `closed` 수를 정합니다. 넘겨받은 스트림(§3.7)을 닫는 코드(#47)가 이 함수를 채웁니다. 그 전에는 0입니다.
 - **지운 설계.** 2026-10-04 초안의 런타임 홈 `tokens/<kernel_id>.json`(같은 계정의 모든 매니저가 함께 읽고 쓰는 파일)과 `tokens/<kernel_id>.lock`은 지웁니다.
