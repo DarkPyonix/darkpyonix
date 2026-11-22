@@ -354,3 +354,32 @@ def test_fr_k10_revoking_a_token_closes_that_shares_adopted_streams(kernel):
     client.request("run", {"mode": "all"})
     assert b"event: run.finished" in h.read_until(other, b"event: run.finished", rest)
     other.close()
+
+
+def test_fr_s4_sse_presence_heartbeat_survives_a_steady_event_stream(monkeypatch):
+    """A busy SSE stream still renews its presence (PROTOCOL §3.7.3a, §3.7.5)."""
+    from darkpyonix import _streams
+    monkeypatch.setattr(_streams, "PRESENCE_HEARTBEAT", 0.3)
+    monkeypatch.setattr(_streams, "POLL", 0.2)
+    beats = []
+    log = EventLog()
+    hub = _streams.StreamHub(KID, log, {"presence.update": lambda params: beats.append(time.monotonic())})
+    client, server_side = h.tcp_pair()
+    try:
+        hub.adopt(server_side, "events", h.http_get("/api/kernels/%s/events" % KID),
+                  label(client_id="dev_aaaaaaaa"))
+        h.read_head(client)
+        client.settimeout(0.05)
+        start = time.monotonic()
+        while time.monotonic() - start < 2.0:      # an event every 20 ms: the queue never idles
+            log.append("kernel.status", {"status": "busy"})
+            try:
+                client.recv(65536)
+            except socket.timeout:
+                pass
+            time.sleep(0.02)
+        assert beats and beats[0] - start < 0.3, "no presence on connect"
+        assert len(beats) >= 4, "presence starved by the event stream: %d beats" % len(beats)
+    finally:
+        hub.stop()
+        client.close()

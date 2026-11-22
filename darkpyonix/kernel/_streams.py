@@ -279,10 +279,16 @@ class StreamHub:
         history = "history" in st.caps
         now = time.monotonic()
         next_ka = now + KEEPALIVE
-        next_presence = now
+        next_presence = now          # join at once, then renew on time even while events flow
         while not st.closed:
+            now = time.monotonic()
+            if now >= next_presence:
+                if not self._peer_open(st):
+                    return
+                self._heartbeat_presence(st)
+                next_presence = now + PRESENCE_HEARTBEAT
             try:
-                item = st.q.get(timeout=POLL)
+                item = st.q.get(timeout=max(0.0, min(POLL, next_presence - now)))
             except queue.Empty:
                 item = None
             if item is _STOP:
@@ -302,9 +308,6 @@ class StreamHub:
             if not self._peer_open(st):
                 return
             now = time.monotonic()
-            if now >= next_presence:
-                self._heartbeat_presence(st)
-                next_presence = now + PRESENCE_HEARTBEAT
             if now >= next_ka:
                 if not self._send(st, b": keepalive\n\n"):
                     return
