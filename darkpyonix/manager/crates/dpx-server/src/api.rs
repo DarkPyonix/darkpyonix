@@ -54,7 +54,7 @@ const OP_LIST_KERNELS: &[u16] = &[200, 400, 401, 403, 500];
 const OP_START_KERNEL: &[u16] = &[200, 201, 400, 401, 403, 500, 504];
 const OP_GET_KERNEL: &[u16] = &[200, 401, 403, 404, 500, 502];
 const OP_SHUTDOWN: &[u16] = &[202, 400, 401, 403, 404, 500, 502];
-const OP_INTERRUPT: &[u16] = &[200, 401, 403, 404, 500, 502];
+const OP_INTERRUPT: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_RESTART: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_NAMESPACE: &[u16] = &[200, 400, 401, 403, 404, 500, 502];
 const OP_KERNEL_DOCUMENT: &[u16] = &[200, 401, 403, 404, 500, 502];
@@ -805,17 +805,12 @@ pub async fn get_run(
     State(st): St,
     Extension(p): Extension<Principal>,
     Path((kid, run_ref)): Path<(String, String)>,
-    headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let r = async {
         check_id(&p, &kid)?;
         require(&p, Capability::History)?;
         check_run_ref(&run_ref)?;
-        if st.backend.supports_handoff() {
-            let plan = plan_handoff(&st, &p, HandoffKind::Wait, &kid, Some(run_ref.as_str()), &uri, &headers).await?;
-            return crate::handoff::pump_response(&st, plan, &uri, &headers, None).await;
-        }
         let summary = match query(&uri)?.get("format").map(String::as_str) {
             None | Some("ipynb") => false,
             Some("summary") => true,
@@ -1807,6 +1802,7 @@ pub async fn wait_run(
     State(st): St,
     Extension(p): Extension<Principal>,
     Path((kid, run_ref)): Path<(String, String)>,
+    headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let r = async {
@@ -1822,6 +1818,12 @@ pub async fn wait_run(
                 .map_err(|_| ApiError::invalid("timeout: expected an integer number of seconds"))?
                 .clamp(1, WAIT_MAX),
         };
+        if st.backend.supports_handoff() {
+            // FR-M6: the kernel answers the wait. Plain connections were handed off before
+            // routing; this one (TLS, HTTP/2, tunnel) is pumped and holds no idle timer.
+            let plan = plan_handoff(&st, &p, HandoffKind::Wait, &kid, Some(run_ref.as_str()), &uri, &headers).await?;
+            return crate::handoff::pump_response(&st, plan, &uri, &headers, None).await;
+        }
         visible(&st, &p, &kid).await?;
         // The backend allows this request `timeout` plus a margin (not its usual 30 s).
         let res = call(&st, &kid, "runs.wait", json!({ "run_id": run_ref, "timeout": timeout })).await?;
@@ -1844,7 +1846,8 @@ pub async fn wait_run(
                 (
                     json!(poll_seq + 1),
                     json!({
-                        "enabled": true,
+                        // The poll after `POLL_MAX` is refused (429): do not ask for it.
+                        "enabled": poll_seq < POLL_MAX,
                         "next_poll_url": repoll,
                         "recommended_delay": POLL_DELAY,
                         "max_polls": POLL_MAX,
