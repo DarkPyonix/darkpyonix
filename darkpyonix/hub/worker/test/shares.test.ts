@@ -46,7 +46,10 @@ describe("shares", () => {
     const page = await call(deps, "GET", "/s/s_00000000000000cc");
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toContain("text/html");
-    expect(await page.text()).toContain("s_00000000000000cc");
+    const html = await page.text();
+    expect(html).toContain("s_00000000000000cc");
+    // GET /shares/{share_id} has no relay_url since the hub runs no relay (FR-H3, #129).
+    expect(html).not.toContain("relay");
     expect((await call(deps, "GET", "/s/s_00000000000000dd")).status).toBe(404);
     const ash = await call(deps, "GET", "/ash/");
     expect(ash.status).toBe(200);
