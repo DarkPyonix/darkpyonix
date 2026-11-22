@@ -231,6 +231,11 @@ class Kernel(object):
         if hard:
             _log(sys.stderr, "hard restart")
             cmd = bootstrap_command(sys.executable, self.path)
+            if os.name == "nt":
+                # MSVC _wexecv joins argv with spaces and does not quote: quote each argument
+                # so the multi-line -c bootstrap and paths with spaces arrive whole (FR-K7).
+                import subprocess
+                os.execv(cmd[0], [subprocess.list2cmdline([a]) for a in cmd])
             os.execv(cmd[0], cmd)
         return 0
 
