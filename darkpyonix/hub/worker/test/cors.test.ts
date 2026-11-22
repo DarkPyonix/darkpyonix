@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { call, cookieValue, makeDeps, signIn } from "./helpers";
+import { call, cookieValue, makeDeps, newDevice, signIn } from "./helpers";
 
 describe("FR-H13", () => {
   it("test_fr_h13_cors_allows_only_the_front", async () => {
@@ -34,9 +34,28 @@ describe("FR-H13", () => {
     expect(cookieValue(done, "__Host-dp_session")).toBeTruthy();
   });
   it("test_fr_h13_callback_returns_to_the_front", async () => {
-    for (const [input, expected] of [["/link?code=x#secret", "/link?code=x"], ["//evil", "/"], ["/\\evil", "/"], ["https://evil", "/"]]) {
+    for (const [input, expected] of [["/n/x?v=1#secret", "/n/x?v=1"], ["/linked", "/linked"], ["//evil", "/"], ["/\\evil", "/"], ["https://evil", "/"]]) {
       expect((await login(input)).done.headers.get("location")).toBe(`https://darkpyonix.dev${expected}`);
     }
+  });
+  it("test_fr_h13_deprecated_link_page_can_approve_from_the_api_origin", async () => {
+    // Until the FR-H12 front serves /link, the Worker's own /link page is where a person
+    // approves a device: sign-in comes back to it, and its POST carries the API's origin.
+    for (const [input, expected] of [["/link?code=BCDF-GHJK#x", "/link?code=BCDF-GHJK"], ["/link", "/link"]]) {
+      expect((await login(input)).done.headers.get("location")).toBe(`https://api.darkpyonix.dev${expected}`);
+    }
+    const deps = makeDeps(); const cookie = await signIn(deps, { id: 133, login: "linker" });
+    const device = await newDevice();
+    const started = await call(deps, "POST", "/device-links", { json: { endpoint_id: device.endpointId, name: "box", role: "computer" } });
+    expect(started.status).toBe(201);
+    const code = ((await started.json()) as { user_code: string }).user_code;
+    const api = "https://api.darkpyonix.dev";
+    expect((await call(deps, "POST", `/link-codes/${code}`, { cookie, origin: api, json: { approve: true } })).status).toBe(204);
+    // Only that one write: every other cookie write from the API origin is still refused.
+    expect((await call(deps, "POST", "/auth/logout", { cookie, origin: api })).status).toBe(403);
+    expect((await call(deps, "POST", "/notebooks", { cookie, origin: api, json: { title: "n" } })).status).toBe(403);
+    // And the API origin gets no CORS headers.
+    expect((await call(deps, "GET", "/config", { origin: api })).headers.get("access-control-allow-origin")).toBe(null);
   });
   it("test_fr_h13_cookie_writes_from_user_subdomains_are_refused", async () => {
     const deps = makeDeps(); const cookie = await signIn(deps, { id: 132, login: "cors" });

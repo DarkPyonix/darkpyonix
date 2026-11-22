@@ -14,6 +14,7 @@ import {
   getCookie,
   noContent,
   redirect,
+  returnsToDeprecatedLinkPage,
   setCookie,
 } from "./http";
 import { base64url, hashToken, newToken, nowSecs, randomBytes, randomHex, safeReturnTo, sha256 } from "./util";
@@ -190,7 +191,9 @@ export async function callback(request: Request, env: Env, deps: Deps): Promise<
   )
     .bind(await hashToken(session), accountId, now, now + SESSION_TTL_SECS)
     .run();
-  return redirect(`${env.FRONT_URL}${safeReturnTo(tx.return_to)}`, [
+  const back = safeReturnTo(tx.return_to);
+  const base = returnsToDeprecatedLinkPage(back) ? env.API_URL : env.FRONT_URL;
+  return redirect(`${base}${back}`, [
     ["set-cookie", setCookie(SESSION_COOKIE, session, SESSION_TTL_SECS)],
     ["set-cookie", clearCookie(STATE_COOKIE)],
   ]);
