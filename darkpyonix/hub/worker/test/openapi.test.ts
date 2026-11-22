@@ -28,7 +28,10 @@ function fill(path: string): string {
     .replace("{share_id}", "s_0123456789abcdef")
     .replace("{name}", "example-name")
     .replace("{link_id}", `l_${"0".repeat(32)}`)
-    .replace("{user_code}", "BCDF-GHJK");
+    .replace("{user_code}", "BCDF-GHJK")
+    .replace("{notebook_id}", `n_${"0".repeat(32)}`)
+    .replace("{version}", "1")
+    .replace("{github_login}", "octocat");
 }
 
 describe("hub.openapi.yaml", () => {

@@ -95,6 +95,21 @@ describe("rate limits", () => {
   });
 });
 
+describe("anonymous list reads", () => {
+  it("test_fr_h19_anonymous_public_list_is_rate_limited_per_address", async () => {
+    const deps = makeDeps(), login = `user${crypto.randomUUID().slice(0, 8)}`;
+    const cookie = await signIn(deps, { id: Math.floor(Math.random() * 1e9), login });
+    expect((await call(deps, "POST", "/notebooks", { cookie, json: { title: "Public", visibility: "public" } })).status).toBe(201);
+    const headers = { "cf-connecting-ip": `lister-${crypto.randomUUID()}` };
+    const reads: number[] = [];
+    for (let i = 0; i < 301; i++) reads.push((await call(deps, "GET", `/users/${login}/notebooks`, { headers })).status);
+    expect(reads.slice(0, 300).every(x => x === 200)).toBe(true);
+    expect(reads[300]).toBe(429);
+    // signed-in reads are not anonymous reads
+    expect((await call(deps, "GET", `/users/${login}/notebooks`, { headers, cookie })).status).toBe(200);
+  });
+});
+
 describe("report and takedown", () => {
   const report = (s: S, reason: unknown, extra: { cookie?: string; headers?: Record<string, string> } = {}) => call(s.deps, "POST", `${s.path}/report`, { json: { reason }, ...extra });
   const takedown = (s: S, method: string, token?: string) => call(s.deps, method, `/admin/notebooks/${s.id}/takedown`, { token, env: operator });
