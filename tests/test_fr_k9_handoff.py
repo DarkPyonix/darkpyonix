@@ -156,6 +156,24 @@ def test_fr_k9_label_without_history_filters_outputs(kernel):
     full.close()
 
 
+def test_fr_k9_label_without_read_blanks_cell_source_on_sse(kernel):
+    info, client = kernel
+    blind = handed(info, "events", events_path(info), label(["history"]))
+    full = handed(info, "events", events_path(info), label())
+    _, rb = h.read_head(blind)
+    _, rf = h.read_head(full)
+    h.edit_reload_and_conflict(info, client)
+    seen_full = h.read_until(full, b"event: doc.conflict", rf, timeout=15)
+    seen_blind = h.read_until(blind, b"event: doc.conflict", rb, timeout=15)
+    for word in (b"CREATEDSECRET", b"LOCALSECRET", b"DISKSECRET", b"RELOADSECRET"):
+        assert word in seen_full, word
+        assert word not in seen_blind, word
+    for kind in (b"event: doc.cell.created", b"event: doc.cell.updated", b"event: doc.reloaded"):
+        assert kind in seen_blind, kind
+    blind.close()
+    full.close()
+
+
 def test_fr_k9_last_event_id_replays_from_the_kernel_ring(kernel):
     info, client = kernel
     client.request("run", {"mode": "all"})

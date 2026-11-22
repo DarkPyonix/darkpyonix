@@ -315,6 +315,8 @@ class StreamHub:
             history = "history" in st.caps
         if not history and event.get("type") in OUTPUT_EVENTS:
             return True  # FR-K9: no history capability, no outputs
+        if "read" not in st.caps:
+            event = _wsync.blank_sources(event)  # FR-K9: no read capability, no cell code
         return self._send(st, sse_frame(event))
 
     # ------------------------------------------------------------ run-wait long poll
