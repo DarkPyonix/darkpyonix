@@ -117,3 +117,17 @@ if __name__ == "__main__":
     # Like the Rust manager, drop our copy; only SIGKILL of this process remains to test.
     conn.close()
     os.read(0, 1)
+
+
+def edit_reload_and_conflict(info, client):
+    """Make the kernel emit doc.cell.*, doc.reloaded and doc.conflict events with code in them."""
+    me = {"client_id": "dev_cccccccc", "user": "carol", "nickname": "rest", "capabilities": ["read", "history", "execute", "edit", "manage"]}
+    client.request("doc.cell.create", {"client": me, "source": "CREATEDSECRET = 0\n"})
+    snap = client.request("doc.snapshot", {})
+    cell = [c for c in snap["cells"] if c["type"] == "code"][0]
+    client.request("doc.lock", {"client": me, "cell_id": cell["cell_id"]})
+    client.request("doc.cell.update", {"client": me, "cell_id": cell["cell_id"],
+                                       "base_version": cell["version"], "source": "LOCALSECRET = 1\n"})
+    time.sleep(1.5)  # past the save debounce, so the next write is an outside edit
+    with open(info["path"], "w") as f:
+        f.write("# %% [code]\nDISKSECRET = 2\n\n# %% [code]\nRELOADSECRET = 3\n")

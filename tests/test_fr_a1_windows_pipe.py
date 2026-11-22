@@ -243,11 +243,12 @@ def test_pr_2_handshake_times_out_on_a_windows_pipe(pipe_server, monkeypatch):
 
 
 @windows_only
-def test_pr_5_adopt_over_a_windows_pipe_is_bad_request(pipe_server):
+def test_pr_5_adopt_over_a_windows_pipe_needs_a_valid_share(pipe_server):
+    """``fd`` has no meaning on a pipe; ``share`` and ``pump`` need the shared-socket bytes."""
     c = KernelClient(pipe_server.address, KID)
     c.connect()
     try:
-        for transport in ("fd", "pump"):
+        for transport in ("fd", "share", "pump"):
             with pytest.raises(p.DKPError) as e:
                 c.request("adopt", {"kind": "http", "transport": transport, "request": ""})
             assert e.value.code == "bad_request"

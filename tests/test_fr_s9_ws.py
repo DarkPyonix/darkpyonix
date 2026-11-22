@@ -340,6 +340,31 @@ def test_fr_s9_ws_without_read_gets_no_code(kernel):
     blind.close()
 
 
+def test_fr_s9_ws_without_read_gets_no_code_in_reload_and_conflict(kernel):
+    info, client = kernel
+    blind = connect(info, caps=["history"], client_id="dev_bbbbbbbb")
+    full = connect(info, client_id="dev_aaaaaaaa")
+    blind.until("users_focus_data")
+    full.until("users_focus_data")
+    h.edit_reload_and_conflict(info, client)
+
+    def until_conflict(ws):
+        seen = []
+        while not (seen and seen[-1].get("type") == "event"
+                   and seen[-1]["event"].get("type") == "doc.conflict"):
+            seen.append(ws.msg(timeout=15))
+        return json.dumps(seen)
+
+    seen_full = until_conflict(full)
+    seen_blind = until_conflict(blind)
+    for word in ("LOCALSECRET", "DISKSECRET", "RELOADSECRET"):
+        assert word in seen_full, word
+        assert word not in seen_blind, word
+    assert "doc.reloaded" in seen_blind
+    blind.close()
+    full.close()
+
+
 def test_fr_s9_ws_typing_needs_edit(kernel):
     info, client = kernel
     a = connect(info, caps=["read", "execute"])
