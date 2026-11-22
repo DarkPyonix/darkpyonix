@@ -22,8 +22,9 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from darkpyonix import _hostctx as hostctx
 from darkpyonix._protocol import STREAM_COALESCE_SECONDS
 
 _POLL = 0.02        # router poll (and stream flush) interval while a cell is active
@@ -93,29 +94,47 @@ class OutputRouter(object):
         self._q.append(item)
         self._wake.set()
 
-    def write_stream(self, name: str, text: str) -> None:
+    def write_stream(self, name: str, text: str, cell_index: Optional[int] = None) -> None:
         if text:
-            self._q.append(("s", name, text))
+            if cell_index is None:
+                cell_index = hostctx.current_cell.get()
+            self._q.append(("s", name, text, cell_index))
             if not self.active:
                 self._wake.set()
 
     def write_display(self, bundle: Dict[str, Any], kind: str = "display_data",
                       execution_count: Optional[int] = None,
-                      metadata: Optional[Dict[str, Any]] = None, record: bool = True) -> None:
+                      metadata: Optional[Dict[str, Any]] = None, record: bool = True,
+                      cell_index: Optional[int] = None) -> None:
         output = {"output_type": kind, "data": dict(bundle), "metadata": dict(metadata or {})}
         if kind == "execute_result":
             output["execution_count"] = execution_count
+        if cell_index is None:
+            cell_index = hostctx.current_cell.get()
         self.flush_streams()        # keep print() text written before this output ahead of it
-        self._push(("o", output, record))
+        self._push(("o", output, record, cell_index))
 
-    def write_output(self, output: Dict[str, Any], record: bool = True) -> None:
+    def write_output(self, output: Dict[str, Any], record: bool = True,
+                     cell_index: Optional[int] = None) -> None:
         """Any nbformat 4 output (used for ``error``)."""
+        if cell_index is None:
+            cell_index = hostctx.current_cell.get()
         self.flush_streams()
-        self._push(("o", dict(output), record))
+        self._push(("o", dict(output), record, cell_index))
 
-    def clear(self, wait: bool = False) -> None:
+    def clear(self, wait: bool = False, cell_index: Optional[int] = None) -> None:
+        if cell_index is None:
+            cell_index = hostctx.current_cell.get()
         self.flush_streams()
-        self._push(("c", bool(wait)))
+        self._push(("c", bool(wait), cell_index))
+
+    def register_cell(self, run: Any, cell: Any, doc_cell_id: Optional[str] = None) -> None:
+        """Keep ``cell`` open as an explicit routing target (parallel member cells, FR-X9)."""
+        self._push(("reg", run, cell, doc_cell_id))
+
+    def unregister_cell(self, cell_index: int) -> None:
+        """Flush and close an explicit routing target."""
+        self._push(("unreg", cell_index))
 
     def begin_cell(self, run: Any, cell: Any, doc_cell_id: Optional[str] = None) -> None:
         """Route outputs to ``cell`` of ``run``; events name it by ``index`` and by the shared
@@ -143,21 +162,32 @@ class OutputRouter(object):
         q = self._q
         run = cell = None
         cell_id = None              # type: Optional[str]  # the shared document's id of ``cell``
-        clear_wait = False
-        pend_name = None            # type: Optional[str]
-        pend = []                   # type: list
-        pend_since = 0.0
-        dirty = False
+        targets = {}                # type: Dict[int, Tuple[Any, Any, Optional[str]]]
+        clear_waits = {}            # type: Dict[int, bool]
+        pending = {}                # type: Dict[Tuple[Optional[int], str], Tuple[float, List[str]]]
+        dirty_run = None            # type: Any
         stopping = False
 
-        def flush_pending():
-            nonlocal pend_name, pend, dirty, clear_wait
-            if pend_name is None:
+        def resolve_target(target_idx: Optional[int]) -> Tuple[Any, Any, Optional[str]]:
+            if target_idx is None:
+                return None, None, None
+            if cell is not None and cell.index == target_idx:
+                return run, cell, cell_id
+            found = targets.get(target_idx)
+            if found is not None:
+                return found
+            return None, None, None
+
+        def flush_key(key: Tuple[Optional[int], str]) -> None:
+            nonlocal dirty_run
+            entry = pending.pop(key, None)
+            if entry is None:
                 return
-            text = "".join(pend)
-            name = pend_name
-            pend_name, pend = None, []
-            if cell is None:
+            _, chunks = entry
+            text = "".join(chunks)
+            target_idx, name = key
+            t_run, t_cell, t_cell_id = resolve_target(target_idx)
+            if t_cell is None:
                 write = self._passthrough.get(name)
                 if write is not None:
                     try:
@@ -165,25 +195,34 @@ class OutputRouter(object):
                     except Exception:
                         pass
                 return
-            outputs = cell.outputs
-            if clear_wait:
+            outputs = t_cell.outputs
+            if clear_waits.get(t_cell.index):
                 del outputs[:]
-                clear_wait = False
+                clear_waits[t_cell.index] = False
             last = outputs[-1] if outputs else None
             if last is not None and last.get("output_type") == "stream" and last.get("name") == name:
                 last["text"] = last["text"] + text
             else:
                 outputs.append({"output_type": "stream", "name": name, "text": text})
-            dirty = True
+            dirty_run = t_run
             self._safe_emit("output", {
-                "run_id": run.run_id, "index": cell.index, "cell_id": cell_id,
+                "run_id": t_run.run_id, "index": t_cell.index, "cell_id": t_cell_id,
                 "output": {"output_type": "stream", "name": name, "text": text},
             })
 
+        def flush_for_cell(target_idx: Optional[int]) -> None:
+            for key in [k for k in pending if k[0] == target_idx]:
+                flush_key(key)
+
+        def flush_all_pending() -> None:
+            for key in list(pending.keys()):
+                flush_key(key)
+
         while not stopping:
             if not q:
-                if pend_name is not None:
-                    timeout = max(0.0, pend_since + self._coalesce - time.monotonic())
+                if pending:
+                    earliest = min(since for since, _ in pending.values())
+                    timeout = max(0.0, earliest + self._coalesce - time.monotonic())
                     timeout = min(timeout, _POLL) if self.active else timeout
                 elif self.active:
                     timeout = _POLL
@@ -199,57 +238,91 @@ class OutputRouter(object):
                 item = q.popleft()
                 tag = item[0]
                 if tag == "s":
-                    name = item[1]
-                    if pend_name != name:
-                        flush_pending()
-                        pend_name = name
-                        pend_since = time.monotonic()
-                    pend.append(item[2])
+                    name, text, target_idx = item[1], item[2], item[3]
+                    tkey = target_idx if target_idx is not None else (
+                        cell.index if cell is not None else None
+                    )
+                    for other_key in [k for k in pending if k[0] == tkey and k[1] != name]:
+                        flush_key(other_key)
+                    pkey = (tkey, name)
+                    entry = pending.get(pkey)
+                    if entry is None:
+                        pending[pkey] = (time.monotonic(), [text])
+                    else:
+                        entry[1].append(text)
                     continue
-                flush_pending()
                 if tag == "o":
-                    output, record = item[1], item[2]
-                    if cell is None:
+                    output, record, target_idx = item[1], item[2], item[3]
+                    tkey = target_idx if target_idx is not None else (
+                        cell.index if cell is not None else None
+                    )
+                    flush_for_cell(tkey)
+                    t_run, t_cell, t_cell_id = resolve_target(tkey)
+                    if t_cell is None:
                         continue
                     if record:
-                        if clear_wait:
-                            del cell.outputs[:]
-                            clear_wait = False
-                        cell.outputs.append(output)
-                        dirty = True
-                    self._safe_emit("output", {"run_id": run.run_id, "index": cell.index,
-                                               "cell_id": cell_id, "output": output})
+                        if clear_waits.get(t_cell.index):
+                            del t_cell.outputs[:]
+                            clear_waits[t_cell.index] = False
+                        t_cell.outputs.append(output)
+                        dirty_run = t_run
+                    self._safe_emit("output", {"run_id": t_run.run_id, "index": t_cell.index,
+                                               "cell_id": t_cell_id, "output": output})
                 elif tag == "c":
-                    if cell is None:
+                    wait_flag, target_idx = item[1], item[2]
+                    tkey = target_idx if target_idx is not None else (
+                        cell.index if cell is not None else None
+                    )
+                    flush_for_cell(tkey)
+                    t_run, t_cell, t_cell_id = resolve_target(tkey)
+                    if t_cell is None:
                         continue
-                    if item[1]:
-                        clear_wait = True
+                    if wait_flag:
+                        clear_waits[t_cell.index] = True
                     else:
-                        del cell.outputs[:]
-                        clear_wait = False
-                        dirty = True
-                    self._safe_emit("output.clear", {"run_id": run.run_id, "index": cell.index,
-                                                     "cell_id": cell_id, "wait": item[1]})
+                        del t_cell.outputs[:]
+                        clear_waits[t_cell.index] = False
+                        dirty_run = t_run
+                    self._safe_emit("output.clear", {"run_id": t_run.run_id, "index": t_cell.index,
+                                                     "cell_id": t_cell_id, "wait": wait_flag})
+                elif tag == "reg":
+                    reg_run, reg_cell, reg_cell_id = item[1], item[2], item[3]
+                    targets[reg_cell.index] = (reg_run, reg_cell, reg_cell_id)
+                    clear_waits.pop(reg_cell.index, None)
+                elif tag == "unreg":
+                    unreg_idx = item[1]
+                    flush_for_cell(unreg_idx)
+                    if dirty_run is not None:
+                        self._update(dirty_run)
+                        dirty_run = None
+                    targets.pop(unreg_idx, None)
+                    clear_waits.pop(unreg_idx, None)
                 elif tag == "cell":
-                    if dirty and run is not None:
-                        self._update(run)
-                        dirty = False
+                    flush_all_pending()
+                    if dirty_run is not None:
+                        self._update(dirty_run)
+                        dirty_run = None
                     run, cell, cell_id = item[1], item[2], item[3]
-                    clear_wait = False
+                    if cell is not None:
+                        clear_waits.pop(cell.index, None)
                 elif tag == "b":
-                    if dirty and run is not None:
-                        self._update(run)
-                        dirty = False
+                    flush_all_pending()
+                    if dirty_run is not None:
+                        self._update(dirty_run)
+                        dirty_run = None
                     item[1].set()
                 elif tag == "stop":
+                    flush_all_pending()
                     stopping = True
                     break
-            if pend_name is not None and (stopping or
-                                          time.monotonic() - pend_since >= self._coalesce):
-                flush_pending()
-            if dirty and run is not None:
-                self._update(run)
-                dirty = False
+            if pending:
+                now = time.monotonic()
+                for key, (since, _) in list(pending.items()):
+                    if stopping or now - since >= self._coalesce:
+                        flush_key(key)
+            if dirty_run is not None:
+                self._update(dirty_run)
+                dirty_run = None
 
     def _safe_emit(self, type_: str, data: Dict[str, Any]) -> None:
         try:
@@ -341,6 +414,62 @@ def StreamCapture(name: str, router: OutputRouter, fallback: Any, fd: Optional[i
                               write_through=False)
     router.add_flushable(stream)
     return stream
+
+
+class DirectStream(object):
+    """Unbuffered text stream used during parallel groups so every write tags ``current_cell``."""
+
+    encoding = "utf-8"
+    errors = "replace"
+    closed = False
+
+    def __init__(self, name: str, router: OutputRouter, fallback: Any,
+                 fd: Optional[int] = None) -> None:
+        self._name = name
+        self._router = router
+        self._fallback = fallback
+        self._fd = fd
+
+    def writable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return False
+
+    def seekable(self) -> bool:
+        return False
+
+    def isatty(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def fileno(self) -> int:
+        if self._fd is None:
+            raise io.UnsupportedOperation("fileno")
+        return self._fd
+
+    def write(self, text: str) -> int:
+        if not isinstance(text, str):
+            raise TypeError("write() argument must be str, not %s" % type(text).__name__)
+        if text:
+            if self._router.active:
+                self._router.write_stream(self._name, text)
+            elif self._fallback is not None:
+                try:
+                    self._fallback.write(text)
+                    self._fallback.flush()
+                except Exception:
+                    pass
+        return len(text)
+
+    def writelines(self, lines: Any) -> None:
+        for line in lines:
+            self.write(line)
 
 
 class FdCapture(object):

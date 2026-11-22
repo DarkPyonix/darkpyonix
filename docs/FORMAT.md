@@ -43,14 +43,14 @@ import torch
 
 | 키 | 의미 | 예 |
 |---|---|---|
-| `width` | 가로 배치에서 셀 너비(CSS grid 트랙) | `1fr`, `320px` |
-| `layout` | 이 셀부터 시작하는 배치 | `horizontal`, `vertical`, `grid` |
+| `width` | 가로 배치에서 셀 너비(CSS grid 트랙, 기본 `1fr`, 세로 배치에서는 무시) | `1fr`, `2fr`, `320px` |
+| `layout` | 이 셀부터 시작하는 배치(`horizontal`은 새 가로 줄 시작, `vertical`은 가로 줄 닫음; `grid`는 원문 보존 후 `horizontal`로 처리, 모르는 값은 보존 후 `vertical`로 처리; SPEC FR-F7) | `horizontal`, `vertical` |
 | `collapsed` | 처음에 접어서 표시 | `true` |
 | `auto_run` | 커널을 연결하면 자동 실행 | `true` |
 | `id` | 클라이언트가 붙이는 안정 ID(선택) | `"c-3f2a"` |
 | `markup` | 마크다운 셀의 마크업 언어(기본 `markdown`, 확장 `quarkdown`, 이슈 #3) | `quarkdown` |
 
-모르는 키는 보존하고 무시합니다.
+모르는 키는 보존하고 무시합니다. 파서는 레이아웃(`row`, `width`)과 병렬 묶음(`group`)을 계산 필드로 제공하며 파일에 직렬화하지 않습니다(SPEC FR-F7, FR-X7).
 
 ### 2.4 셀 식별
 
@@ -72,21 +72,24 @@ import torch
 | `argparse` | 정의됨 | `darkpyonix.params.get(...)` 호출 실행. 값은 실행 요청의 `params` 또는 명령줄 인자에서 옴 | 파라미터 폼 |
 | `binding` | 정의됨 | `@darkpyonix.binding`이 붙은 정의를 격리 네임스페이스에서 다시 평가(이슈 #6) | 코드 셀 |
 | `shell` | 정의됨 | `darkpyonix.run_command("""…""")` 실행. 출력은 스트림으로 냄 | 터미널 출력 |
-| `parallel` | 예약 | 다음 셀들을 병렬로 실행하는 묶음의 시작(이슈 #7) | 가로 배치 |
-| `concurrent` | 예약 | 병렬 묶음을 실행하는 셀. 예시 파일의 `concorrunt`는 이 타입의 오타로 보고 별칭으로 받음 | |
-| `cinterop` / `cppinterop` / `rustinterop` | 예약 | C(cython) / C++(cppyy) / Rust(maturin·PyO3) 코드를 즉시 컴파일해 파이썬 네임스페이스에 등록(이슈 #5) | 코드 셀 |
-| `sql`, `toml`, `yaml`, `json` | 예약 | 평가 결과를 파이썬 네임스페이스에 바로 노출(이슈 #5) | |
-| (모르는 타입) | — | `code`처럼 실행하고 원래 타입을 보존 | 코드 셀 |
+| `parallel` | 정의됨 | 다음 셀들을 병렬로 실행하는 묶음의 시작(SPEC FR-X7~X11, 이슈 #7) | 가로 배치 |
+| `concurrent` | 정의됨 | 병렬 묶음을 닫고 `darkpyonix.run_parallel(...)`로 실행하는 셀(SPEC FR-X7~X11). 예시 파일 철자 `concorrunt`와 `concurrent`를 모두 같은 의미로 받으며, 오너 최종 철자 결정 전까지 새 직렬화는 `concorrunt`를 씀(`[provisional]`, 라운드트립은 `raw_type` 보존) | |
+| `sql`, `toml`, `yaml`, `json` | 정의됨 | `darkpyonix.sql/toml/yaml/json` 평가 결과를 반환하고 호출부 전역 `target`(기본 `_`)에 노출(SPEC FR-F12·FR-F13, 이슈 #5) | 코드 셀 |
+| `cinterop` / `cppinterop` / `rustinterop` | 예약 (1.0 이후) | C(cython) / C++(cppyy) / Rust(maturin·PyO3) interop는 1.0 이후로 미룸(SPEC FR-F8~F11 `Draft`, INTENT D25, 이슈 #5) | 코드 셀 |
+| (모르는 타입) | - | `code`처럼 실행하고 원래 타입을 보존 | 코드 셀 |
 
-"예약"은 문법상 받아들이고 보존하지만 v1 커널이 특별한 의미를 주지 않는다는 뜻입니다. 예약 타입의 본문도 유효한 파이썬이므로 `code`처럼 실행됩니다. `darkpyonix.run_cinterop()` 같은 API는 v1에서 `NotImplementedError`를 냅니다.
+"예약 (1.0 이후)"은 문법상 받아들이고 보존하지만 v1 커널이 특별한 의미를 주지 않는다는 뜻입니다. 예약 타입의 본문도 유효한 파이썬이므로 `code`처럼 실행됩니다. `darkpyonix.run_cinterop()`/`run_cppinterop()`/`run_rustinterop()`는 v1에서 `NotImplementedError`를 냅니다(1.0 이후 구현 예정, INTENT D25).
 
-예약 타입(`parallel`, `concurrent`, interop, 데이터 형식)과 `layout`의 실행 의미·계산 규칙은 SPEC FR-X7~X12, FR-F7~F13(`Draft`)과 [proposals/cells-parallel-interop.md](proposals/cells-parallel-interop.md)에 있습니다. 합의(`Agreed`)되면 이 표와 §2.3을 그 내용으로 바꿉니다.
+`parallel`/`concurrent`, `sql`/`toml`/`yaml`/`json`, `layout`의 실행 의미와 계산 규칙은 2026-11-22 오너 결정(INTENT D25)으로 확정되었습니다(SPEC FR-F7, FR-F12~F13, FR-X7~X11 `Agreed`). 참고: `concorrunt`/`concurrent` 철자 선택은 오너 결정 대기(`[provisional]`)이며 테스트는 두 철자를 모두 검증합니다.
 
-### 3.1 레이아웃과 병렬은 다릅니다 (이슈 #7)
+### 3.1 레이아웃과 병렬은 다릅니다 (이슈 #7, INTENT D25)
+
+2026-11-22 오너 결정으로 참조 예시 파일([`examples/darkpyonix_format.py`](examples/darkpyonix_format.py))을 기준으로 확정되었습니다(SPEC FR-F7, FR-X7~X11).
 
 - `layout: horizontal`은 **화면 배치**입니다. 셀은 여전히 차례대로 실행되고 실행 버튼도 셀마다 따로 있습니다.
-- `parallel`은 **실행 의미**입니다. 묶인 셀이 동시에 실행되고, 화면에서는 보통 가로로 놓입니다.
-- 가로로 놓인 셀은 병렬일 수도, 단순 가로 배치일 수도 있습니다. 그래서 둘을 다른 키로 둡니다. grid를 여닫는 태그를 둘지는 이슈 #7에서 결정합니다(PROJECT Q7).
+- `[grid]`/`[/grid]` 여닫는 태그는 두지 않습니다. `# @layout: horizontal|vertical` 전환과 `# @width: 1fr`로 가로 줄을 쌓아 grid를 표현합니다(`layout: grid`는 원문을 보존하되 `horizontal`로 계산).
+- `parallel`은 **실행 의미**입니다. `[parallel]`..`[concurrent]`(예시 파일 철자 `concorrunt` 포함) 묶음 안에서 `__co_routines__`에 항목을 모으고 `darkpyonix.run_parallel(*__co_routines__)`로 동시에 실행합니다. 화면에서는 묶인 셀에 `@layout`이 없으면 기본으로 한 가로 줄에 놓입니다.
+- 가로로 놓인 셀은 병렬일 수도, 단순 가로 배치일 수도 있으므로 레이아웃 키와 병렬 셀 타입을 분리해 둡니다.
 
 ### 3.2 마크다운과 확장 마크업
 
@@ -148,7 +151,9 @@ MODEL_HEIGHT = darkpyonix.params.get("model_height", default=50, range=(30, 100,
 | `darkpyonix.run_command(cmd, check=False)` | 출력을 스트림 출력으로 | 표준 출력으로 |
 | `darkpyonix.display(obj)` | `display_data` 출력 | `print(repr(obj))` |
 | `darkpyonix.uv.add/remove`, `darkpyonix.pip.install` | 커널 인터프리터 환경에 설치 | 같음 |
-| `darkpyonix.run_parallel(*aws)` | 코루틴들을 모아 실행 | 같음 |
-| `darkpyonix.run_cinterop/run_cppinterop/run_rustinterop` | `NotImplementedError` (예약) | 같음 |
+| `darkpyonix.run_parallel(*items, fail_fast=False, max_threads=None)` | 메인 스레드 asyncio + 스레드 풀로 동시 실행, 셀별 출력 라우팅, 기본 gather(`ParallelError`), 비-awaitable/비-callable 시 `TypeError`(FR-X8~X11) | 같음(출력 라우팅만 제외) |
+| `darkpyonix.json/toml/yaml(text, target="_")` | 파싱 결과 반환 및 호출부 전역 `target`(기본 `_`) 바인딩. `toml`은 3.11+ `tomllib` / 3.8~3.10 내장 `tomli`(MIT), `yaml`은 설치된 PyYAML(FR-F12) | 같음 |
+| `darkpyonix.sql(query, target="_", params=None, con=None)` | DB-API 2.0 연결(기본 프로세스당 sqlite 메모리 DB) 실행, `SQLResult`(HTML 표 렌더) 반환 및 `target` 바인딩(FR-F13) | 같음 |
+| `darkpyonix.run_cinterop/run_cppinterop/run_rustinterop` | `NotImplementedError` (예약, 1.0 이후, INTENT D25) | 같음 |
 
 런타임 API는 표준 라이브러리만 씁니다. 커널 밖에서 쓰려면 `pip install darkpyonix`로 설치합니다. 커널 안에서는 설치하지 않아도 커널이 경로를 넣어 줍니다(INTENT D3).
