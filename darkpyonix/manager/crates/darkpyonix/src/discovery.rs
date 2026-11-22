@@ -5,7 +5,6 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::client::{Api, CliError};
 
@@ -194,12 +193,6 @@ pub fn resolve_file(file: &Path) -> Result<(PathBuf, String), CliError> {
     Ok((canonical, dpx_kernel::kernel_id_for(file)))
 }
 
-pub fn kernel_id_for(canonical: &str) -> String {
-    let digest = Sha256::digest(canonical.as_bytes());
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    format!("k_{}", &hex[..20])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,14 +245,14 @@ mod tests {
     #[test]
     fn test_pr_kernel_id_is_sha256_prefix_of_canonical_path() {
         // echo -n /home/u/exp/train.py | shasum -a 256
-        assert_eq!(kernel_id_for("/home/u/exp/train.py"), "k_7570bb3a04bd69b917b4");
+        assert_eq!(dpx_kernel::ident::kernel_id_for_canonical("/home/u/exp/train.py"), "k_7570bb3a04bd69b917b4");
         let home = scratch("kid");
         let f = home.join("a.py");
         std::fs::write(&f, "").unwrap();
         std::fs::create_dir_all(home.join("sub")).unwrap();
         let (canon, id) = resolve_file(&home.join("sub/../a.py")).unwrap();
         assert_eq!(canon, std::fs::canonicalize(&f).unwrap());
-        assert_eq!(id, kernel_id_for(&dpx_kernel::canonical_path(&f)));
+        assert_eq!(id, dpx_kernel::ident::kernel_id_for_canonical(&dpx_kernel::canonical_path(&f)));
         assert!(resolve_file(&home.join("missing.py")).is_err());
     }
 
