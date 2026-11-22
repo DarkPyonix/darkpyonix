@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import gc
+import json
 import os
 import signal
 import subprocess
@@ -279,14 +280,24 @@ def test_fr_x10_failure_waits_for_siblings_then_raises():
 
 
 def test_fr_x10_fail_fast_cancels_siblings():
+    """FR-X10: after the first failure the siblings are cancelled or interrupted.
+
+    The bound is on what fail_fast does, from the failure until ``run_parallel`` returns, and
+    it is below the 1 s grace ``_stop_threads`` gives a thread: a worker that only stops when
+    the grace runs out fails it. Start-up is not timed (#157): while the CPU-bound worker
+    holds the GIL, the loop's 10 ms polls take tens to hundreds of milliseconds to see it has
+    started, and that depends on the machine, not on fail_fast.
+    """
     coro_cancelled = False
     thread_interrupted = False
     thread_started = threading.Event()
+    marks = {}
 
     async def fast_fail():
         while not thread_started.is_set():
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.03)
+        marks["fail"] = time.monotonic()
         raise RuntimeError("fast boom")
 
     async def long_coro():
@@ -306,20 +317,73 @@ def test_fr_x10_fail_fast_cancels_siblings():
             while True:
                 n += 1
         except KeyboardInterrupt:
+            marks["interrupted"] = time.monotonic()
             thread_interrupted = True
             raise
 
     t0 = time.monotonic()
     with pytest.raises(ParallelError) as info:
         run_parallel(fast_fail(), long_coro(), long_thread, fail_fast=True)
-    elapsed = time.monotonic() - t0
+    end = time.monotonic()
 
-    assert elapsed < 1.5, "fail_fast took too long: %.2fs" % elapsed
+    phases = "start-up %.3fs, failure to worker interrupt %s, failure to return %.3fs" % (
+        marks["fail"] - t0,
+        "%.3fs" % (marks["interrupted"] - marks["fail"]) if "interrupted" in marks else "never",
+        end - marks["fail"],
+    )
+    assert end - marks["fail"] < 0.9, "fail_fast waited out the thread grace: " + phases
     assert len(info.value.errors) == 1
     assert info.value.errors[0][0] == 0
     assert isinstance(info.value.errors[0][1], RuntimeError)
     assert coro_cancelled is True
     assert thread_interrupted is True
+
+
+def test_fr_x10_fail_fast_interrupts_a_busy_thread_without_waiting_on_imports(python, scratch):
+    """#157: the interrupt must not wait for anything a busy worker slows down.
+
+    A CPU-bound worker holds the GIL, so every system call the main thread makes in the
+    meantime (an import's stat and open calls) waits for a GIL handoff. A long ``sys.path``
+    makes a first-time import do hundreds of them, like a cold CI runner does. Run in a
+    fresh interpreter so nothing has been imported for it.
+    """
+    path = _write(scratch, "parallel_fail_fast_cold.py", '''
+        import asyncio, json, os, sys, tempfile, threading, time
+        empty = tempfile.mkdtemp()
+        sys.path[:0] = [os.path.join(empty, "p%d" % i) for i in range(400)]
+        import darkpyonix
+
+        started = threading.Event()
+        marks = {}
+
+        async def fast_fail():
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.03)
+            marks["fail"] = time.monotonic()
+            raise RuntimeError("boom")
+
+        def busy():
+            started.set()
+            n = 0
+            try:
+                while True:
+                    n += 1
+            except KeyboardInterrupt:
+                marks["interrupted"] = time.monotonic()
+                raise
+
+        try:
+            darkpyonix.run_parallel(fast_fail(), busy, fail_fast=True)
+        except darkpyonix.ParallelError:
+            pass
+        print(json.dumps({"latency": marks["interrupted"] - marks["fail"]}), flush=True)
+        os._exit(0)
+    ''')
+    out = _run(python, path)
+    assert out.returncode == 0, out.stderr
+    latency = json.loads(out.stdout.strip().splitlines()[-1])["latency"]
+    assert latency < 0.05, "the interrupt reached the busy worker after %.3fs" % latency
 
 
 # --------------------------------------------------------------------------- FR-X11
