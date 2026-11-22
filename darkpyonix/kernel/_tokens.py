@@ -23,6 +23,9 @@ from ._protocol import DKPError, now_iso
 from ._runs import runs_dir_for
 
 CAPABILITIES = ("read", "history", "execute", "edit", "manage")
+# The manager asks other kernels about an unknown token only when it has this prefix
+# (SPEC FR-A6, owner decision 2026-11-23).
+TOKEN_PREFIX = "dpk_"
 KINDS = ("initial", "login", "share")
 STORE_NAME = "tokens.json"
 
@@ -103,7 +106,7 @@ class TokenStore(object):
             raise DKPError("bad_request", "label must be a string")
         expires = params.get("expires_at")
         expires_unix = _parse_time(expires) if expires is not None else None
-        token = secrets.token_urlsafe(32)
+        token = TOKEN_PREFIX + secrets.token_urlsafe(32)
         entry = {
             "sha256": _hash(token), "kind": kind, "capabilities": caps,
             "share_id": None, "label": label, "created_at": now_iso(),
