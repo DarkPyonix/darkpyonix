@@ -2458,6 +2458,32 @@ components:
           - 'null'
           description: 'Set when the file changed on disk while this cell was locked (FR-S5): {disk_source}.'
           additionalProperties: true
+        row:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+          description: 'Computed file-wide horizontal row index starting at 0, or null when vertical. Never serialized to the file (FR-F7).'
+        width:
+          type:
+          - string
+          - 'null'
+          description: 'Computed CSS grid track width (default "1fr") in a horizontal row, or null when vertical. Never serialized to the file (FR-F7).'
+        group:
+          type:
+          - object
+          - 'null'
+          description: 'Computed parallel group bounds {head, end} for a closed [parallel]..[concurrent] group, or null outside one. Never serialized to the file (FR-X7).'
+          required:
+          - head
+          - end
+          properties:
+            head:
+              type: integer
+              minimum: 0
+            end:
+              type: integer
+              minimum: 0
     Document:
       type: object
       required:

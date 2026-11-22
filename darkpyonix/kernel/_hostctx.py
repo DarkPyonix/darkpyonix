@@ -6,16 +6,30 @@ files keep behaving like plain Python (SPEC FR-F5).
 """
 from __future__ import annotations
 
+import contextvars
 from typing import Any, Callable, Dict, Optional
 
 _in_kernel = False
 _params = {}            # type: Dict[str, Any]
 _display = None         # type: Optional[Callable[[Dict[str, Any], Dict[str, Any], bool], None]]
+_parallel_hook = None   # type: Any
+current_cell = contextvars.ContextVar("darkpyonix_current_cell", default=None)  # type: Any
 
 
 def in_kernel() -> bool:
     """True while code runs inside a DarkPyonix kernel."""
     return _in_kernel
+
+
+def get_parallel_hook() -> Any:
+    """Return the active kernel parallel hook, or ``None`` outside a parallel group."""
+    return _parallel_hook
+
+
+def set_parallel_hook(hook: Any) -> None:
+    """Install or clear the active kernel parallel hook (SPEC FR-X9..X11)."""
+    global _parallel_hook
+    _parallel_hook = hook
 
 
 def current_params() -> Dict[str, Any]:
@@ -53,10 +67,11 @@ def _install(display: Callable[[Dict[str, Any], Dict[str, Any], bool], None]) ->
 
 
 def _uninstall() -> None:
-    global _in_kernel, _display, _params
+    global _in_kernel, _display, _params, _parallel_hook
     _in_kernel = False
     _display = None
     _params = {}
+    _parallel_hook = None
 
 
 def _set_params(params: Optional[Dict[str, Any]]) -> None:

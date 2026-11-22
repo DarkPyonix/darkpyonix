@@ -163,13 +163,13 @@ INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 �
 | `run.queued` | `{run_id, position}` |
 | `run.started` | `{run_id, mode, cells: [int], cell_ids: [str\|null], params}` |
 | `run.finished` | `{run_id, status: "ok"\|"error"\|"interrupted"\|"cancelled", duration}` |
-| `cell.started` | `{run_id, index, cell_id, execution_count}` |
+| `cell.started` | `{run_id, index, cell_id, execution_count, group?: {head, end}}` |
 | `cell.finished` | `{run_id, index, cell_id, status: "ok"\|"error"\|"interrupted", duration}` |
 | `output` | `{run_id, index, cell_id, output: <nbformat 4 output>}` |
 | `output.clear` | `{run_id, index, cell_id, wait: bool}` |
 | `replay_truncated` | `{oldest_seq}` |
 
-`index`는 실행이 읽은 파일에서의 셀 위치이고, `cell_id`는 그 셀의 공유 문서 ID(§4, `doc.snapshot`의 `cell_id`)입니다. 실행 중에 셀이 옮겨지거나 지워져도 `cell_id`로 셀을 찾아야 합니다. 실행이 시작될 때 공유 문서와 파일이 맞지 않으면(커널이 문서를 들고 있지 않을 때 등) `cell_id`는 `null`입니다. `run.started`의 `cell_ids`는 `cells`와 같은 순서·길이의 배열이고 같은 규칙을 따릅니다.
+`index`는 실행이 읽은 파일에서의 셀 위치이고, `cell_id`는 그 셀의 공유 문서 ID(§4, `doc.snapshot`의 `cell_id`)입니다. 실행 중에 셀이 옮겨지거나 지워져도 `cell_id`로 셀을 찾아야 합니다. 실행이 시작될 때 공유 문서와 파일이 맞지 않으면(커널이 문서를 들고 있지 않을 때 등) `cell_id`는 `null`입니다. `run.started`의 `cell_ids`는 `cells`와 같은 순서·길이의 배열이고 같은 규칙을 따릅니다. `cell.started`의 선택 필드 `group: {head, end}`는 그 셀이 닫힌 `[parallel]`..`[concurrent]` 묶음에 속할 때만 들어갑니다(SPEC FR-X9, PR-4 필드 추가).
 
 `output`의 `output` 필드는 nbformat 4의 출력 객체(`stream`, `display_data`, `execute_result`, `error`)를 그대로 씁니다. 같은 셀의 연속된 `stream` 출력은 커널이 최대 50 ms 동안 모아서 하나로 보냅니다.
 
@@ -295,11 +295,12 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 
 `Presence = {client_id, nickname, user, avatar?, capabilities, focused_cell_id?, focused_at?, cursor?, last_seen}`.
 
-`DocumentCell = {cell_id, index, type, raw_type, title, metadata, source, source_sha256, version, lock?, conflict?}`.
+`DocumentCell = {cell_id, index, type, raw_type, title, metadata, source, source_sha256, version, lock?, conflict?, row?, width?, group?}`.
 
 - `source`는 파서(FORMAT §2.4)가 낸 본문 그대로입니다. 표식과 메타데이터 줄은 빠지고, 다음 표식 앞의 빈 줄(앞 셀 본문에 속함)과 줄 끝(`\r\n` 포함)은 남습니다. 클라이언트가 이 값을 바꾸지 않고 돌려보내면 파일 바이트도 바뀌지 않습니다.
 - `type`은 정규 타입(소문자, 별칭 해석, 타입 없는 표식은 `code`, 첫 셀은 `preamble`)이고, `raw_type`은 표식의 `[ ]` 안에 쓰인 그대로(없으면 `null`)입니다. 표시는 `type`으로, 원문 보존이 필요하면 `raw_type`을 씁니다.
 - `title`은 표식의 제목이고 없으면 `null`입니다.
+- `row`(`int | null`), `width`(`str | null`, 세로 배치에서는 `null`), `group`(`{head: int, end: int} | null`)은 파서가 문서에서 계산하는 선택 필드이며 파일로 직렬화하지 않습니다(SPEC FR-F7, FR-X7, PR-4).
 
 **스냅숏의 `seq`.** `seq`는 **스냅숏에 이미 반영된 마지막 이벤트의 번호**입니다. 클라이언트는 `subscribe since=seq`(HTTP는 `?since=seq`)로 구독하고, `seq`가 그보다 큰 이벤트만 스냅숏 위에 적용합니다. 커널은 문서 상태를 바꾸는 일과 그 이벤트를 내는 일을 한 잠금 안에서 하고, 스냅숏도 같은 잠금 안에서 만듭니다. 따라서 스냅숏과 경쟁한 편집은 스냅숏에 들어 있거나(`seq` 이하) 구독으로 오거나(`seq` 초과) 둘 중 정확히 하나입니다. 클라이언트가 `seq`가 자기 것 이하인 이벤트를 받으면 무시합니다(재연결로 겹칠 때).
 

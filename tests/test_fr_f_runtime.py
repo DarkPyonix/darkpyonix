@@ -77,7 +77,10 @@ def test_runtime_import_is_cheap_and_never_loads_the_kernel_process(python, scra
     # Every module in the package root is either a kernel-process module or a runtime one, so a
     # new file cannot slip past the assertion above unnoticed.
     from conftest import PACKAGE_DIR
-    runtime = {"__init__", "_binding", "_command", "_home", "_host", "_markdown", "_misc", "_params"}
+    runtime = {
+        "__init__", "_binding", "_command", "_data", "_errors", "_home",
+        "_host", "_markdown", "_misc", "_parallel", "_params", "_sql",
+    }
     present = {n[:-3] for n in os.listdir(PACKAGE_DIR) if n.endswith(".py")}
     assert present == runtime | set(KERNEL_MODULES)
 
@@ -506,9 +509,11 @@ def test_display_parallel_and_reserved_interop(kernel, capsys):
         return v
 
     t0 = time.monotonic()
-    assert darkpyonix.run_parallel(slow(1, 0.3), slow(2, 0.1), 3) == [1, 2, 3]
+    assert darkpyonix.run_parallel(slow(1, 0.3), slow(2, 0.1)) == [1, 2]
     assert time.monotonic() - t0 < 0.55
     assert darkpyonix.run_parallel() == []
+    with pytest.raises(TypeError):
+        darkpyonix.run_parallel(slow(1, 0), 3)
 
     async def nested():
         return darkpyonix.run_parallel(slow(1, 0))
