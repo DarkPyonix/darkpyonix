@@ -329,6 +329,22 @@ FORMAT §3.4. 이슈 #6의 참조 구현을 따르되, `binding` 데코레이터
   - `con=`으로 다른 DB-API 연결을 씁니다.
 - 테스트: `test_fr_f13_sql_default_sqlite_and_params`, `test_fr_f13_sql_result_renders_html`
 
+### FR-F14 마크다운 셀의 마크업 언어 (`Agreed`, [user, 2026-11-22], 이슈 #3)
+근거: INTENT D24, FORMAT §2.3·§3.2. `.pynb` 마크다운 셀은 기본 `markdown` 외에 추가 마크업 언어를 선언할 수 있으며, v1 확장 언어는 `quarkdown`입니다.
+- **셀 메타데이터**: `# @markup: <언어>`를 파싱해 셀 메타데이터에 보존하고 직렬화 시 바이트 그대로 유지합니다(생략 시 기본값 `markdown`).
+- **런타임 API**: `darkpyonix.markdown(text, *, silent=False, markup="markdown")`은 `markup` 값(소문자 정규화, 공백 제거)에 따라 `display_data` MIME 번들을 결정합니다.
+  - `"markdown"`(기본): `{"text/markdown": text, "text/plain": text}`(기존 FR-F2와 동일).
+  - `"quarkdown"`: `{"text/vnd.darkpyonix.quarkdown": text, "text/plain": text}` 및 출력 `metadata`에 `{"darkpyonix": {"markup": "quarkdown"}}`을 담습니다.
+  - 알 수 없는 언어 값(`<lang>`): 오류를 내지 않고 `{"text/vnd.darkpyonix.<lang>": text, "text/plain": text}`와 `metadata.darkpyonix.markup = "<lang>"`으로 내보냅니다.
+- **표준 라이브러리 전용 및 일반 파이썬 호환**: 커널은 마크업 파서나 외부 바이너리를 불러오지 않습니다(NFR-K2). `python file.py`로 실행하면 `markup="quarkdown"` 호출도 아무것도 출력하지 않습니다(FR-F5).
+- **클라이언트 렌더링 및 격리**: 매니저는 출력 번들을 변경 없이 전달·기록합니다. Ember는 별도 프로세스 경계(GPL-3.0 격리)로 Quarkdown을 렌더링하고 미설치 시 `text/plain` 폴백과 안내를 표시합니다. ash는 샌드박스 iframe(NFR-H3)으로 결과를 표시합니다.
+- 수용 기준:
+  1. `# %% [markdown]` 아래 `# @markup: quarkdown` 메타데이터가 있는 셀을 파싱하면 `metadata["markup"] == "quarkdown"`이고, 다시 직렬화하면 원문과 바이트 단위로 같습니다(`test_fr_f14_parser_preserves_markup_metadata`).
+  2. 커널 안에서 `darkpyonix.markdown(src, markup="quarkdown")`을 실행하면 `text/vnd.darkpyonix.quarkdown`과 `text/plain`이 포함된 `display_data`가 발행되고 `metadata.darkpyonix.markup == "quarkdown"`입니다. `markup`을 생략하면 기존과 같이 `text/markdown`만 발행됩니다(`test_fr_f14_markdown_emits_markup_mime_and_metadata`).
+  3. `silent=True`와 `markup="quarkdown"`을 함께 주면 실시간 `output` 이벤트는 나가되 실행 기록에는 남지 않습니다(`test_fr_f14_quarkdown_silent_is_not_logged`).
+  4. `python file.py`로 `darkpyonix.markdown(src, markup="quarkdown")`이 들어 있는 파일을 실행하면 표준 출력이 비어 있고 종료 코드 0이며, 커널 모듈은 표준 라이브러리만 import합니다(`test_fr_f14_quarkdown_is_noop_in_plain_python`).
+  5. 알 수 없는 `markup="myst"`를 넘겨도 예외 없이 `text/vnd.darkpyonix.myst`와 `text/plain` 폴백을 발행합니다(`test_fr_f14_unknown_markup_falls_back_cleanly`).
+
 ## 7. 매니저 (M)
 
 ### FR-M1 HTTP API — `Done` (스트림 넘김 구현됨 #47, develop CI 실행 42320659374 통과)

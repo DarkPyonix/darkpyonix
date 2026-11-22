@@ -48,6 +48,7 @@ import torch
 | `collapsed` | 처음에 접어서 표시 | `true` |
 | `auto_run` | 커널을 연결하면 자동 실행 | `true` |
 | `id` | 클라이언트가 붙이는 안정 ID(선택) | `"c-3f2a"` |
+| `markup` | 마크다운 셀의 마크업 언어(기본 `markdown`, 확장 `quarkdown`, 이슈 #3) | `quarkdown` |
 
 모르는 키는 보존하고 무시합니다.
 
@@ -87,7 +88,7 @@ import torch
 - `parallel`은 **실행 의미**입니다. 묶인 셀이 동시에 실행되고, 화면에서는 보통 가로로 놓입니다.
 - 가로로 놓인 셀은 병렬일 수도, 단순 가로 배치일 수도 있습니다. 그래서 둘을 다른 키로 둡니다. grid를 여닫는 태그를 둘지는 이슈 #7에서 결정합니다(PROJECT Q7).
 
-### 3.2 마크다운
+### 3.2 마크다운과 확장 마크업
 
 ```python
 # %% [markdown]
@@ -97,6 +98,20 @@ darkpyonix.markdown("""
 """, silent=True)
 ```
 
+Quarkdown처럼 기본 Markdown 외의 마크업 언어를 쓰는 셀은 메타데이터 `# @markup`과 `markup=` 인자로 언어를 선언합니다(INTENT D24, SPEC FR-F14, 이슈 #3).
+
+```python
+# %% [markdown]
+# @markup: quarkdown
+darkpyonix.markdown("""
+.doctype {paged}
+# 제목
+""", silent=True, markup="quarkdown")
+```
+
+- `markup`의 기본값은 `"markdown"`입니다(생략하면 일반 Markdown). v1에서 추가로 정의된 값은 `"quarkdown"`입니다.
+- `# @markup` 메타데이터는 편집기와 읽기 전용 뷰어(ash)가 셀을 실행하기 전에도 마크업 언어를 알기 위한 선언이며, `markup=` 인자는 커널 실행 시 `display_data` MIME(`text/markdown` 또는 `text/vnd.darkpyonix.quarkdown`)을 결정합니다. 둘 다 있으면 값이 같아야 하며, 실행 출력에서는 `markup=` 인자가 우선합니다.
+- 모르는 `markup` 값은 오류를 내지 않고 원문 그대로 보존하며 `text/vnd.darkpyonix.<값>`과 `text/plain` 폴백으로 내보냅니다.
 - `silent=True`이면 실행 기록에 출력을 남기지 않고 화면에만 렌더합니다. 기본값은 `False`입니다.
 - `python file.py`로 실행하면 `darkpyonix.markdown`은 아무것도 출력하지 않습니다. 원래 동작을 바꾸지 않기 위해서입니다.
 - 예시 파일의 `slient=`는 `silent=`의 오타입니다. 런타임은 모르는 키워드 인자를 오류 없이 무시하고 경고만 남깁니다.
