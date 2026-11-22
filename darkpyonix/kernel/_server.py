@@ -427,6 +427,14 @@ class ControlServer:
             except ValueError as e:  # includes JSONDecodeError and UnicodeDecodeError
                 self._bad_frame(c, repr(e))
                 continue
+            version = msg.get("dkp")
+            if type(version) is not int or version != _p.DKP_VERSION:
+                # PROTOCOL §1: a frame of an unknown version gets `error` and the connection closes.
+                self._send(c, _error_frame("bad_request", "unsupported dkp version %r (this kernel speaks %d)"
+                                           % (version, _p.DKP_VERSION)))
+                c.closing = True
+                c.inbuf = bytearray()
+                return
             if c.authed:
                 self._on_message(c, msg)
             else:

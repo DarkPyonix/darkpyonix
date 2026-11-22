@@ -1,6 +1,7 @@
 """DKP/1 control channel (FR-A1, PR-1, PR-2, PR-3, PR-4; PROTOCOL §3)."""
 from __future__ import annotations
 
+import json
 import os
 import socket
 import stat
@@ -384,3 +385,25 @@ def test_fr_d_announce_names_the_runtime_home(dp_home):
     main = importlib.import_module("darkpyonix.__main__")
     k = main.Kernel(os.path.join(dp_home, "nb.py"))
     assert k.info()["home"] == dp_home
+
+
+@pytest.mark.parametrize("version", [99, 0, "1", None])
+def test_pr_4_unknown_dkp_version_gets_error_and_close(server, version):
+    for authed in (False, True):
+        if authed:
+            s = _raw_auth(server)
+            frame = {"op": "request", "id": 1, "method": "status", "params": {}}
+        else:
+            s, _hello = _raw_connect(server)
+            frame = {"op": "auth", "client": {"name": "raw", "kind": "test", "pid": 1}}
+        frame["dkp"] = version
+        if version is None:
+            payload = json.dumps(dict((k, v) for k, v in frame.items() if k != "dkp")).encode()
+            s.sendall(struct.pack(">I", len(payload)) + payload)
+        else:
+            s.sendall(p.encode(frame))
+        err = p.recv_frame(s)
+        assert err["op"] == "error" and err["code"] == "bad_request", err
+        assert err["dkp"] == p.DKP_VERSION
+        assert _wait_closed(s, 2)
+        s.close()
