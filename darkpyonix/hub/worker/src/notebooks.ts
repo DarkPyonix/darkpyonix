@@ -36,8 +36,12 @@ const clientIp = (r: Request) => r.headers.get("cf-connecting-ip") ?? "unknown";
 async function limit(limiter: Env["PUSH_LIMITER"], key: string) {
   if (limiter && !(await limiter.limit({ key })).success) throw ApiError.tooMany();
 }
+/** FR-H19: anonymous notebook reads, 300 per minute per address. */
+async function limitAnonymousRead(r: Request, e: Env) {
+  if (!r.headers.has("authorization") && !r.headers.has("cookie")) await limit(e.READ_LIMITER, `read:${clientIp(r)}`);
+}
 async function readable(request: Request, env: Env, deps: Deps, id: string): Promise<Notebook> {
-  if (!request.headers.has("authorization") && !request.headers.has("cookie")) await limit(env.READ_LIMITER, `read:${clientIp(request)}`);
+  await limitAnonymousRead(request, env);
   const n = await find(env, id);
   if (n.visibility === "private" || n.taken_down) {
     let p: Principal;
@@ -80,7 +84,8 @@ export async function listMine(r: Request, e: Env, d: Deps) {
   const rows = await e.DB.prepare(`${selectNotebook} WHERE n.account_id = ? ORDER BY n.created_at DESC, n.rowid DESC`).bind(p.accountId).all<Notebook>();
   return json(200, { notebooks: rows.results.map(view) });
 }
-export async function listPublic(_r: Request, e: Env, _d: Deps, login: string) {
+export async function listPublic(r: Request, e: Env, _d: Deps, login: string) {
+  await limitAnonymousRead(r, e);
   const account = await e.DB.prepare("SELECT account_id FROM accounts WHERE github_login = ? COLLATE NOCASE").bind(login).first<{account_id: string}>();
   if (!account) throw ApiError.notFound();
   const rows = await e.DB.prepare(`${selectNotebook} WHERE n.account_id = ? AND n.visibility = 'public' AND n.taken_down = 0 ORDER BY n.created_at DESC, n.rowid DESC`).bind(account.account_id).all<Notebook>();
