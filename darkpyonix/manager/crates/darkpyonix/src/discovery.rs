@@ -5,7 +5,6 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::client::{Api, CliError};
 
@@ -189,14 +188,9 @@ pub async fn spawn_ephemeral(http: &reqwest::Client, home: &Path) -> Result<Mana
 pub fn resolve_file(file: &Path) -> Result<(PathBuf, String), CliError> {
     let canonical = std::fs::canonicalize(file)
         .map_err(|e| CliError::new("bad_request", format!("{}: {e}", file.display())))?;
-    let text = canonical.to_string_lossy();
-    Ok((canonical.clone(), kernel_id_for(&text)))
-}
-
-pub fn kernel_id_for(canonical: &str) -> String {
-    let digest = Sha256::digest(canonical.as_bytes());
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    format!("k_{}", &hex[..20])
+    // The id comes from the kernel's own rule (`normcase(realpath(abspath))`): on Windows,
+    // `std::fs::canonicalize` adds `\\?\` and keeps the case, which would give another id.
+    Ok((canonical, dpx_kernel::kernel_id_for(file)))
 }
 
 #[cfg(test)]
@@ -251,14 +245,31 @@ mod tests {
     #[test]
     fn test_pr_kernel_id_is_sha256_prefix_of_canonical_path() {
         // echo -n /home/u/exp/train.py | shasum -a 256
-        assert_eq!(kernel_id_for("/home/u/exp/train.py"), "k_7570bb3a04bd69b917b4");
+        assert_eq!(dpx_kernel::ident::kernel_id_for_canonical("/home/u/exp/train.py"), "k_7570bb3a04bd69b917b4");
         let home = scratch("kid");
         let f = home.join("a.py");
         std::fs::write(&f, "").unwrap();
         std::fs::create_dir_all(home.join("sub")).unwrap();
         let (canon, id) = resolve_file(&home.join("sub/../a.py")).unwrap();
         assert_eq!(canon, std::fs::canonicalize(&f).unwrap());
-        assert_eq!(id, kernel_id_for(&canon.to_string_lossy()));
+        assert_eq!(id, dpx_kernel::ident::kernel_id_for_canonical(&dpx_kernel::canonical_path(&f)));
         assert!(resolve_file(&home.join("missing.py")).is_err());
+    }
+
+    #[test]
+    fn test_fr_k2_cli_kernel_id_matches_the_kernel_rule() {
+        let home = scratch("kid_rule");
+        let f = home.join("Train.py");
+        std::fs::write(&f, "").unwrap();
+        let (_, id) = resolve_file(&f).unwrap();
+        assert_eq!(id, dpx_kernel::kernel_id_for(&f));
+        let canonical = dpx_kernel::canonical_path(&f);
+        assert!(!canonical.starts_with(r"\\?\"), "{canonical}");
+        if cfg!(windows) {
+            // normcase: another spelling of the same file is the same kernel.
+            let upper = std::path::PathBuf::from(f.to_string_lossy().to_uppercase());
+            assert_eq!(resolve_file(&upper).unwrap().1, id);
+            assert_eq!(canonical, canonical.to_lowercase());
+        }
     }
 }
