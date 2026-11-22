@@ -58,7 +58,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
 ### FR-K7 재시작 — `Done`
 `restart`(soft)는 네임스페이스를 비우고 실행 횟수를 0으로 돌립니다. `restart hard`는 같은 인터프리터와 인자로 프로세스를 다시 실행합니다(커널 ID 유지).
 - 수용 기준: soft 재시작 뒤 이전 변수가 없습니다. hard 재시작 뒤 커널 ID가 같고 `pid`나 시작 시각이 바뀝니다.
-- 테스트: `test_fr_k7_soft_restart_clears_namespace`, `test_fr_k7_hard_restart_stops_loop_and_sets_flag`(실행기 쪽), `test_fr_k7_hard_restart_keeps_kernel_id`(실제 커널 프로세스: 같은 커널 ID, 같은 인터프리터와 경로로 다시 announce하고 `started_at`이 늦어지며 이전 변수가 없음. POSIX에서는 `os.execv`라 `pid`는 그대로입니다)
+- 테스트: `test_fr_k7_soft_restart_clears_namespace`, `test_fr_k7_hard_restart_stops_loop_and_sets_flag`(실행기 쪽), `test_fr_k7_hard_restart_keeps_kernel_id`(실제 커널 프로세스: 같은 커널 ID, 같은 인터프리터와 경로로 다시 announce하고 `started_at`이 늦어지며 이전 변수가 없음. POSIX에서는 `os.execv`라 `pid`는 그대로입니다), `test_fr_k7_hard_restart_keeps_kernel_id_on_windows`(Windows 전용, 공백이 든 경로. MSVC `_wexecv`는 인자를 따옴표로 묶지 않으므로 커널이 인자마다 따옴표를 붙여 다시 실행함)
 
 ### FR-K8 종료 — `Done`
 `shutdown`은 실행 중인 셀을 인터럽트하고, 실행 기록을 마저 쓰고, `bye`를 보내고, 코드 0으로 끝납니다.
@@ -74,7 +74,7 @@ DarkPyonix 커널 스택의 요구사항과 수용 기준입니다. 근거는 [I
   - 넘겨받은 요청에 틀린 토큰이 들어 있어도 커널은 라벨대로 응답합니다(토큰을 보지 않음).
   - `history`가 없는 라벨(`["read"]`)의 SSE에는 `output` 이벤트가 없습니다.
   - `streams.close`가 그 `share_id`의 스트림만 닫고, 다른 스트림은 그대로입니다.
-- 테스트: `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_streams_close_closes_only_that_share`, `test_fr_k9_wait_is_answered_by_the_kernel`, `test_fr_k9_ws_upgrade_is_answered_with_101`(`tests/test_fr_k9_handoff.py`, 사용 가능한 모든 인터프리터). `test_fr_k9_adopted_socket_on_windows`(`tests/test_fr_k9_windows_handoff.py`, Windows에서만 실행하고 다른 곳에서는 건너뜀)
+- 테스트: `test_fr_k9_adopted_sse_survives_manager_kill`, `test_fr_k9_kernel_ignores_tokens_in_adopted_request`, `test_fr_k9_label_without_history_filters_outputs`, `test_fr_k9_label_without_read_blanks_cell_source_on_sse`(`doc.cell.*`, `doc.reloaded`, `doc.conflict`의 셀 소스를 비움), `test_fr_k9_streams_close_closes_only_that_share`, `test_fr_k9_wait_is_answered_by_the_kernel`, `test_fr_k9_ws_upgrade_is_answered_with_101`(`tests/test_fr_k9_handoff.py`, 사용 가능한 모든 인터프리터). `test_fr_k9_adopted_socket_on_windows`(`tests/test_fr_k9_windows_handoff.py`, Windows에서만 실행하고 다른 곳에서는 건너뜀)
 - 상태 메모(#49): `ws`는 `101`, 제어 프레임, 2025 동기화 메시지(PROTOCOL §5)와 `read`·`history` 걸러내기까지 구현됐습니다(`darkpyonix/kernel/_streams.py`, `_wsync.py`). 테스트: `test_fr_k9_ws_streams_close_closes_the_socket`, `test_fr_k9_ws_presence_carries_capabilities`(`tests/test_fr_s9_ws.py`).
 
 ### FR-K10 커널 접근 토큰 보관 — `Done` (사용자 결정 2026-10-04, 구현됨 #48, `tests/test_pr_7_tokens.py` 통과)
@@ -236,7 +236,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
 PROTOCOL §2를 구현합니다. 매니저의 query에 같은 사용자의 모든 커널이 200 ms 안에 응답합니다. 발견은 이 루프백 멀티캐스트 하나입니다(INTENT D4). 그룹 주소와 포트(`239.255.68.80:46880`)는 사용자 결정입니다(2026-10-04, "그대로 사용", PROJECT Q14).
 - 수용 기준: 커널 세 개를 띄우고 query 하나를 보내면 세 개의 announce를 받습니다. 다른 `user_tag`의 query에는 응답하지 않습니다.
   - `user_tag`는 OS 계정에서 만들어 홈이 달라도 같으므로(FR-A1), 홈을 지정한 매니저는 announce의 `home`이 자기 홈(심볼릭 링크를 푼 경로)과 다르거나 없으면 버립니다. 응답 수에도 세지 않습니다(PROTOCOL §2.2).
-- 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
+- 테스트: `test_fr_d1_query_finds_all_kernels`, `test_fr_d1_other_user_tag_is_ignored`, `test_fr_d1_listener_sees_announce_and_bye`, `test_fr_d1_announce_from_another_home_is_dropped`, `test_fr_d1_announce_without_home_is_dropped_when_a_home_is_set`(PROTOCOL §2.4: 파이썬 `discover()`도 자기 `DARKPYONIX_HOME`과 다른 `home`이거나 `home`이 없는 announce를 버림), Rust `fr_d1_query_finds_all_kernels`(`darkpyonix/manager/crates/dpx-kernel/tests/discovery_launch.rs`)
 
 ### FR-D2 등록 파일 없음 — `Done` (사용자 지시 2026-10-03, 2026-10-05 구현, develop CI 실행 41936239905에서 Rust 테스트와 파이썬 테스트 통과 확인)
 커널 등록 파일(`kernels/<kernel_id>.json`)과 `DARKPYONIX_DISCOVERY=registry`는 없습니다. 리더가 사용자 승인 없이 더했던 보조 발견이라 지웠습니다. 사용자(2026-10-03): "커널 등록 파일 써도 된다고 내가 말한 적이 절대 없고요"(INTENT D4, §5).
@@ -572,7 +572,7 @@ INTENT D17. 2025 상세 페이지의 `/kernels/{kernel_id}/tokens/…`는 그 �
 
 ### FR-S4 접속자, 포커스, 커서 — `Done`
 클라이언트는 접속할 때 `client_id`(기기마다 고유)와 `nickname`(기기 이름, 2025 `?nickname=`)을 알립니다. 사용자 이름과 아바타는 토큰에서 정해지고, 없으면 클라이언트가 준 값을 씁니다. 접속자 목록은 다음을 담습니다: 사용자, 기기, 권한, 포커스한 셀(`focused_cell_id`, `focused_at`), 커서(`cell_id`, `line`, `column`, 선택 범위). 포커스, 블러, 커서 변경은 `presence.update` 이벤트로 퍼집니다(커서는 클라이언트마다 초당 최대 20회로 합칩니다). 이벤트 스트림이 끊기고 30초가 지나면 그 클라이언트는 `presence.leave`가 됩니다.
-- 테스트: `test_fr_s4_presence_focus_cursor_and_leave`, `test_fr_s4_presence_and_leave_release_locks_through_kernel`
+- 테스트: `test_fr_s4_presence_focus_cursor_and_leave`, `test_fr_s4_presence_and_leave_release_locks_through_kernel`, `test_fr_s4_sse_presence_heartbeat_survives_a_steady_event_stream`(이벤트가 쉬지 않고 와도 넘겨받은 SSE가 접속하자마자, 그리고 10초마다 접속을 갱신함)
 - 상태 메모: 커널 쪽(`presence.update`/`presence.leave`, 30초 유예)을 검증했습니다. 지금은 이벤트 스트림이 열려 있는 동안 매니저가 약 10초마다 `presence.update` 하트비트를 보냅니다(Rust `test_fr_s4_event_stream_with_client_id_heartbeats_presence`). 스트림 넘김(FR-M6) 뒤에는 커널이 넘겨받은 스트림으로 접속 여부를 직접 알므로 하트비트가 필요 없습니다. 스트림이 닫히고 30초 뒤 `presence.leave`입니다(PROTOCOL §3.7.5, 구현 대기 #47).
 
 ### FR-S5 디스크 파일과의 동기화 — `Done`
@@ -606,7 +606,7 @@ INTENT D19, PROTOCOL §5. 사용자 결정: "원 설계대로 복구". `GET /api
 - 능력 집합으로 거릅니다(FR-K9). `history`가 없으면 `history_data`가 빈 목록이고 `execution_output`과 출력이 담긴 필드를 받지 않습니다. `read`가 없으면 `code_data`의 `source`가 비어 있습니다. `edit`이 없으면 `start_typing`은 잠그지 않고 `{"type": "error", "error": "INSUFFICIENT_PERMISSION"}`를 돌려받습니다.
 - 편집, 잠금 해제(최종 소스), 실행, 인터럽트는 2025처럼 REST(매니저)이고, 결과는 WebSocket으로 퍼집니다.
 - 수용 기준: 두 클라이언트가 WebSocket으로 붙은 뒤 한쪽이 `start_typing`하면 다른 쪽이 `cell_locked`를 받고, REST로 잠금을 풀며 소스를 보내면 `cell_unlocked_with_code`를 받습니다. REST로 실행하면 두 쪽 모두 `execution_started`, `execution_output`, `execution_complete`를 받습니다. 매니저를 `SIGKILL`로 죽여도(평문 연결) 다음 실행의 메시지가 옵니다. `history`가 없는 클라이언트는 출력을 받지 않습니다. `edit` 없이 `execute`만 가진 클라이언트의 `start_typing`은 `INSUFFICIENT_PERMISSION`입니다.
-- 테스트(`tests/test_fr_s9_ws.py`): `test_fr_s9_ws_initial_sync_code_history_locks`, `test_fr_s9_ws_typing_locks_and_unlock_with_code`, `test_fr_s9_ws_focus_and_blur_reach_other_users`, `test_fr_s9_ws_execution_broadcast`, `test_fr_s9_ws_execution_error_message`, `test_fr_s9_ws_unmapped_events_are_wrapped`, `test_fr_s9_ws_survives_manager_kill`, `test_fr_s9_ws_without_history_gets_no_outputs`, `test_fr_s9_ws_without_read_gets_no_code`, `test_fr_s9_ws_typing_needs_edit`, 프레임 시험 `test_fr_s9_frame_reader_*`, `test_fr_s9_idle_connection_is_closed_and_pings_are_sent`; Rust `test_fr_s9_ws_route_hands_the_upgrade_to_the_kernel_with_the_label`, `test_fr_s9_ws_needs_read_and_a_valid_token`
+- 테스트(`tests/test_fr_s9_ws.py`): `test_fr_s9_ws_initial_sync_code_history_locks`, `test_fr_s9_ws_typing_locks_and_unlock_with_code`, `test_fr_s9_ws_focus_and_blur_reach_other_users`, `test_fr_s9_ws_execution_broadcast`, `test_fr_s9_ws_execution_error_message`, `test_fr_s9_ws_unmapped_events_are_wrapped`, `test_fr_s9_ws_survives_manager_kill`, `test_fr_s9_ws_without_history_gets_no_outputs`, `test_fr_s9_ws_without_read_gets_no_code`, `test_fr_s9_ws_without_read_gets_no_code_in_reload_and_conflict`, `test_fr_s9_ws_typing_needs_edit`, 프레임 시험 `test_fr_s9_frame_reader_*`, `test_fr_s9_idle_connection_is_closed_and_pings_are_sent`; Rust `test_fr_s9_ws_route_hands_the_upgrade_to_the_kernel_with_the_label`, `test_fr_s9_ws_needs_read_and_a_valid_token`
 - 셀 맵핑(K2, 사용자 결정 2026-10-25): `history_data`의 `cell_id`와 `code_data`의 `execution_count`는 FR-R4와 같은 규칙(`id` → `source_sha256` → `index`, 기록 하나는 한 번만, `_document._map_run` 재사용)으로 실행 기록과 지금 문서의 셀을 맞춥니다. 셋 다 안 맞으면 `cell_id`는 `null`이고, 해시가 다르면 `history_data` 항목에 `stale: true`가 붙습니다. 사용자(2026-10-25): "K2 니가 원하는대로 하고 나중에 문제가 생기면 내가 수정요청 할게". 선택을 맡긴 결정이라 [user, 2026-10-25]입니다(리더가 권장안을 골랐습니다). 테스트(`tests/test_fr_s9_cell_matching.py`): `test_fr_s9_match_inserted_cell_above_keeps_ids`, `test_fr_s9_match_by_hash_when_ids_are_absent`, `test_fr_s9_match_edited_cell_falls_back_to_index_and_is_stale`, `test_fr_s9_match_stale_index_match_lands_on_the_cell_now_there`, `test_fr_s9_match_no_cross_matching_of_ids`, `test_fr_s9_match_record_names_another_cell_is_not_index_matched`, `test_fr_s9_history_survives_a_cell_inserted_after_the_run`
 - 구현 메모(#49): `history_data`의 `cell_id`와 `code_data`의 `execution_count`는 K2 규칙으로 맞춥니다(위 항목). `execution_interrupted`는 `interrupted_by`가 `run.finished`에서야 정해져서 그때 보냅니다. 오너 결정(2026-10-25, "K1/K2 -- 우리 웹 소켓으로 하나?, K5 -- 실제 구현까지 보류 | 외 전부 추천대로"): `execution_interrupted`는 `run.finished` 시점에 보내는 것으로 확정합니다(K3). 클라이언트에는 실제로 멈춘 사실이 중요하고, 요청 즉시 한 번 더 보내면 알림이 중복됩니다. K1(TLS 위 WebSocket 시험)은 소유자가 "K1 검증하는데 얼마 안걸리면 넣고 아니면 빼."(2026-10-25)라고 해서 HTTP/1.1만 넣었습니다(아래 상태 메모). K2는 위 사용자 결정(2026-10-25, 이후)으로 정해졌습니다.
 - 상태 메모: 커널 쪽(Python)은 구현·검증됐습니다. Rust 매니저(경로, 토큰, 라벨)는 CI에서 검증합니다. TLS(HTTP/1.1)로 오는 WebSocket은 매니저가 `hyper::upgrade`로 업그레이드된 연결을 소켓쌍에 양방향으로 이어 줍니다(`pump_response`). 시험 `test_fr_s9_ws_over_tls_http1_upgrade_exchanges_frames_and_closes`(`tests/ws_tls.rs`, 가짜 커널)가 101, 프레임 왕복, 닫기를 봅니다. 실제 Python 커널 뒤의 TLS는 `test_fr_s9_ws_over_tls_real_kernel_history_typing_and_revocation`(`darkpyonix/manager/crates/darkpyonix/tests/ws_tls_real.rs`)이 봅니다. 시험 안에서 만든 자체 서명 인증서로 전용 매니저를 HTTPS로 띄우고, 커널이 소켓쌍 펌프 위에서 직접 `101`을 답하며(받아들임 키 확인), 공유의 능력에 따라 `request_history`가 비거나 차고, `start_typing`이 `edit` 없이는 `INSUFFICIENT_PERMISSION`, `edit`이 있으면 `cell_locked`이며, 공유를 지우면 그 공유의 소켓만 닫히고 마스터 토큰의 소켓은 남는 것까지 확인합니다. 이 두 시험은 Unix와 Windows(`rust-windows`) 모두에서 돕니다(#49). HTTP/2 WebSocket(RFC 8441 확장 CONNECT)은 구현하지 않으며 지원하지 않습니다. HTTP/2 요청은 400으로 거절하고(`test_fr_s9_ws_over_http2_is_refused_without_reaching_the_kernel`) 클라이언트는 WebSocket에 HTTP/1.1을 씁니다(소유자 결정 K1, 2026-10-25: "K1 검증하는데 얼마 안걸리면 넣고 아니면 빼.").
@@ -985,12 +985,12 @@ PROTOCOL §3.4. 링 버퍼와 `replay_truncated`. 읽지 않는 구독자가 있
 
 ### PR-4 호환성 — `Done`
 모르는 필드는 무시하고, 필드 추가는 버전을 올리지 않습니다. 의미를 바꾸는 변경은 `dkp` 버전을 올립니다.
-- 테스트: `test_pr_4_unknown_fields_are_ignored`
+- 테스트: `test_pr_4_unknown_fields_are_ignored`, `test_pr_4_unknown_dkp_version_gets_error_and_close`(PROTOCOL §1: `dkp`가 없거나 1이 아닌 제어 프레임은 인증 전후 모두 `error`(`bad_request`)를 받고 연결이 닫힘)
 
 ### PR-5 스트림 넘김 `adopt` — `Done` (사용자 결정 2026-10-03, 구현됨 #47, POSIX `fd`와 Windows `share`, Windows 종단 시험 통과: CI 실행 42115113942)
 PROTOCOL §3.7.1–§3.7.3. POSIX는 제어 채널인 유닉스 도메인 소켓 위에서 `adopt` 프레임 직후 `SCM_RIGHTS`로 FD 하나, Windows는 제어 파이프 위 `share`에 `WSAPROTOCOL_INFOW`의 base64, 퍼 나르기는 소켓 쌍의 한쪽입니다. 커널은 파이썬 3.8에서도 되도록 `socket.recvmsg`로 받습니다(`recv_fds` 없음).
 - 수용 기준: Windows 파이프로 온 `transport: "fd"`는 `bad_request`입니다. FD 없이 온 `adopt`는 `bad_request`입니다. `adopt`가 성공하면 `stream_id`를 돌려줍니다.
-- 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. `test_pr_5_adopt_over_a_windows_pipe_is_bad_request`(Windows 전용, #80. `share`는 아직 없어서 Windows 파이프의 `adopt`는 모두 `bad_request`)
+- 테스트: `test_pr_5_adopt_fd_over_unix_socket`, `test_pr_5_adopt_pump_end_of_a_socketpair`, `test_pr_5_adopt_without_fd_is_bad_request`, `test_pr_5_adopt_with_share_transport_is_bad_request_on_a_unix_socket`, `test_pr_5_adopt_with_an_unparsable_request_is_bad_request`. `test_pr_5_adopt_over_a_windows_pipe_needs_a_valid_share`(Windows 전용, #80. 파이프의 `fd`와, 공유 소켓 바이트가 없거나 틀린 `share`·`pump`는 `bad_request`). 성공하는 `share` 넘김은 `test_fr_k9_adopted_socket_on_windows`(`tests/test_fr_k9_windows_handoff.py`)
 
 ### PR-6 공유 철회 `streams.close` — `Done`
 PROTOCOL §3.7.4. `streams.close {share_id}`는 그 `share_id` 라벨의 넘겨받은 스트림을 모두 닫고 `{closed}`를 돌려줍니다.
