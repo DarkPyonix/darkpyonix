@@ -245,10 +245,6 @@ def test_fr_k9_ws_upgrade_is_answered_with_101(kernel):
     c.close()
 
 
-def test_fr_k9_adopted_socket_on_windows():
-    pytest.skip("Windows socket.fromshare handoff is a follow-up of #47 (needs a Windows runner)")
-
-
 # ------------------------------------------------------------------ PR-5, PR-6 (in-process server)
 
 
