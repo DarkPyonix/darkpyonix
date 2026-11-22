@@ -1,8 +1,11 @@
 """FR-D1, FR-D2: multicast discovery only, no registry files (PROTOCOL §2, INTENT D4)."""
 from __future__ import annotations
 
+import json
 import os
 import signal
+import socket
+import threading
 import time
 
 import pytest
@@ -150,3 +153,69 @@ def test_fr_d2_killed_kernel_vanishes_without_pruning(python, dp_home, scratch, 
     finally:
         for p in procs:
             reap(p)
+
+
+def test_fr_d1_announce_from_another_home_is_dropped(python, dp_home, scratch, multicast, monkeypatch):
+    procs, ids = _start_many(python, scratch, 1)
+    try:
+        _wait_all(procs, ids)
+        # The same home through a symlink is the same home (canonical comparison).
+        alias = os.path.join(scratch, "home-link")
+        os.symlink(dp_home, alias)
+        client = discovery.DiscoveryClient(_home.user_tag(), home=alias)
+        try:
+            assert [k["kernel_id"] for k in client.query(timeout=0.3, expect=1)] == ids
+        finally:
+            client.close()
+        other = os.path.join(scratch, "other-home")
+        os.makedirs(other, mode=0o700)
+        client = discovery.DiscoveryClient(_home.user_tag(), home=other)
+        try:
+            assert client.query(timeout=0.3, expect=1) == []
+        finally:
+            client.close()
+        # discover() filters by this process's DARKPYONIX_HOME.
+        monkeypatch.setenv("DARKPYONIX_HOME", other)
+        assert discovery.discover(timeout=0.3) == []
+        monkeypatch.setenv("DARKPYONIX_HOME", alias)
+        assert [k["kernel_id"] for k in discovery.discover(timeout=0.3)] == ids
+    finally:
+        for p in procs:
+            reap(p)
+
+
+def test_fr_d1_announce_without_home_is_dropped_when_a_home_is_set(dp_home, multicast):
+    """A hand-made announce that omits ``home`` is not counted (PROTOCOL §2.4)."""
+    tag = _home.user_tag()
+    sock = discovery.open_group_socket()
+    sock.settimeout(0.2)
+    stop = threading.Event()
+
+    def answer():
+        while not stop.is_set():
+            try:
+                data, addr = sock.recvfrom(discovery.MAX_DATAGRAM)
+            except (socket.timeout, OSError):
+                continue
+            query = json.loads(data.decode("utf-8"))
+            if query.get("op") != "query" or query.get("user_tag") != tag:
+                continue
+            reply = {"dkp": 1, "op": "announce", "user_tag": tag, "nonce": query["nonce"],
+                     "kernel_id": "k_00000000000000000000", "status": "idle"}
+            out = discovery.open_send_socket()
+            try:
+                out.sendto(json.dumps(reply).encode("utf-8"), addr)
+                out.sendto(json.dumps(dict(reply, kernel_id="k_11111111111111111111",
+                                           home=dp_home)).encode("utf-8"), addr)
+            finally:
+                out.close()
+
+    thread = threading.Thread(target=answer, daemon=True)
+    thread.start()
+    try:
+        found = discovery.discover(timeout=0.5)
+    finally:
+        stop.set()
+        thread.join(2)
+        sock.close()
+    assert [k["kernel_id"] for k in found] == ["k_11111111111111111111"]
