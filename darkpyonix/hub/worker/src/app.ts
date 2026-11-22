@@ -27,7 +27,7 @@ import { linkPage } from "./pages";
 import { ashPage, publishShare, resolveShare, sharePage, unpublishShare } from "./shares";
 import { hashToken, normalizeUserCode, nowSecs } from "./util";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 type Handler = (request: Request, env: Env, deps: Deps, ...params: string[]) => Promise<Response> | Response;
 

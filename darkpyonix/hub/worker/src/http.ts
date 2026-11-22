@@ -153,7 +153,7 @@ export async function principal(
     if (row) {
       if (request.method !== "GET" && request.method !== "HEAD") {
         const origin = request.headers.get("origin");
-        if (!corsOrigin(origin, env)) {
+        if (!corsOrigin(origin, env) && !deprecatedLinkWrite(request, origin, env)) {
           throw ApiError.forbidden("cross-origin request with a session cookie");
         }
       }
@@ -205,4 +205,19 @@ export function requireDevice(p: Principal): Extract<Principal, { kind: "device"
 /** Origins allowed for credentialed browser access (FR-H13). */
 export function corsOrigin(origin: string | null, env: Env): boolean {
   return origin !== null && origin !== "null" && [env.FRONT_URL, ...(env.CORS_DEV_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean)].includes(origin);
+}
+
+/**
+ * FR-H13 exception for the deprecated `/link` page the Worker still serves: its approval
+ * `POST /link-codes/{user_code}` comes from the API's own origin. Only that write, and only
+ * until the FR-H12 front serves `/link`; the PR that ships it removes this with the page.
+ */
+export function deprecatedLinkWrite(request: Request, origin: string | null, env: Env): boolean {
+  return origin === env.API_URL && request.method === "POST" && new URL(request.url).pathname.startsWith("/link-codes/");
+}
+
+/** FR-H13 exception, removed with the deprecated `/link` page: sign-in started there returns there. */
+export function returnsToDeprecatedLinkPage(returnTo: string): boolean {
+  const path = returnTo.split(/[?#]/, 1)[0];
+  return path === "/link";
 }
