@@ -286,6 +286,26 @@ async fn kernel_principal(st: &AppState, kernel_id: &str, token: &str) -> Result
     }))
 }
 
+/// Kernel access tokens start with this (SPEC FR-A6, owner decision 2026-11-23).
+const KERNEL_TOKEN_PREFIX: &str = "dpk_";
+
+/// Whether a running kernel other than `except` holds `token`. Only a token with the kernel
+/// prefix is asked about, so a wrong token costs no kernel round trips.
+async fn held_by_another_kernel(st: &AppState, except: Option<&str>, token: &str) -> bool {
+    if !token.starts_with(KERNEL_TOKEN_PREFIX) {
+        return false;
+    }
+    for k in st.backend.list(false).await.unwrap_or_default() {
+        if Some(k.kernel_id.as_str()) == except {
+            continue;
+        }
+        if let Ok(Some(_)) = kernel_principal(st, &k.kernel_id, token).await {
+            return true;
+        }
+    }
+    false
+}
+
 /// Authenticates before routing, so an anonymous caller always gets 401 (never 400/404).
 async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
@@ -318,7 +338,15 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
         }
         auth::Lookup::Unknown => match (token.as_deref().filter(|t| !t.is_empty()), path_kernel_id(&path)) {
             (Some(t), Some(kid)) => match kernel_principal(&st, kid, t).await {
-                Ok(p) => p,
+                Ok(Some(p)) => Some(p),
+                Ok(None) => {
+                    // A kernel token of another kernel: answered as if this kernel did not
+                    // exist, the FR-A6 rule for a token pointed at another kernel.
+                    if held_by_another_kernel(&st, Some(kid), t).await {
+                        return ApiError::not_found(format!("no such kernel: {kid}")).into_response();
+                    }
+                    None
+                }
                 Err(e) => return e.into_response(),
             },
             // The password path names no kernel: an initial token (FR-A4) is looked for among
@@ -332,6 +360,13 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
                     }
                 }
                 found
+            }
+            // A path that names no kernel reaches beyond the token's kernel (K4).
+            (Some(t), None) => {
+                if held_by_another_kernel(&st, None, t).await {
+                    return ApiError::forbidden("a kernel access token works only on its own kernel").into_response();
+                }
+                None
             }
             _ => None,
         },
