@@ -475,6 +475,16 @@ async fn test_fr_a3_user_permission_names_the_needed_capability() {
 }
 
 #[tokio::test]
+async fn test_fr_a3_interrupt_with_a_wrong_user_permission_is_bad_request() {
+    let s = TestServer::start(Mode::Dedicated).await;
+    let (kid, _) = s.kernel("train.py");
+    let a = s.admin();
+    let b = format!("/api/kernels/{kid}");
+    assert_eq!(a.post(&format!("{b}/interrupt?user_permission=execute"), json!({})).await.status, 200);
+    a.post(&format!("{b}/interrupt?user_permission=viewer3"), json!({})).await.error(400, "bad_request");
+}
+
+#[tokio::test]
 async fn test_fr_a3_token_share_is_issued_by_the_kernel() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, _) = s.kernel("train.py");
