@@ -265,6 +265,15 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 
 이 결정이 대체하는 것: D15의 "릴레이는 UDP를 받는 곳에 둡니다", "`darkpyonix/hub/server`는 릴레이 호스트로 남깁니다", "Durable Objects는 … 릴레이를 Container로 옮길 때만"의 릴레이 부분, D15 개정 표의 `relay.darkpyonix.dev` 행과 "노트북 페이지가 … 릴레이·P2P로 붙습니다", PROJECT Q9(릴레이를 VPS에 둘지 Container에 둘지)와 Q1 리더 권장 중 "darkpyonix.dev가 iroh-relay를 운영"하는 부분. D15의 나머지(Workers, TypeScript, D1, GitHub 로그인, 호스트 역할 분담)는 그대로입니다.
 
+### D24. `.pynb` 마크다운 셀은 기본 Markdown 외에 Quarkdown을 지원합니다
+
+사용자 결정(2026-11-22, 이슈 #3): "md는 당연히 들어가는거고 추가로 지원할 언어를 말하는거야 ... 쿼크다운은 그래서 넣자고 했잖아" / ".pynb의 마크다운 셀을 위한거야. Markdown말고도 Quarkdown 이런거 지원하자는거였고. 지원할 가치가 있냐를 보는게 목표였던거지".
+
+- **기본은 `markdown`, 첫 확장 언어는 `quarkdown`입니다.** 셀 메타데이터 `# @markup: <언어>`(생략 시 `markdown`)와 `darkpyonix.markdown(..., markup="<언어>")`로 선언합니다(FORMAT §2.3, §3.2, SPEC FR-F14).
+- **커널은 마크업을 렌더링하지 않습니다(NFR-K2).** 커널과 런타임 API는 표준 라이브러리만 쓰므로 마크업 파서나 외부 바이너리를 불러오지 않습니다. 커널은 원문과 언어별 MIME(`text/markdown` 또는 `text/vnd.darkpyonix.quarkdown`) 및 `text/plain` 폴백만 `display_data`로 내보냅니다. 매니저는 이를 그대로 전달·기록합니다.
+- **렌더링은 클라이언트가 맡고, GPL-3.0 경계를 지킵니다.** Quarkdown은 GPL-3.0이므로 Apache-2.0(core·Ember)과 MPL-2.0(ash) 바이너리에 라이브러리로 링크하지 않습니다. Ember는 별도 프로세스(로컬 Quarkdown CLI)를 호출해 생성한 결과를 샌드박스에서 표시하고, 설치되어 있지 않거나 오프라인 폴백이 필요할 때는 원문(`text/plain`)과 안내를 보여 줍니다. ash는 브라우저 WASM 렌더러 또는 사전 렌더된 `text/html`을 샌드박스 iframe(NFR-H3)에서 표시합니다.
+- **폐기·보류한 후보(이슈 #3).** Quarto는 노트북 실행 엔진 역할이 DarkPyonix 커널과 중복되고 설치본(약 150~250 MB)이 과대해 채택하지 않습니다. Pandoc은 셀 마크업 언어가 아니라 범용 문서 변환기(GPL-2.0+, 약 120~180 MB)이므로 셀 언어로 채택하지 않습니다. MyST(MIT, JS 파서)와 Typst(Apache-2.0, Rust/WASM)는 향후 확장 후보로 보류합니다.
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
