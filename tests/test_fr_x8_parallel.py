@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import gc
+import json
 import os
 import signal
 import subprocess
@@ -336,6 +337,53 @@ def test_fr_x10_fail_fast_cancels_siblings():
     assert isinstance(info.value.errors[0][1], RuntimeError)
     assert coro_cancelled is True
     assert thread_interrupted is True
+
+
+def test_fr_x10_fail_fast_interrupts_a_busy_thread_without_waiting_on_imports(python, scratch):
+    """#157: the interrupt must not wait for anything a busy worker slows down.
+
+    A CPU-bound worker holds the GIL, so every system call the main thread makes in the
+    meantime (an import's stat and open calls) waits for a GIL handoff. A long ``sys.path``
+    makes a first-time import do hundreds of them, like a cold CI runner does. Run in a
+    fresh interpreter so nothing has been imported for it.
+    """
+    path = _write(scratch, "parallel_fail_fast_cold.py", '''
+        import asyncio, json, os, sys, tempfile, threading, time
+        empty = tempfile.mkdtemp()
+        sys.path[:0] = [os.path.join(empty, "p%d" % i) for i in range(400)]
+        import darkpyonix
+
+        started = threading.Event()
+        marks = {}
+
+        async def fast_fail():
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.03)
+            marks["fail"] = time.monotonic()
+            raise RuntimeError("boom")
+
+        def busy():
+            started.set()
+            n = 0
+            try:
+                while True:
+                    n += 1
+            except KeyboardInterrupt:
+                marks["interrupted"] = time.monotonic()
+                raise
+
+        try:
+            darkpyonix.run_parallel(fast_fail(), busy, fail_fast=True)
+        except darkpyonix.ParallelError:
+            pass
+        print(json.dumps({"latency": marks["interrupted"] - marks["fail"]}), flush=True)
+        os._exit(0)
+    ''')
+    out = _run(python, path)
+    assert out.returncode == 0, out.stderr
+    latency = json.loads(out.stdout.strip().splitlines()[-1])["latency"]
+    assert latency < 0.05, "the interrupt reached the busy worker after %.3fs" % latency
 
 
 # --------------------------------------------------------------------------- FR-X11
