@@ -172,15 +172,37 @@ def match_run_cells(snap_cells: List[Dict[str, Any]],
     return out
 
 
-def _blank_sources(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Copy of ``event`` without cell code (no ``read``)."""
+def _blank_cell(cell: Any) -> Any:
+    if not isinstance(cell, dict):
+        return cell
+    out = dict(cell, source="")
+    if isinstance(out.get("conflict"), dict):
+        out["conflict"] = dict(out["conflict"], disk_source=None)
+    return out
+
+
+def blank_sources(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy of ``event`` without cell code, for a label without ``read`` (FR-K9, PROTOCOL §5.3).
+
+    Covers ``data.cell`` (``doc.cell.*``), ``data.cells`` (``doc.reloaded``) and the
+    ``local``/``disk`` sources of ``doc.conflict``.
+    """
     data = event.get("data")
-    if not isinstance(data, dict) or not isinstance(data.get("cell"), dict):
+    if not isinstance(data, dict):
         return event
-    cell = dict(data["cell"], source="")
-    if isinstance(cell.get("conflict"), dict):
-        cell["conflict"] = dict(cell["conflict"], disk_source=None)
-    return dict(event, data=dict(data, cell=cell))
+    out = dict(data)
+    changed = False
+    if isinstance(out.get("cell"), dict):
+        out["cell"] = _blank_cell(out["cell"])
+        changed = True
+    if isinstance(out.get("cells"), list):
+        out["cells"] = [_blank_cell(c) for c in out["cells"]]
+        changed = True
+    for side in ("local", "disk"):
+        if isinstance(out.get(side), dict) and "source" in out[side]:
+            out[side] = dict(out[side], source="" if side == "local" else None)
+            changed = True
+    return dict(event, data=out) if changed else event
 
 
 class WsSync(object):
@@ -316,7 +338,7 @@ class WsSync(object):
             if history:
                 out.append({"type": "event", "event": ev})
         else:
-            out.append({"type": "event", "event": ev if read else _blank_sources(ev)})
+            out.append({"type": "event", "event": ev if read else blank_sources(ev)})
         return [self._stamp(m, seq) for m in out]
 
     def _presence_messages(self, d: Dict[str, Any], when: Any, ev: Dict[str, Any]) -> List[Dict[str, Any]]:
