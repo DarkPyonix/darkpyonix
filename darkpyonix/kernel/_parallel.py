@@ -85,21 +85,42 @@ def _is_coroutine_callable(item: Any) -> bool:
     return False
 
 
+_SET_ASYNC_EXC = None  # type: Any
+_SET_ASYNC_EXC_LOADED = False
+
+
+def _load_set_async_exc() -> Any:
+    """``PyThreadState_SetAsyncExc`` through ``ctypes``, or ``None``; looked up once.
+
+    ``run_parallel`` calls this before any thread item starts (#157). Importing ``ctypes``
+    for the first time makes many system calls, and with a CPU-bound worker holding the
+    GIL each of them waits for a GIL handoff: done at interrupt time, the import alone
+    delayed the interrupt by up to a second on a CI runner.
+    """
+    global _SET_ASYNC_EXC, _SET_ASYNC_EXC_LOADED
+    if not _SET_ASYNC_EXC_LOADED:
+        _SET_ASYNC_EXC_LOADED = True
+        try:
+            import ctypes
+            _SET_ASYNC_EXC = (ctypes, ctypes.pythonapi.PyThreadState_SetAsyncExc)
+        except (ImportError, AttributeError, OSError):
+            _SET_ASYNC_EXC = None
+    return _SET_ASYNC_EXC
+
+
 def _interrupt_thread_ids(tids: Sequence[int]) -> bool:
     """Best-effort async ``KeyboardInterrupt`` injection via ``PyThreadState_SetAsyncExc``.
 
     Returns ``True`` if ``ctypes`` is available, ``False`` otherwise (after writing a
     warning to ``sys.stderr``).
     """
-    try:
-        import ctypes
-        set_async_exc = ctypes.pythonapi.PyThreadState_SetAsyncExc
-    except (ImportError, AttributeError, OSError):
+    loaded = _load_set_async_exc()
+    if loaded is None:
         sys.stderr.write(
             "darkpyonix: ctypes is unavailable; cannot interrupt running worker threads\n"
         )
         return False
-
+    ctypes, set_async_exc = loaded
     for tid in tids:
         try:
             res = set_async_exc(ctypes.c_ulong(tid), ctypes.py_object(KeyboardInterrupt))
@@ -178,6 +199,8 @@ def run_parallel(*items: Any, fail_fast: bool = False,
 
     if not items:
         return []
+    if "callable" in kinds:
+        _load_set_async_exc()  # now, while no worker competes for the GIL (#157)
 
     hook = _get_hook()
     cell_indices = [
