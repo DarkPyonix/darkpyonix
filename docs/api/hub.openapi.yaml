@@ -74,8 +74,8 @@ info:
     marked `deprecated: true`.
 
     **Planned paths.** A path item with `x-planned: true` is agreed in the SPEC but not yet
-    served by the Worker (hosted notebooks, FR-H14..H19); the OpenAPI test skips it until the
-    flag is removed. `/link`, `/s/{share_id}`, `/ash/` and the Flathub file are still served by
+    served by the Worker; the OpenAPI test skips it until the flag is removed. No path carries
+    the flag now: hosted notebooks (FR-H14..H19) are served. `/link`, `/s/{share_id}`, `/ash/` and the Flathub file are still served by
     the Worker and stay as `deprecated: true` until the front (FR-H12) replaces them.
 
     **Errors.** Error bodies are `Error` objects. Every 401 carries a `code`:

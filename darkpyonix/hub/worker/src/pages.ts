@@ -29,7 +29,7 @@ export function sharePlaceholderPage(shareId: string): string {
 <pre id="route"></pre>
 <script>
 fetch("/shares/${id}").then(function (r) { return r.json(); }).then(function (j) {
-  document.getElementById("route").textContent = "host: " + j.endpoint_id + "\\nrelay: " + j.relay_url;
+  document.getElementById("route").textContent = "host: " + j.endpoint_id;
 });
 </script>
 </body>
