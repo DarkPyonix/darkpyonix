@@ -274,6 +274,21 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 - **렌더링은 클라이언트가 맡고, GPL-3.0 경계를 지킵니다.** Quarkdown은 GPL-3.0이므로 Apache-2.0(core·Ember)과 MPL-2.0(ash) 바이너리에 라이브러리로 링크하지 않습니다. Ember는 별도 프로세스(로컬 Quarkdown CLI)를 호출해 생성한 결과를 샌드박스에서 표시하고, 설치되어 있지 않거나 오프라인 폴백이 필요할 때는 원문(`text/plain`)과 안내를 보여 줍니다. ash는 브라우저 WASM 렌더러 또는 사전 렌더된 `text/html`을 샌드박스 iframe(NFR-H3)에서 표시합니다.
 - **폐기·보류한 후보(이슈 #3).** Quarto는 노트북 실행 엔진 역할이 DarkPyonix 커널과 중복되고 설치본(약 150~250 MB)이 과대해 채택하지 않습니다. Pandoc은 셀 마크업 언어가 아니라 범용 문서 변환기(GPL-2.0+, 약 120~180 MB)이므로 셀 언어로 채택하지 않습니다. MyST(MIT, JS 파서)와 Typst(Apache-2.0, Rust/WASM)는 향후 확장 후보로 보류합니다.
 
+### D25. 레이아웃·병렬 실행·데이터 형식을 확정하고, interop·캐시는 1.0 이후로 미룹니다
+
+오너 결정(2026-11-22, 이슈 #5·#7, PROJECT Q7·Q8):
+
+- **레이아웃과 병렬 실행(이슈 #7).** 오너 원문: `"그니까 내가 예시 파일 확인하라고 했잖아. 확인 했어? 인용이 답변 기다릴거 없이 인용이가 올려둔 이슈의 예시 파일을 보라고"`. 인용(dlsdyd)의 추가 답변을 기다리지 않고 참조 예시 파일([`docs/examples/darkpyonix_format.py`](examples/darkpyonix_format.py))을 기준으로 확정합니다(SPEC FR-F7, FR-X7~X11 `Agreed`).
+  - **레이아웃:** `[grid]`/`[/grid]` 여닫는 태그를 두지 않습니다. 셀 메타데이터 `# @layout: horizontal|vertical` 전환과 `# @width: 1fr`만 쓰고, 가로 줄을 세로로 쌓아 grid를 표현합니다. `layout: grid`는 파서가 보존하되 `horizontal`로 계산합니다.
+  - **병렬 묶음과 실행:** `[parallel]`에서 시작해 `[concurrent]`(별칭 `concorrunt`)에서 끝나는 묶음과 `__co_routines__`, `darkpyonix.run_parallel(*__co_routines__)`를 씁니다. 묶음 안의 셀을 하나만 실행해도 묶음 전체가 실행됩니다.
+  - **실행기와 실패 정책:** 메인 스레드 `asyncio` 이벤트 루프(awaitable) + 스레드 풀(일반 callable)을 씁니다. 기본은 gather 방식(`fail_fast=False`)으로 나머지 항목이 끝까지 돈 뒤 `.errors`를 담은 `darkpyonix.ParallelError`를 냅니다(`fail_fast=True`는 선택 옵션). awaitable도 callable도 아닌 값이 들어오면 아무것도 실행하기 전에 `TypeError`를 냅니다. 프로세스 실행기(FR-X12)는 후속으로 남겨 둡니다(`Draft`).
+- **언어 interop과 캐시(이슈 #5).** 오너 원문: `"C, C++, 캐시 등등은 나중으로 미뤄"`. C(Cython)·C++(cppyy)·Rust(maturin·PyO3) interop(SPEC FR-F8~F11)과 interop 빌드 캐시는 모두 1.0 이후로 미룹니다(`Draft` 유지).
+- **데이터 형식과 SQL(이슈 #5).** `darkpyonix.json`/`toml`/`yaml`/`sql`(SPEC FR-F12·FR-F13)을 `Agreed`로 확정합니다.
+  - **Python 3.8~3.10용 TOML 파서:** 3.11 이상은 표준 `tomllib`을 쓰고, 3.8~3.10은 MIT 라이선스 `tomli` 순수 파이썬 소스를 `LICENSE`와 함께 `darkpyonix/kernel/_vendor/tomli/`에 내장합니다(Apache-2.0 저장소에 MIT 코드 포함 승인).
+  - **기본 변수 바인딩:** `json`/`toml`/`yaml`/`sql` 모두 결과를 반환하면서 호출부 전역 `target`(기본 `"_"`, `None`이면 미바인딩)에 묶어 `python file.py`에서도 똑같이 동작합니다.
+  - **SQL 기본 연결:** `con`과 `darkpyonix.sql.connection`이 없으면 프로세스당 하나인 `sqlite3` 메모리 DB를 기본 연결로 씁니다.
+- **폐기한 대안:** `[grid]`/`[/grid]` 여닫는 태그(협업 편집에서 셀 이동·삭제 시 짝이 깨짐), `run_parallel`에서 awaitable·callable이 아닌 값을 그대로 돌려주는 0.3.0 스텁 동작(잘못 넘긴 값을 조용히 삼킴), Python 3.8~3.10에서 `tomli` 외부 설치를 요구하는 방식(설치 없이 동작해야 하는 NFR-K2 취지와 충돌).
+
 ## 4. 폐기한 대안
 
 | 대안 | 폐기 이유 |
@@ -311,6 +326,9 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 | 노트북 본문을 R2 공개 버킷 또는 별도 호스트에서 직접 서빙 | 비공개 노트북의 권한 검사를 우회하고 응답 헤더를 통제하기 어렵습니다. 본문은 Worker를 거쳐서만 나갑니다(D15 개정). 렌더링 iframe을 어느 도메인에서 띄울지는 이것과 다른 질문입니다(PROJECT Q18) |
 | 노트북 출력과 ash 코드를 메인 페이지 출처에서 실행 | 남이 쓴 스크립트가 메인 페이지 출처의 자격 증명으로 API를 부를 수 있습니다. 출처 없는 샌드박스 iframe에서만 돌립니다(NFR-H3) |
 | REST 경로 버전(`/api/v1`, `/v1`)과 `/config`의 `api_version` | 사용자 결정(2026-10-03, "REST API의 버저닝은 죄악이야"). 판이 생기면 깨는 변경이 허락되고, 서버는 여러 판을, 클라이언트는 판 고르기를 떠안습니다. 더하기만 하는 변경과 `deprecated` 표시로 대신합니다(D16) |
+| `[grid]`/`[/grid]` 여닫는 태그(또는 `# @grid: begin\|end`) | 협업 편집에서 셀 이동·삭제 시 짝이 깨지고, 참조 예시 파일(`docs/examples/darkpyonix_format.py`)도 셀 메타데이터만 씁니다. `# @layout: horizontal\|vertical` 전환과 `# @width`로 대체합니다(D25) |
+| `run_parallel`에서 awaitable·callable이 아닌 값을 그대로 반환(0.3.0 스텁) | 잘못 넘긴 인자를 조용히 삼켜 오류를 숨깁니다. 아무것도 실행하기 전에 `TypeError`를 냅니다(D25) |
+| Python 3.8~3.10에서 `tomli` 외부 설치 요구(`InteropUnavailable`) 또는 자체 TOML 파서 작성 | 3.8~3.10에서도 추가 설치 없이 3.11+ `tomllib`과 같은 결과를 내야 합니다. MIT `tomli` 소스를 `LICENSE`와 함께 `darkpyonix/kernel/_vendor/tomli/`에 내장합니다(D25) |
 
 ## 5. 승인 없이 바뀐 결정과 복구 (2026-10-03)
 
