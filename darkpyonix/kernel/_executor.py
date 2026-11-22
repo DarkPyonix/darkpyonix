@@ -19,6 +19,7 @@ from __future__ import annotations
 import __future__ as _future
 import _thread
 import ast
+import asyncio
 import builtins
 import collections
 import linecache
@@ -29,11 +30,11 @@ import sys
 import threading
 import time
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from darkpyonix import format as fmt
 from darkpyonix import _figures as figures, _hostctx as hostctx
-from darkpyonix._capture import FdCapture, OutputRouter, StreamCapture
+from darkpyonix._capture import DirectStream, FdCapture, OutputRouter, StreamCapture
 from darkpyonix._collab import by_of
 from darkpyonix._display import format_bundle
 from darkpyonix._model import CellRecord, Run, RunRequest
@@ -61,6 +62,119 @@ def _type_name(obj: Any) -> str:
     if module in (None, "builtins", "__main__"):
         return qual
     return "%s.%s" % (module, qual)
+
+
+def _current_coroutines(ns: Dict[str, Any]) -> List[Any]:
+    items = ns.get("__co_routines__")
+    if isinstance(items, (list, tuple)):
+        return list(items)
+    return []
+
+
+class _OpenMember(object):
+    __slots__ = ("index", "rec", "doc_cell_id", "t0", "pending_count", "status", "finished")
+
+    def __init__(self, index: int, rec: CellRecord, doc_cell_id: Optional[str],
+                 t0: float, pending_count: int) -> None:
+        self.index = index
+        self.rec = rec
+        self.doc_cell_id = doc_cell_id
+        self.t0 = t0
+        self.pending_count = pending_count
+        self.status = "ok"
+        self.finished = False
+
+
+class _ParallelGroupState(object):
+    """Tracks one closed ``[parallel]``..``[concurrent]`` group and implements ``ParallelHook``."""
+
+    def __init__(self, executor: "Executor", run: Run, head: int, end: int) -> None:
+        self.executor = executor
+        self.run = run
+        self.head = head
+        self.end = end
+        self.seen_ids = set()       # type: Set[int]
+        self.item_to_cell = {}      # type: Dict[int, int]
+        self.open_members = {}      # type: Dict[int, _OpenMember]
+
+    def snapshot_coroutines(self, ns: Dict[str, Any]) -> None:
+        self.seen_ids = set(id(x) for x in _current_coroutines(ns))
+
+    def associate_new_items(self, cell_index: int, ns: Dict[str, Any]) -> int:
+        after = _current_coroutines(ns)
+        new_ids = set()  # type: Set[int]
+        for item in after:
+            ident = id(item)
+            if ident not in self.seen_ids:
+                new_ids.add(ident)
+        if not new_ids:
+            return 0
+        self.seen_ids.update(new_ids)
+        for ident in new_ids:
+            self.item_to_cell[ident] = cell_index
+        return sum(1 for item in after if id(item) in new_ids)
+
+    def add_open_member(self, index: int, rec: CellRecord, doc_cell_id: Optional[str],
+                        t0: float, pending_count: int) -> None:
+        self.open_members[index] = _OpenMember(index, rec, doc_cell_id, t0, pending_count)
+
+    def cell_of(self, item: Any) -> Optional[int]:
+        return self.item_to_cell.get(id(item))
+
+    def enter_cell(self, cell_index: int) -> Any:
+        return hostctx.current_cell.set(cell_index)
+
+    def item_finished(self, cell_index: int, exc_info: Optional[Tuple[Any, Any, Any]]) -> None:
+        member = self.open_members.get(cell_index)
+        if member is None or member.finished:
+            return
+        member.pending_count -= 1
+        from_interrupt = False
+        if exc_info is not None:
+            etype, evalue, tb = exc_info
+            if etype is not None and isinstance(etype, type) and issubclass(
+                    etype, (asyncio.CancelledError, KeyboardInterrupt)):
+                from_interrupt = issubclass(etype, KeyboardInterrupt)
+                if member.status != "error":
+                    member.status = "interrupted"
+            else:
+                member.status = "error"
+                err_out = self.executor._error_output(etype, evalue, tb)
+                self.executor.router.write_output(err_out, cell_index=cell_index)
+        if member.pending_count <= 0:
+            self._finish_member(member, from_interrupt=from_interrupt)
+
+    def _finish_member(self, member: _OpenMember, from_interrupt: bool = False) -> None:
+        if member.finished:
+            return
+        prev_in_user = self.executor._in_user
+        self.executor._in_user = False
+        try:
+            member.finished = True
+            self.executor.router.unregister_cell(member.index)
+            self.executor.router.flush()
+            member.rec.status = member.status
+            member.rec.ended_at = now_iso()
+            self.executor.emit("cell.finished", {
+                "run_id": self.run.run_id,
+                "index": member.index,
+                "cell_id": member.doc_cell_id,
+                "status": member.status,
+                "duration": round(time.monotonic() - member.t0, 6),
+                "started_by": self.run.started_by,
+            })
+            self.executor._store_call("update", self.run)
+        finally:
+            self.executor._in_user = prev_in_user
+        if prev_in_user and not from_interrupt and self.executor._interrupt_target == self.run.run_id:
+            raise KeyboardInterrupt
+
+    def finish_remaining(self, interrupted: bool = False) -> None:
+        for member in self.open_members.values():
+            if not member.finished:
+                if interrupted and member.status != "error":
+                    member.status = "interrupted"
+                self._finish_member(member, from_interrupt=interrupted)
 
 
 class Executor(object):
@@ -102,6 +216,7 @@ class Executor(object):
         self.fdcapture = None                   # type: Optional[FdCapture]
         self._saved_streams = None              # type: Optional[Tuple[Any, Any]]
         self._captures = []                     # type: List[Any]
+        self._direct_streams = []               # type: List[Any]
         self._saved_sigint = None
         # The real stderr while capture is installed (for kernel diagnostics).
         self.original_stderr = sys.stderr
@@ -443,6 +558,8 @@ class Executor(object):
         self._saved_streams = (sys.stdout, sys.stderr)
         self._captures = [StreamCapture("stdout", self.router, out_fallback, out_fd),
                           StreamCapture("stderr", self.router, err_fallback, err_fd)]
+        self._direct_streams = [DirectStream("stdout", self.router, out_fallback, out_fd),
+                                DirectStream("stderr", self.router, err_fallback, err_fd)]
         sys.stdout, sys.stderr = self._captures
         try:
             self._saved_sigint = signal.signal(signal.SIGINT, self._on_sigint)
@@ -469,6 +586,7 @@ class Executor(object):
                 except Exception:
                     pass
             self._captures = []
+            self._direct_streams = []
             sys.stdout, sys.stderr = self._saved_streams
             self._saved_streams = None
         if self.fdcapture is not None:
@@ -531,7 +649,9 @@ class Executor(object):
             if req.mode == "all":
                 indexes = list(range(len(doc.cells)))
             else:
-                indexes = list(req.cells)
+                req_expanded = self._expand_parallel_groups(doc, list(req.cells))
+                run.cell_indexes = list(req_expanded)
+                indexes = list(req_expanded)
                 if not self._preamble_done and 0 not in indexes:
                     indexes.insert(0, 0)
             if doc.cells and not doc.cells[0].source.strip():
@@ -551,27 +671,36 @@ class Executor(object):
                                                else None for i in indexes],
                                   "params": dict(run.params), "started_by": run.started_by})
         status = "ok"
+        active_group = None  # type: Optional[_ParallelGroupState]
         if load_error is not None:
             status = "error"
             self._log("cannot load %s: %r" % (self.path, load_error))
         else:
             linecache.cache[self.path] = (len(text), None, text.splitlines(True), self.path)
             lines = self._cell_lines(doc, text)
-            for idx in indexes:
-                if self._interrupt_target == run.run_id:
-                    status = "interrupted"
-                    break
-                if idx >= len(doc.cells):
-                    status = "error"
-                    self._log("run %s: no cell %d" % (run.run_id, idx))
-                    break
-                cstatus = self._run_cell(run, doc.cells[idx], lines.get(idx),
-                                         cell_ids[idx] if cell_ids is not None else None)
-                if cstatus != "ok":
-                    status = cstatus
-                    break
-                if self._exit_requested:
-                    break
+            try:
+                for idx in indexes:
+                    if self._interrupt_target == run.run_id:
+                        status = "interrupted"
+                        break
+                    if idx >= len(doc.cells):
+                        status = "error"
+                        self._log("run %s: no cell %d" % (run.run_id, idx))
+                        break
+                    cstatus, active_group = self._run_cell(
+                        run, doc.cells[idx], lines.get(idx),
+                        cell_ids[idx] if cell_ids is not None else None,
+                        active_group=active_group,
+                    )
+                    if cstatus != "ok":
+                        status = cstatus
+                        break
+                    if self._exit_requested:
+                        break
+            finally:
+                if active_group is not None:
+                    active_group.finish_remaining(interrupted=(status != "ok"))
+                    active_group = None
         self._exit_requested = False
         run.status = status
         if status == "interrupted" and self._interrupt_target == run.run_id:
@@ -607,8 +736,29 @@ class Executor(object):
             pos = i + len(src)
         return out
 
+    @staticmethod
+    def _expand_parallel_groups(doc: Any, indexes: List[int]) -> List[int]:
+        """Expand any cell belonging to a closed parallel group to ``head..end`` (FR-X7)."""
+        expanded = []  # type: List[int]
+        seen = set()   # type: Set[int]
+        n = len(doc.cells)
+        for idx in indexes:
+            grp = doc.cells[idx].group if 0 <= idx < n else None
+            if grp is not None:
+                for gidx in range(grp["head"], grp["end"] + 1):
+                    if gidx not in seen:
+                        seen.add(gidx)
+                        expanded.append(gidx)
+            else:
+                if idx not in seen:
+                    seen.add(idx)
+                    expanded.append(idx)
+        return expanded
+
     def _run_cell(self, run: Run, cell: Any, line_offset: Optional[int],
-                  doc_cell_id: Optional[str] = None) -> str:
+                  doc_cell_id: Optional[str] = None,
+                  active_group: Optional[_ParallelGroupState] = None
+                  ) -> Tuple[str, Optional[_ParallelGroupState]]:
         rec = CellRecord(cell.index, cell.type, cell.source, cell.source_sha256,
                          title=cell.title, cell_id=cell.id, metadata=cell.metadata)
         self.execution_count += 1
@@ -618,17 +768,60 @@ class Executor(object):
         run.cells.append(rec)
         if cell.index == 0:
             self._preamble_done = True
-        self.emit("cell.started", {"run_id": run.run_id, "index": cell.index,
-                                   "cell_id": doc_cell_id, "execution_count": count,
-                                   "started_by": run.started_by})
+        grp = cell.group
+        is_head = grp is not None and cell.index == grp["head"]
+        is_member = (active_group is not None and grp is not None
+                     and active_group.head < cell.index < active_group.end)
+        is_end = (active_group is not None and grp is not None
+                  and cell.index == active_group.end)
+
+        started_event = {
+            "run_id": run.run_id, "index": cell.index,
+            "cell_id": doc_cell_id, "execution_count": count,
+            "started_by": run.started_by,
+        }
+        if grp is not None:
+            started_event["group"] = dict(grp)
+        self.emit("cell.started", started_event)
         self.router.begin_cell(run, rec, doc_cell_id)
+        if cell.type == "parallel" and grp is None:
+            self.router.write_stream(
+                "stderr",
+                "darkpyonix: [parallel] at cell %d has no [concurrent]; "
+                "running its cells one by one\n" % cell.index,
+            )
         t0 = time.monotonic()
-        status, error = self._exec_cell(run, cell, line_offset, count)
+        if is_end and active_group is not None:
+            self.router.flush_streams()
+            hostctx.set_parallel_hook(active_group)
+            if self._direct_streams:
+                sys.stdout, sys.stderr = self._direct_streams
+            try:
+                status, error = self._exec_cell(run, cell, line_offset, count)
+            finally:
+                if self._captures:
+                    sys.stdout, sys.stderr = self._captures
+                hostctx.set_parallel_hook(None)
+            active_group.finish_remaining(interrupted=(status == "interrupted"))
+            active_group = None
+        else:
+            status, error = self._exec_cell(run, cell, line_offset, count)
+
         figures.flush(self._log)
         if error is not None:
             self.router.write_output(error)
         if self.fdcapture is not None:
             self.fdcapture.sync()
+
+        if is_member and active_group is not None and status == "ok" and not self._exit_requested:
+            added = active_group.associate_new_items(cell.index, self._ns)
+            if added > 0:
+                active_group.add_open_member(cell.index, rec, doc_cell_id, t0, added)
+                self.router.register_cell(run, rec, doc_cell_id)
+                self.router.end_cell()
+                self._store_call("update", run)
+                return status, active_group
+
         self.router.end_cell()
         rec.status = status
         rec.ended_at = now_iso()
@@ -637,7 +830,12 @@ class Executor(object):
                                     "duration": round(time.monotonic() - t0, 6),
                                     "started_by": run.started_by})
         self._store_call("update", run)
-        return status
+        if is_head and status == "ok" and not self._exit_requested:
+            if active_group is not None:
+                active_group.finish_remaining(interrupted=False)
+            active_group = _ParallelGroupState(self, run, grp["head"], grp["end"])
+            active_group.snapshot_coroutines(self._ns)
+        return status, active_group
 
     def _compile(self, source: str, filename: str, line_offset: int):
         tree = compile(source, filename, "exec", ast.PyCF_ONLY_AST | self._future_flags, True)
