@@ -159,7 +159,7 @@ matplotlib이 설치된 인터프리터에서는 커널이 `plt.show()`와 셀 �
   - A에는 `error` 출력이 나오고, `[concurrent]` 셀에는 `.errors`에 A의 예외를 담은 `ParallelError`가 나옵니다.
   - 그 실행의 다음 셀은 건너뜁니다.
   - `fail_fast=True`이면 B가 취소됩니다.
-- 테스트: `test_fr_x10_failure_waits_for_siblings_then_raises`, `test_fr_x10_fail_fast_cancels_siblings`
+- 테스트: `test_fr_x10_failure_waits_for_siblings_then_raises`, `test_fr_x10_fail_fast_cancels_siblings`, `test_fr_x10_fail_fast_interrupts_a_busy_thread_without_waiting_on_imports`(#157: 스레드 항목이 있으면 `run_parallel`이 시작 전에 `PyThreadState_SetAsyncExc`를 찾아 두어, 중단이 바쁜 스레드 옆의 첫 `ctypes` import를 기다리지 않음)
 
 ### FR-X11 병렬 인터럽트 (`Agreed`, [user, 2026-11-22], 이슈 #7)
 근거: 제안 §3.7, `docs/examples/darkpyonix_format.py`, INTENT D25(2026-11-22 오너 결정). FR-X4를 병렬 묶음으로 넓힙니다. `run_parallel`은 메인 스레드에서 받은 `KeyboardInterrupt`를 잡아 남은 태스크를 모두 취소하고, 아직 도는 스레드 항목에는 `PyThreadState_SetAsyncExc`로 `KeyboardInterrupt`를 보냅니다(최선의 시도. C 코드 안에서 막힌 스레드는 그 호출이 돌아올 때까지 멈추지 않음). 스레드를 최대 1초 기다린 뒤 `KeyboardInterrupt`를 다시 일으킵니다. 실행과 아직 끝나지 않은 묶인 셀은 `interrupted`로 끝나고, 네임스페이스는 남습니다. 커널을 죽이지 않습니다.
