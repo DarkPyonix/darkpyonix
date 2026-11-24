@@ -308,10 +308,10 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 
 리더 결정(2026-11-25)으로 D10의 "리버스 프록시(VS Code `serve-web` 등)"를 이렇게 구체화합니다.
 
-- **런타임 둘.** OSE(DarkPyonix가 빌드한 Code-OSS 서버, Ember D10)가 기본이고 늘 설치합니다. 사용자가 고르면 자기 Microsoft VS Code의 `code serve-web`(VSC)을 더합니다. OSE는 Ember의 `ose-v*` 릴리스에서 받고, 판은 Ember 릴리스가 정합니다. Ember 에디터가 지원하는 Code-OSS 커밋에만 붙기 때문입니다(Ember D50). 매니저는 판을 고르지 않고, 받은 아카이브의 커밋과 판을 알려 줄 뿐입니다. VSC는 아무것도 내려받지 않고 사용자의 `code` 경로만 기록합니다. Microsoft 서버를 내려받거나 묶거나 대신 설치하지 않는다는 Ember D10의 라이선스 판단을 매니저도 따릅니다(SPEC FR-M8).
+- **런타임 둘.** OSE(DarkPyonix가 빌드한 Code-OSS 서버, Ember D10)가 기본이고 늘 설치합니다. 사용자가 고르면 자기 Microsoft VS Code의 `code serve-web`(VSC)을 더합니다. OSE는 Ember의 `ose-v*` 릴리스에서 받고, 판은 Ember 릴리스가 정합니다. Ember 에디터가 지원하는 Code-OSS 커밋에만 붙기 때문입니다(Ember D50). 매니저는 판을 고르지 않고, 받은 아카이브의 커밋과 판을 알려 줄 뿐입니다. VSC는 아무것도 내려받지 않고 사용자의 `code` 경로만 기록하며, 사용자가 Microsoft 서버 라이선스를 받아들인다는 플래그를 직접 줄 때만 설치됩니다. Microsoft 서버를 내려받거나 묶거나 대신 설치하지 않는다는 Ember D10의 라이선스 판단을 매니저도 따릅니다(SPEC FR-M8).
 - **별도 자식 프로세스, 매니저가 부모.** OSE와 `code serve-web`은 Node.js 프로그램이라 Rust 매니저 프로세스 안에 둘 수 없습니다. 전용 매니저가 시작할 때 자동 시작이 켜진 런타임을 자식으로 띄우고, 죽으면 다시 띄우고, 매니저가 끝나면 함께 끝냅니다. 에디터 서버는 커널과 달리 매니저보다 오래 살 이유가 없습니다(SPEC FR-M9).
 - **0700 소켓, 토큰 없음.** 에디터 서버는 `--without-connection-token --socket-path`로 사용자만 들어갈 수 있는 디렉터리의 유닉스 도메인 소켓에만 리슨합니다. OSE는 연결 토큰을 브라우저 쪽에 돌려주므로 토큰으로는 지킬 수 없고, 같은 기계의 다른 계정이 붙을 수 있는 루프백 포트도 쓰지 않습니다(D5와 같은 판단).
-- **매니저 엔드포인트가 유일한 입구.** 매니저가 `/ide/<런타임>/` 아래의 HTTP와 WebSocket을 그 소켓으로 프록시하고 인증합니다. 인증은 매니저 토큰(Bearer)이나 실행 표입니다. 실행 표는 `POST /editor/{runtime}/launch`가 내고, 첫 요청의 `?dpx-ticket=`이 302와 함께 `HttpOnly` 쿠키가 됩니다. ember-node는 요청마다 헤더를 넣을 수 없는 바이트 relay라서 표가 필요합니다. 노드는 에디터 소켓에 붙지 않고, Ember 에디터와 VS Code 두 목표가 같은 서버, 같은 경로를 씁니다(SPEC FR-M9, FR-M10).
+- **매니저 엔드포인트가 유일한 입구.** 매니저가 `/ide/<런타임>/` 아래의 HTTP와 WebSocket을 그 소켓으로 프록시하고 인증합니다. 인증은 마스터 토큰(Bearer)이나 실행 표입니다. 에디터 서버는 터미널과 기계의 파일 전체를 열므로, 노트북 하나에 묶인 공유 토큰으로는 열리지 않습니다. 실행 표는 `POST /editor/{runtime}/launch`가 내고, 첫 요청의 `?dpx-ticket=`이 302와 함께 `HttpOnly` 쿠키가 됩니다. ember-node는 요청마다 헤더를 넣을 수 없는 바이트 relay라서 표가 필요합니다. 노드는 에디터 소켓에 붙지 않고, Ember 에디터와 VS Code 두 목표가 같은 서버, 같은 경로를 씁니다(SPEC FR-M9, FR-M10).
 - **Ember 에디터 UI는 Ember 클라이언트에만 있습니다.** 매니저와 노드는 에디터 서버만 다룹니다.
 
 ## 4. 폐기한 대안
