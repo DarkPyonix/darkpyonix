@@ -447,10 +447,10 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ### FR-M10 에디터 제어 API — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
 마스터 토큰으로만 인증합니다(FR-M9와 같은 이유). 공유 토큰은 `403`입니다. `docs/api/manager.openapi.yaml`에 구현과 같은 변경으로 더합니다(NFR-M3).
-- `GET /editor` → `{runtimes: [{runtime, version, commit, state, path, reason?}], default_runtime, autostart}`. `state`는 `running`, `starting`, `stopped`, `failed`. `path`는 `/ide/<런타임>/`. 설치된 것이 없으면 빈 목록입니다. 소켓 경로는 알려 주지 않습니다.
-- `POST /editor/{runtime}/launch` → `{ticket, path, commit, version}`. 멱등하게 에디터 서버를 켜고 소켓이 답할 때까지(최대 30초) 기다린 뒤 새 실행 표를 냅니다. 설치되지 않았으면 `409`와 이유, 30초 안에 답하지 않으면 `503`.
-- `POST /editor/{runtime}/stop` → `204`. 에디터 서버를 끄고 그 런타임의 표를 모두 지웁니다. 다음 `launch`나 매니저 재시작까지 다시 띄우지 않습니다.
-- `POST /editor/{runtime}/extensions {id, version?}` → `{installed: true}`. 그 런타임의 CLI로 같은 `--server-data-dir`에 확장을 설치합니다. OSE는 Open VSX, VSC는 사용자의 Microsoft 마켓플레이스(Ember E4). 실패하면 `422`와 CLI의 출력.
+- `GET /api/editor` → `{runtimes: [{runtime, version, commit, state, path, reason?}], default_runtime, autostart}`. `state`는 `running`, `starting`, `stopped`, `failed`. `path`는 `/ide/<런타임>/`. 설치된 것이 없으면 빈 목록입니다. 소켓 경로는 알려 주지 않습니다.
+- `POST /api/editor/{runtime}/launch` → `{ticket, path, commit, version}`. 멱등하게 에디터 서버를 켜고 소켓이 답할 때까지(최대 30초) 기다린 뒤 새 실행 표를 냅니다. 설치되지 않았으면 `409`와 이유, 30초 안에 답하지 않으면 `503`.
+- `POST /api/editor/{runtime}/stop` → `204`. 에디터 서버를 끄고 그 런타임의 표를 모두 지웁니다. 다음 `launch`나 매니저 재시작까지 다시 띄우지 않습니다.
+- `POST /api/editor/{runtime}/extensions {id, version?}` → `{installed: true}`. 그 런타임의 CLI로 같은 `--server-data-dir`에 확장을 설치합니다. OSE는 Open VSX입니다(Ember E4). VSC는 `409`입니다: 사용자의 VS Code 확장은 그 VS Code가 Microsoft 마켓플레이스에서 직접 설치하고, 매니저는 Microsoft 서버의 확장 디렉터리를 다루지 않습니다. 설치가 실패하면 `422`와 CLI의 출력.
 - 테스트(계획): `test_fr_m10_editor_lists_installed_runtimes_without_the_socket`, `test_fr_m10_launch_is_idempotent_and_returns_a_fresh_ticket`, `test_fr_m10_launch_of_an_uninstalled_runtime_is_409`, `test_fr_m10_stop_ends_the_editor_until_the_next_launch`, `test_fr_m10_extensions_use_the_runtimes_data_dir`
 
 ## 8. CLI (C)
