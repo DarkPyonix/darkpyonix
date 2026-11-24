@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,8 @@ use tokio_stream::wrappers::BroadcastStream;
 pub const RUN: &str = "20261003-142233-a1f0";
 pub const OTHER_RUN: &str = "20261003-000000-0000";
 pub const TOKEN: &str = "fake-master-token";
+pub const SHARE_ID: &str = "s_0123456789abcdef";
+pub const SHARE_TOKEN: &str = "fake-share-token";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Scenario {
@@ -43,6 +45,8 @@ pub enum Scenario {
 
 pub struct FakeState {
     pub scenario: Scenario,
+    /// A dedicated manager (FR-M4) issues shares; an ephemeral one (the default) refuses.
+    pub dedicated: AtomicBool,
     pub calls: Mutex<Vec<(String, Value)>>,
     kernel: Mutex<Option<Value>>,
     tx: broadcast::Sender<(Option<u64>, String, Value)>,
@@ -122,6 +126,7 @@ impl Fake {
         let (tx, _) = broadcast::channel(1024);
         let state = Arc::new(FakeState {
             scenario,
+            dedicated: AtomicBool::new(false),
             calls: Mutex::new(Vec::new()),
             kernel: Mutex::new(None),
             tx,
@@ -231,8 +236,9 @@ async fn health() -> Json<Value> {
     Json(json!({"status": "ok", "version": "0.0.0-fake"}))
 }
 
-async fn manager_info() -> Json<Value> {
-    Json(json!({"version": "0.0.0-fake", "mode": "ephemeral", "pid": std::process::id(),
+async fn manager_info(State(s): St) -> Json<Value> {
+    let mode = if s.dedicated.load(Ordering::SeqCst) { "dedicated" } else { "ephemeral" };
+    Json(json!({"version": "0.0.0-fake", "mode": mode, "pid": std::process::id(),
                 "started_at": "2026-10-03T00:00:00Z", "idle_timeout": 120,
                 "capabilities": ["read", "history", "execute", "edit", "manage"]}))
 }
@@ -342,8 +348,19 @@ async fn document(State(s): St, Query(q): Query<HashMap<String, String>>) -> Res
 }
 
 async fn share(State(s): St, UrlPath(kid): UrlPath<String>, Json(body): Json<Value>) -> Response {
-    s.record(format!("POST /kernels/{kid}/shares"), body);
-    err(StatusCode::FORBIDDEN, "forbidden", "an ephemeral manager cannot share")
+    s.record(format!("POST /kernels/{kid}/shares"), body.clone());
+    if !s.dedicated.load(Ordering::SeqCst) {
+        return err(StatusCode::FORBIDDEN, "forbidden", "an ephemeral manager cannot share");
+    }
+    if known(&s, &kid).is_none() {
+        return err(StatusCode::NOT_FOUND, "not_found", "no such kernel");
+    }
+    // ShareWithToken (docs/api/manager.openapi.yaml): the token is shown in this response only.
+    let share = json!({"share_id": SHARE_ID, "kernel_id": kid, "capabilities": body["capabilities"],
+                       "label": body.get("label").cloned().unwrap_or(Value::Null),
+                       "created_at": "2026-10-03T00:00:00Z", "expires_at": null,
+                       "token": SHARE_TOKEN, "url": format!("https://darkpyonix.dev/s/{SHARE_ID}#{SHARE_TOKEN}")});
+    (StatusCode::CREATED, Json(share)).into_response()
 }
 
 async fn start_run(State(s): St, UrlPath(kid): UrlPath<String>, Json(body): Json<Value>) -> Response {

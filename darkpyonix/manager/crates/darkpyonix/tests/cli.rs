@@ -249,6 +249,87 @@ fn test_fr_c2_cli_commands() {
 }
 
 #[test]
+fn test_fr_c2_attach_follows_every_run_until_ctrl_c_detaches() {
+    let fake = Fake::start("attach", Scenario::Ok);
+    let f = fake.file();
+    let kid = kernel_id(&std::fs::canonicalize(&f).unwrap().to_string_lossy());
+
+    // Without a kernel there is nothing to attach to.
+    let o = run(&fake.home, &["attach", "train.py"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o.stderr).contains("no kernel is running for train.py"), "{}", text(&o.stderr));
+
+    assert_eq!(run(&fake.home, &["kernel", "train.py"]).status.code(), Some(0));
+    let mut child = cli(&fake.home)
+        .args(["attach", "train.py"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let events = format!("GET /kernels/{kid}/events");
+    wait_until("attach to open the event stream", Duration::from_secs(10), || fake.state.count(&events) > 0);
+    // The stream subscribes right after recording the call; give it that moment.
+    std::thread::sleep(Duration::from_millis(300));
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+
+    // Every run's output shows, and the end of a run does not end the attachment.
+    fake.state.emit("run.started", json!({"run_id": RUN, "mode": "all", "cells": [], "params": {}}));
+    fake.state.out(RUN, json!({"output_type": "stream", "name": "stdout", "text": "first\n"}));
+    fake.state.emit("run.finished", json!({"run_id": RUN, "status": "error", "duration": 0.1}));
+    fake.state.out(OTHER_RUN, json!({"output_type": "stream", "name": "stdout", "text": "second\n"}));
+    assert_eq!(lines.next().unwrap().unwrap(), "first");
+    assert_eq!(lines.next().unwrap().unwrap(), "second");
+
+    // Ctrl-C detaches with 0 and interrupts nothing.
+    sigint(child.id());
+    let status = child.wait().unwrap();
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("attached to train.py (idle); Ctrl-C detaches"), "{stderr}");
+    assert!(stderr.contains(&format!("run {RUN} finished: error")), "{stderr}");
+    assert_eq!(fake.state.count(&format!("POST /kernels/{kid}/interrupt")), 0, "attach never interrupts");
+    assert_eq!(fake.state.count(&format!("POST /kernels/{kid}/runs")), 0, "attach never runs");
+}
+
+#[test]
+fn test_fr_c2_share_on_a_dedicated_manager_prints_the_link_and_the_token_once() {
+    let fake = Fake::start("share_dedicated", Scenario::Ok);
+    fake.state.dedicated.store(true, std::sync::atomic::Ordering::SeqCst);
+    let f = fake.file();
+    let kid = kernel_id(&std::fs::canonicalize(&f).unwrap().to_string_lossy());
+    let shares = format!("POST /kernels/{kid}/shares");
+
+    // A share is for a running kernel.
+    let o = run(&fake.home, &["share", "train.py", "--capabilities", "read"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o.stderr).contains("no kernel is running for train.py"), "{}", text(&o.stderr));
+
+    assert_eq!(run(&fake.home, &["kernel", "train.py"]).status.code(), Some(0));
+    let o = run(&fake.home, &["share", "train.py", "--capabilities", "read,history", "--label", "review"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let sent: Vec<Value> = fake.state.calls().into_iter().filter(|c| c.0 == shares).map(|c| c.1).collect();
+    assert_eq!(sent.last().unwrap(), &json!({"capabilities": ["read", "history"], "label": "review"}));
+    assert_eq!(
+        text(&o.stdout),
+        format!(
+            "read+history share for train.py\nurl    https://darkpyonix.dev/s/{SHARE_ID}#{SHARE_TOKEN}\n\
+             token  {SHARE_TOKEN}\n(the token is shown only once)\n"
+        )
+    );
+
+    // For an agent: the manager's ShareWithToken as it came.
+    let o = run(&fake.home, &["share", "train.py", "--capabilities", "execute", "--json"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["share_id"], SHARE_ID);
+    assert_eq!(v["kernel_id"], kid.as_str());
+    assert_eq!(v["capabilities"], json!(["execute"]));
+    assert_eq!(v["token"], SHARE_TOKEN);
+    assert_eq!(v["label"], Value::Null);
+}
+
+#[test]
 fn test_fr_c2_logs_follow_replays_the_executing_run() {
     // Busy: the kernel reports RUN as executing; its early output is only in the replay buffer.
     let fake = Fake::start("logs_follow", Scenario::Busy);
