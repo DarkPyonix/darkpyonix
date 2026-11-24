@@ -290,13 +290,13 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
   - **SQL 기본 연결:** `con`과 `darkpyonix.sql.connection`이 없으면 프로세스당 하나인 `sqlite3` 메모리 DB를 기본 연결로 씁니다.
 - **폐기한 대안:** `[grid]`/`[/grid]` 여닫는 태그(협업 편집에서 셀 이동·삭제 시 짝이 깨짐), `run_parallel`에서 awaitable·callable이 아닌 값을 그대로 돌려주는 0.3.0 스텁 동작(잘못 넘긴 값을 조용히 삼킴), Python 3.8~3.10에서 `tomli` 외부 설치를 요구하는 방식(설치 없이 동작해야 하는 NFR-K2 취지와 충돌).
 
-### D26. 매니저는 단독 바이너리로도 배포하고, ember-node가 설치해 사용자 서비스로 돌립니다
+### D26. 매니저는 PyPI에서 받고, ember-node가 설치해 노드와 따로 사용자 서비스로 돌립니다
 
-오너 결정(2026-11-25): "사용자는 노드에서 클로드 코드 깔듯이 한줄 실행할거고, 거기에 노드가 깔리고 노드 첫 실행에 다크피닉스 매니저까지 같이 설치되어야지." 리더가 권장안대로 정했습니다(오너가 반대하지 않는 한 유지). 설계 메모는 `.scratch/leader/node-manager-editor-install-design.md`입니다.
+오너 결정(2026-11-25): "사용자는 노드에서 클로드 코드 깔듯이 한줄 실행할거고, 거기에 노드가 깔리고 노드 첫 실행에 다크피닉스 매니저까지 같이 설치되어야지." 그리고 "매니저는 pypi에서 받는거야. 매니저랑 노드는 따로야." 설계 메모는 `.scratch/leader/node-manager-editor-install-design.md`입니다.
 
-- **배포.** D22의 플랫폼 휠과 같은 빌드의 바이너리를 GitHub Release(`v<버전>`)에 `darkpyonix-<버전>-<대상>.tar.gz`(Windows는 `.zip`)와 `SHA256SUMS`로도 올립니다. 대상은 휠과 같은 다섯입니다. 파이썬이나 pip 없이 받을 수 있어야 노드가 설치할 수 있습니다(SPEC FR-C4).
-- **설치는 노드가 부르고, 등록은 매니저가 합니다.** ember-node는 자기 릴리스가 고정한 판(`DARKPYONIX_VERSION`)을 받아 `$DARKPYONIX_HOME/manager/<버전>/`에 두고 확인한 뒤 `darkpyonix service install --dedicated`를 부릅니다. 매니저가 마스터 토큰을 만들고 사용자 서비스(macOS launchd 사용자 에이전트, Linux `systemd --user`, Windows 사용자 예약 작업)로 등록하고, `{url, token, pid}`를 한 번 출력합니다(SPEC FR-M7).
-- **매니저는 노드의 자식이 아닙니다.** 매니저는 Ember 없이도 IDE 확장, 에이전트, ash가 쓰는 커널 접근 API입니다. 커널이 매니저에 기대지 않는 것처럼(D2) 매니저도 노드에 기대지 않으므로, 노드가 재시작하거나 업데이트돼도 매니저와 에디터 서버는 계속 돕니다.
+- **배포는 PyPI 하나.** 노드가 받는 매니저는 D22의 플랫폼 휠(`darkpyonix==<버전>`)입니다. 따로 단독 아카이브를 내지 않습니다. 노드는 자기 릴리스가 고정한 판(`DARKPYONIX_VERSION`)을, `uv`가 있으면 `uv tool install --force darkpyonix==<버전>`으로, 없으면 `python3 -m venv $DARKPYONIX_HOME/venv` 뒤 그 venv의 `pip install darkpyonix==<버전>`으로 설치하고 `darkpyonix --version`이 그 판인지 확인합니다. 시스템 파이썬에 직접 `pip install`하지 않습니다(PEP 668 외부 관리 환경). 휠이 없는 플랫폼(musl Linux 등)에서는 매니저가 없다고 알립니다(SPEC FR-C4).
+- **설치는 노드가 부르고, 등록은 매니저가 합니다.** 노드가 `darkpyonix service install --dedicated`를 부르면, 매니저가 마스터 토큰을 만들고 사용자 서비스(macOS launchd 사용자 에이전트, Linux `systemd --user`, Windows 사용자 예약 작업)로 등록하고 `{url, token, pid}`를 한 번 출력합니다(SPEC FR-M7).
+- **매니저와 노드는 따로입니다.** 매니저는 노드의 자식이 아닙니다. 매니저는 Ember 없이도 IDE 확장, 에이전트, ash가 쓰는 커널 접근 API이고, 커널이 매니저에 기대지 않는 것처럼(D2) 매니저도 노드에 기대지 않습니다. 노드가 재시작하거나 업데이트돼도 매니저와 에디터 서버는 계속 돕니다.
 
 ### D27. 에디터 서버는 매니저 엔드포인트에서 서빙되고, 매니저가 설치하고 감독합니다
 
@@ -313,6 +313,8 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 - **0700 소켓, 토큰 없음.** 에디터 서버는 `--without-connection-token --socket-path`로 사용자만 들어갈 수 있는 디렉터리의 유닉스 도메인 소켓에만 리슨합니다. OSE는 연결 토큰을 브라우저 쪽에 돌려주므로 토큰으로는 지킬 수 없고, 같은 기계의 다른 계정이 붙을 수 있는 루프백 포트도 쓰지 않습니다(D5와 같은 판단).
 - **매니저 엔드포인트가 유일한 입구.** 매니저가 `/ide/<런타임>/` 아래의 HTTP와 WebSocket을 그 소켓으로 프록시하고 인증합니다. 인증은 마스터 토큰(Bearer)이나 실행 표입니다. 에디터 서버는 터미널과 기계의 파일 전체를 열므로, 노트북 하나에 묶인 공유 토큰으로는 열리지 않습니다. 실행 표는 `POST /api/editor/{runtime}/launch`가 내고, 첫 요청의 `?dpx-ticket=`이 302와 함께 `HttpOnly` 쿠키가 됩니다. ember-node는 요청마다 헤더를 넣을 수 없는 바이트 relay라서 표가 필요합니다. 노드는 에디터 소켓에 붙지 않고, Ember 에디터와 VS Code 두 목표가 같은 서버, 같은 경로를 씁니다(SPEC FR-M9, FR-M10).
 - **Ember 에디터 UI는 Ember 클라이언트에만 있습니다.** 매니저와 노드는 에디터 서버만 다룹니다.
+- **에디터 서버 종류와 프리셋은 Ember 설정에서 오고, 매니저는 받은 대로 적용합니다.** 오너 원문(2026-11-25): "엠버 메인서버 세팅에 에디터 서버와 에디터 서버 프리 인스톨 확장 프로그램 테마 등등 프리셋이 있고, 엠버 노드 연결할 때 에디터 서버 세팅이 있어서 메인서버 세팅 상속해서 수정 가능하게 해야지. 그리고 거기서 에디터 서버 종류를 다운받는 세팅이 있는데 거기에 선택이 Code OSE, VS Code, Manual Script 이렇게 있는거고." 설정과 상속은 Ember가 맡습니다(Ember D56). 노드는 자기 컴퓨터의 최종 설정을 매니저에 넘깁니다: 종류는 `darkpyonix editor install --runtime ose|vsc|script`로, 확장·테마·설정 기본값은 `PUT /api/editor/{runtime}/presets`로(SPEC FR-M8, FR-M10). Manual Script는 오너 쪽 스크립트가 설치하고, 마지막 줄로 `serve-web`과 같은 플래그를 받는 서버 명령을 알려 줍니다. 스크립트는 CLI로만 받고 HTTP로는 받지 않습니다. 기본으로 보일 IDE(Ember 에디터, Code, Gateway)는 Ember만의 설정입니다.
+- **매니저가 꺼지면 에디터 서버도 꺼집니다.** 오너 원문(2026-11-25): "매니저가 꺼지면 편집기는 당연히 꺼져야지."
 
 ## 4. 폐기한 대안
 
@@ -355,7 +357,7 @@ D10의 "PyPI에는 같은 바이너리를 담은 휠"을 0.3.0에서 이렇게 �
 | `run_parallel`에서 awaitable·callable이 아닌 값을 그대로 반환(0.3.0 스텁) | 잘못 넘긴 인자를 조용히 삼켜 오류를 숨깁니다. 아무것도 실행하기 전에 `TypeError`를 냅니다(D25) |
 | Python 3.8~3.10에서 `tomli` 외부 설치 요구(`InteropUnavailable`) 또는 자체 TOML 파서 작성 | 3.8~3.10에서도 추가 설치 없이 3.11+ `tomllib`과 같은 결과를 내야 합니다. MIT `tomli` 소스를 `LICENSE`와 함께 `darkpyonix/kernel/_vendor/tomli/`에 내장합니다(D25) |
 | ember-node가 매니저를 자식으로 띄워 감독 | 노드를 재시작하거나 업데이트하면 매니저와 에디터 세션이 끊깁니다. 매니저는 Ember 없이도 쓰는 API입니다(D26) |
-| 노드가 PyPI 휠에서 매니저 바이너리를 꺼내 씀 | 휠 내부 경로(`<이름>.data/scripts/`)에 기댑니다. 같은 빌드를 단독 아카이브로도 냅니다(D26) |
+| 매니저 단독 바이너리 아카이브를 GitHub Release에 따로 냄(2026-11-25 리더 권장안) | 오너 결정(2026-11-25): "매니저는 pypi에서 받는거야." 배포 경로를 PyPI 하나로 둡니다(D26) |
 | 에디터 서버를 매니저와 같은 프로세스로 | OSE와 `code serve-web`은 Node.js 프로그램이라 Rust 매니저 안에 둘 수 없습니다(D27) |
 | ember-node가 에디터 서버를 직접 띄우거나 그 소켓에 직접 relay(Ember #1064의 모양) | 오너 결정(2026-11-25): 편집기 서버는 매니저의 엔드포인트에 있습니다. 노드는 매니저 엔드포인트로만 잇습니다(D27) |
 | 에디터 서버를 루프백 TCP와 연결 토큰으로 | OSE는 연결 토큰을 브라우저 쪽에 돌려주어 토큰으로 지킬 수 없고, 루프백 포트는 같은 기계의 다른 계정도 닿습니다(D27) |

@@ -421,16 +421,18 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 테스트(계획): `test_fr_m7_service_unit_runs_the_dedicated_manager_without_the_token`, `test_fr_m7_install_prints_the_manager_line_once_and_is_idempotent`, `test_fr_m7_token_file_is_0600`, `test_fr_m7_uninstall_removes_the_registration_and_keeps_the_token`
 
 ### FR-M8 에디터 서버 설치 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
-매니저는 VS Code 서버 런타임 둘을 다룹니다: `ose`(기본, Ember의 Code-OSS 빌드)와 `vsc`(사용자의 Microsoft VS Code). Ember 에디터 UI는 Ember 클라이언트에 있고 여기서 다루지 않습니다.
+매니저는 VS Code 서버 런타임 셋을 다룹니다: `ose`(기본, Ember의 Code-OSS 빌드), `vsc`(사용자의 Microsoft VS Code), `script`(Ember 설정의 Manual Script가 설치한 서버). 어느 것을 쓸지와 프리셋은 Ember의 메인 서버 설정과 노드별 상속 설정이 정하고(INTENT D27, Ember D56), 노드가 이 명령과 FR-M10의 `presets`로 넘깁니다. Ember 에디터 UI는 Ember 클라이언트에 있고 여기서 다루지 않습니다.
 - `darkpyonix editor install --runtime ose --release <태그>`: `<릴리스 주소>/<태그>/dpx-ose-<판>-<대상>.tar.gz`와 같은 릴리스의 `SHA256SUMS`를 받아 확인하고 `$DARKPYONIX_HOME/editor/ose/<태그>/`에 풉니다. 릴리스 주소는 기본 `https://github.com/DarkPyonix/darkpyonix-ember/releases/download`이고 `DARKPYONIX_EDITOR_RELEASES`로 바꿉니다(시험은 `file://`). 대상 이름은 OSE의 것(`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`)입니다. 판은 노드가 넘깁니다(Ember D50). 매니저는 태그를 고르지 않습니다.
   - 풀어 둔 `product.json`의 `commit`과 `version`을 기록합니다.
   - 체크섬이 다르거나 내려받기·풀기가 실패하면 아무것도 남기지 않고 설정도 바꾸지 않으며, 종료 코드 1과 이유를 냅니다.
   - 이미 받은 태그면 다시 받지 않습니다. 새 태그가 설치되면 돌고 있지 않은 옛 태그 디렉터리를 지웁니다.
 - `darkpyonix editor install --runtime vsc --accept-server-license-terms [--code <경로>]`: 아무것도 내려받지 않습니다. Microsoft VS Code Server 라이선스는 사용자가 받아들여야 하므로, 이 플래그가 없으면 라이선스 주소(`https://code.visualstudio.com/license/server`)를 보여 주고 종료 코드 2로 끝납니다. 플래그를 주면 그 사실을 설정에 기록하고, 그때만 매니저가 `code serve-web`에 `--accept-server-license-terms`를 넘깁니다. `code`를 주어진 경로나 PATH에서 찾아 `code --version`과 `code serve-web --help`가 되는지 확인하고 경로와 판을 기록합니다. 찾지 못하면 종료 코드 1과 이유를 냅니다. `code serve-web`이 처음 켤 때 Microsoft에서 서버를 받는 것은 사용자의 도구가 하는 일입니다.
-- `darkpyonix editor use ose|vsc`(VS Code 창의 기본 런타임), `darkpyonix editor autostart on|off`(기본 켜짐), `darkpyonix editor status`(설치된 런타임, 판, 커밋, 상태를 JSON으로).
+- `darkpyonix editor install --runtime script --script <파일>` (Ember 설정의 Manual Script): 그 파일을 사용자 권한으로 한 번 실행합니다(Unix는 `sh <파일>`, Windows는 `powershell -NoProfile -File <파일>`). 환경으로 `DARKPYONIX_EDITOR_DIR=$DARKPYONIX_HOME/editor/script/`(설치할 곳)를 줍니다. 표준 출력의 마지막 줄은 JSON `{"program": "<절대 경로>", "args": [..], "version"?: "..", "commit"?: ".."}`이어야 하고, 그 서버는 `serve-web`과 같은 플래그(`--without-connection-token`, `--socket-path`, `--server-base-path`, `--server-data-dir`)를 받아야 합니다. 매니저는 그 명령을 기록하고, 띄울 때 `args` 뒤에 그 플래그를 붙입니다. 스크립트가 0이 아닌 코드로 끝나거나 마지막 줄이 그 모양이 아니거나 `program`이 실행 파일이 아니면 종료 코드 1이고 설정은 바뀌지 않습니다. 스크립트는 CLI로만 받고, HTTP API로는 받지 않습니다.
+- Ember 설정의 종류와의 대응: Code OSE → `ose`, VS Code → `vsc`, Manual Script → `script`.
+- `darkpyonix editor use ose|vsc|script`(VS Code 창의 기본 런타임), `darkpyonix editor autostart on|off`(기본 켜짐), `darkpyonix editor status`(설치된 런타임, 판, 커밋, 상태를 JSON으로).
 - 설정은 `$DARKPYONIX_HOME/editor.toml`에 둡니다.
 - 설치는 CLI로만 합니다. HTTP API로는 아무것도 내려받지 않습니다.
-- 테스트(계획): `test_fr_m8_ose_install_checks_the_sum_and_records_the_commit`, `test_fr_m8_a_bad_sum_leaves_nothing_behind`, `test_fr_m8_the_same_tag_is_not_downloaded_twice`, `test_fr_m8_vsc_records_the_users_code_and_downloads_nothing`, `test_fr_m8_vsc_without_code_is_an_error`, `test_fr_m8_vsc_needs_the_license_flag`
+- 테스트(계획): `test_fr_m8_ose_install_checks_the_sum_and_records_the_commit`, `test_fr_m8_a_bad_sum_leaves_nothing_behind`, `test_fr_m8_the_same_tag_is_not_downloaded_twice`, `test_fr_m8_vsc_records_the_users_code_and_downloads_nothing`, `test_fr_m8_vsc_without_code_is_an_error`, `test_fr_m8_vsc_needs_the_license_flag`, `test_fr_m8_script_records_the_server_it_prints`, `test_fr_m8_a_failing_script_changes_nothing`
 
 ### FR-M9 에디터 서버 수명과 서빙 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
 - **자동 시작.** 전용 매니저(FR-M4)는 시작할 때 설치되고 자동 시작이 켜진 런타임마다 에디터 서버 하나를 자식 프로세스로 띄웁니다. 임시 매니저(FR-M3)는 띄우지 않습니다.
@@ -451,7 +453,9 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - `POST /api/editor/{runtime}/launch` → `{ticket, path, commit, version}`. 멱등하게 에디터 서버를 켜고 소켓이 답할 때까지(최대 30초) 기다린 뒤 새 실행 표를 냅니다. 설치되지 않았으면 `409`와 이유, 30초 안에 답하지 않으면 `503`.
 - `POST /api/editor/{runtime}/stop` → `204`. 에디터 서버를 끄고 그 런타임의 표를 모두 지웁니다. 다음 `launch`나 매니저 재시작까지 다시 띄우지 않습니다.
 - `POST /api/editor/{runtime}/extensions {id, version?}` → `{installed: true}`. 그 런타임의 CLI로 같은 `--server-data-dir`에 확장을 설치합니다. OSE는 Open VSX입니다(Ember E4). VSC는 `409`입니다: 사용자의 VS Code 확장은 그 VS Code가 Microsoft 마켓플레이스에서 직접 설치하고, 매니저는 Microsoft 서버의 확장 디렉터리를 다루지 않습니다. 설치가 실패하면 `422`와 CLI의 출력.
-- 테스트(계획): `test_fr_m10_editor_lists_installed_runtimes_without_the_socket`, `test_fr_m10_launch_is_idempotent_and_returns_a_fresh_ticket`, `test_fr_m10_launch_of_an_uninstalled_runtime_is_409`, `test_fr_m10_stop_ends_the_editor_until_the_next_launch`, `test_fr_m10_extensions_use_the_runtimes_data_dir`
+- `PUT /api/editor/{runtime}/presets {extensions: [{id, version?}], theme?, settings?}` → 적용한 상태. 노드가 Ember 설정(메인 서버 설정을 상속해 고친 노드 설정)의 최종값을 넘깁니다. 매니저는 목록의 확장 중 설치되지 않은 것만 설치하고(다른 확장은 지우지 않음), `theme`(`workbench.colorTheme`)와 `settings`(설정 키와 값)를 그 런타임의 기본값으로 둡니다. 기본값은 매니저가 만드는 로컬 확장 `darkpyonix.presets`의 `contributes.configurationDefaults`로 그 런타임의 확장 디렉터리에 넣습니다. 사용자가 고친 설정이 이 기본값보다 앞섭니다. 받은 프리셋은 `editor.toml`에 기록하고, 바뀌었으면 돌고 있는 서버를 다시 띄웁니다. 확장 하나라도 실패하면 `422`와 실패한 확장의 출력이고, 성공한 것은 남습니다. `vsc`는 확장에 대해 `409`(위와 같은 이유)이고 테마·설정은 같은 방식으로 둡니다. *열린 점:* `configurationDefaults`가 OSE 1.139.1에서 `workbench.colorTheme`에 듣는지는 실제 OSE로 확인해야 합니다(Ember Live checks와 같은 자리).
+- `GET /api/editor`의 각 런타임에 `presets`(마지막으로 적용한 `{extensions, theme, settings}`)를 더합니다.
+- 테스트(계획): `test_fr_m10_editor_lists_installed_runtimes_without_the_socket`, `test_fr_m10_launch_is_idempotent_and_returns_a_fresh_ticket`, `test_fr_m10_launch_of_an_uninstalled_runtime_is_409`, `test_fr_m10_stop_ends_the_editor_until_the_next_launch`, `test_fr_m10_extensions_use_the_runtimes_data_dir`, `test_fr_m10_presets_install_only_missing_extensions`, `test_fr_m10_presets_put_the_theme_in_configuration_defaults`, `test_fr_m10_presets_are_listed_as_applied`
 
 ## 8. CLI (C)
 - 연결 하나의 첫 요청만 넘길 수 있다. 같은 연결을 재사용(keep-alive)한 두 번째 이후의 스트림 요청은 넘기지 않고 매니저가 중계하므로 매니저와 함께 끝난다. 스트림을 구독하는 클라이언트는 새 연결을 써야 한다.
@@ -480,7 +484,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 | `darkpyonix share FILE --capabilities read,history[,execute,edit,manage]` | 공유 토큰 발급(전용 매니저). 능력 이름은 FR-A3 |
 | `darkpyonix manager [--ephemeral\|--dedicated] [--host H] [--port P] [--idle-timeout S]` | 매니저 실행. 기본은 `--ephemeral`(FR-M3: 루프백, 유휴 시 종료, 주소와 토큰은 표준 출력으로), `--dedicated`는 FR-M4. 둘을 함께 주면 오류입니다 |
 | `darkpyonix service install --dedicated [--host H] [--port P]`, `service uninstall`, `service status` | 전용 매니저를 사용자 서비스로 등록·제거·조회(FR-M7, 구현 대기 #163) |
-| `darkpyonix editor install --runtime ose --release T \| --runtime vsc --accept-server-license-terms [--code P]`, `editor use ose\|vsc`, `editor autostart on\|off`, `editor status` | 에디터 서버 설치와 설정(FR-M8, 구현 대기 #162) |
+| `darkpyonix editor install --runtime ose --release T \| --runtime vsc --accept-server-license-terms [--code P] \| --runtime script --script F`, `editor use ose\|vsc\|script`, `editor autostart on\|off`, `editor status` | 에디터 서버 설치와 설정(FR-M8, 구현 대기 #162) |
 
 - 수용 기준: `darkpyonix run a.py`를 두 번째로 실행하면 종료 코드 75와 함께 현재 실행 정보와 `--queue`/`stop` 안내를 출력합니다.
 - 테스트: Rust `test_fr_c2_cli_commands`, `test_fr_c2_second_run_exits_75_with_hint`, `test_fr_c2_run_follows_outputs_and_exits_0`, `test_fr_c2_run_error_exits_1_with_traceback`, `test_fr_c2_ctrl_c_interrupts_the_run_and_exits_130`, `test_fr_c2_second_ctrl_c_detaches_and_the_run_continues`, `test_fr_c2_detach_prints_the_run_id_and_does_not_follow`, `test_fr_c2_run_options_reach_the_api`, `test_fr_c2_logs_follow_replays_the_executing_run`, `test_fr_c2_attach_follows_every_run_until_ctrl_c_detaches`, `test_fr_c2_share_on_a_dedicated_manager_prints_the_link_and_the_token_once`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`), `test_fr_c2_every_command_parses`, `test_fr_c2_invalid_usage_is_rejected`(`darkpyonix/manager/crates/darkpyonix/src/args.rs`)
@@ -500,11 +504,11 @@ PyPI의 `darkpyonix`는 플랫폼마다 `darkpyonix` 명령(Rust 바이너리, �
   6. 릴리스 워크플로는 태그가 `v` + 버전과 다르거나 바이너리 `--version`이 패키지 버전과 다르면 올리지 않고, 업로드는 GitHub Release `published`일 때 신뢰 게시(OIDC)로만 합니다. 수동 실행(`workflow_dispatch`)과, 패키징 관련 경로를 바꾼 풀 리퀘스트(`pull_request`, `paths` 필터)는 빌드와 스모크 시험까지만 하고 올리지 않습니다.
 - 테스트: 위 1~5는 `publish-pypi.yml`의 플랫폼별 스모크 단계(`packaging/smoke.py`)가 증명합니다. 휠 구성(태그, 스크립트 포함, 대체 휠)은 `tests/test_fr_c3_packaging.py`가 가짜 바이너리로 확인합니다. 각 플랫폼에서 통과한 실행 기록을 여기에 붙인 뒤 `Done`으로 바꿉니다.
 
-### FR-C4 단독 바이너리 릴리스 — `Agreed` (INTENT D26, 리더 결정 2026-11-25, 구현 대기 #163)
-FR-C3의 플랫폼 휠에 들어가는 같은 바이너리를 GitHub Release `v<버전>`에도 올립니다. 파이썬이나 pip 없이 받을 수 있어야 ember-node가 첫 실행에서 매니저를 설치합니다(FR-M7).
-- 아카이브: `darkpyonix-<버전>-macos-arm64.tar.gz`, `-macos-x86_64.tar.gz`, `-linux-x86_64.tar.gz`, `-linux-aarch64.tar.gz`(glibc, manylinux_2_28과 같은 빌드), `-windows-x64.zip`. 안에는 `darkpyonix`(Windows는 `darkpyonix.exe`)와 `LICENSE`만 있습니다. 같은 릴리스에 모든 아카이브의 `SHA256SUMS`를 둡니다.
-- 휠과 같은 빌드 산출물이므로 FR-C3의 버전 확인(태그, `--version`)을 그대로 거칩니다. musl Linux 등 휠이 없는 플랫폼에는 아카이브도 없습니다.
-- 수용 기준: 릴리스 워크플로의 dry run이 다섯 아카이브와 `SHA256SUMS`를 만들고, 플랫폼마다 아카이브를 깨끗한 디렉터리에 풀어 FR-C3 수용 기준 1~3을 돌립니다. 게시는 FR-C3과 같은 조건(Release `published`)에서만 합니다.
+### FR-C4 노드가 PyPI에서 매니저를 설치 — `Agreed` (INTENT D26, 오너 결정 2026-11-25, 구현은 Ember 쪽, core는 휠(FR-C3)과 `--version`만)
+ember-node는 매니저를 PyPI의 플랫폼 휠(FR-C3)로 설치합니다. 단독 바이너리 아카이브는 내지 않습니다.
+- 순서: `uv`가 PATH에 있으면 `uv tool install --force darkpyonix==<버전>`(실행 파일은 `uv tool dir --bin` 아래). 없으면 `python3 -m venv $DARKPYONIX_HOME/venv`, 그 venv의 `python -m pip install darkpyonix==<버전>`(실행 파일은 `$DARKPYONIX_HOME/venv/bin/darkpyonix`, Windows는 `Scripts\darkpyonix.exe`). 시스템 파이썬에 직접 설치하지 않습니다.
+- 설치 뒤 `darkpyonix --version`이 `<버전>`과 같아야 합니다. `py3-none-any` 휠만 있는 플랫폼에서는 `darkpyonix`가 종료 코드 1로 "매니저를 지원하지 않는다"고 답하므로(FR-C3), 노드는 그것을 이유로 보여 줍니다.
+- core가 지킬 것: 휠의 `darkpyonix --version`이 패키지 버전과 같음(FR-C3 수용 기준 1)과 `service install`(FR-M7).
 
 ## 9. 인증과 공유 (A)
 
