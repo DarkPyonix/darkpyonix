@@ -124,6 +124,18 @@ tags:
     Served.
 
     '
+- name: Editor
+  description: 'The VS Code server a dedicated manager installs, supervises and serves (SPEC FR-M8,
+
+    FR-M9, FR-M10, INTENT D27). Runtimes: `ose` (Code-OSS built by DarkPyonix), `vsc` (the user''s own
+
+    Microsoft `code serve-web`), `script` (installed by a Manual Script from Ember settings). The server
+
+    itself is served under `/ide/<runtime>/` outside this contract (like `/docs/`), for the master
+
+    token or a launch ticket. Master token only: a share token answers `403`.
+
+    '
 paths:
   /health:
     get:
@@ -1709,6 +1721,194 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/KernelUnreachable'
+  /api/editor:
+    get:
+      tags:
+      - Editor
+      operationId: getEditor
+      x-darkpyonix-status: planned
+      summary: Installed editor runtimes and their state
+      description: 'Every installed runtime with its version, Code-OSS commit (Ember D50), state, served
+
+        path and the presets last applied. The socket path is not shown. An ephemeral manager lists
+
+        what is installed and runs nothing.
+
+        '
+      responses:
+        '200':
+          description: The installed runtimes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EditorStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/editor/{runtime}/launch:
+    parameters:
+    - $ref: '#/components/parameters/EditorRuntime'
+    post:
+      tags:
+      - Editor
+      operationId: launchEditor
+      x-darkpyonix-status: planned
+      summary: Start the editor server if needed and issue a launch ticket
+      description: 'Idempotent: starts the runtime unless it runs, waits up to 30 s for its socket, and
+
+        issues a ticket. `GET <path>?dpx-ticket=<ticket>` answers `302` to the same path without the
+
+        query and sets the `dpx-editor` cookie (`HttpOnly`, `SameSite=Strict`, `Path=<path>`). An unused
+
+        ticket lasts 5 minutes, a used one 12 hours after its last use; `stop` and a manager restart
+
+        revoke them. `409` when the runtime is not installed or the manager is ephemeral, `503`
+
+        (`editor_unavailable`) when the socket does not answer in time.
+
+        '
+      responses:
+        '200':
+          description: The ticket and where the runtime is served.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EditorLaunch'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditorConflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/EditorUnavailable'
+  /api/editor/{runtime}/stop:
+    parameters:
+    - $ref: '#/components/parameters/EditorRuntime'
+    post:
+      tags:
+      - Editor
+      operationId: stopEditor
+      x-darkpyonix-status: planned
+      summary: Stop the editor server
+      description: 'Ends the runtime and revokes its tickets. It stays off until the next `launch` or manager
+
+        start.
+
+        '
+      responses:
+        '204':
+          description: Stopped.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/editor/{runtime}/extensions:
+    parameters:
+    - $ref: '#/components/parameters/EditorRuntime'
+    post:
+      tags:
+      - Editor
+      operationId: installEditorExtension
+      x-darkpyonix-status: planned
+      summary: Install one extension into the runtime
+      description: 'Runs the runtime''s `--install-extension publisher.name[@version]` against its data dir
+
+        (Open VSX for `ose`). `vsc` answers `409`: VS Code installs its own extensions. `422`
+
+        (`extension_failed`) carries the CLI output in `data.output`.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditorExtension'
+      responses:
+        '200':
+          description: Installed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - installed
+                properties:
+                  installed:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditorConflict'
+        '422':
+          $ref: '#/components/responses/ExtensionFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/editor/{runtime}/presets:
+    parameters:
+    - $ref: '#/components/parameters/EditorRuntime'
+    put:
+      tags:
+      - Editor
+      operationId: putEditorPresets
+      x-darkpyonix-status: planned
+      summary: Apply the presets from Ember settings
+      description: 'The final editor settings of this computer (Ember main server settings, overridden per
+
+        node). Installs the listed extensions that are missing (never removes others) and puts `theme`
+
+        (`workbench.colorTheme`) and `settings` as defaults through the manager-made extension
+
+        `darkpyonix.presets` (`contributes.configurationDefaults`); a user''s own settings win. A running
+
+        server restarts when the defaults changed. `vsc` with extensions answers `409`.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditorPresets'
+      responses:
+        '200':
+          description: The presets as applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EditorPresets'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditorConflict'
+        '422':
+          $ref: '#/components/responses/ExtensionFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -1735,6 +1935,13 @@ components:
       name: token
       description: Accepted only on the events stream, the WebSocket sync (2025 `/ws/kernels/{kernel_id}?token=`) and share links.
   parameters:
+    EditorRuntime:
+      name: runtime
+      in: path
+      required: true
+      description: '`ose`, `vsc` or `script`; any other name answers `404`.'
+      schema:
+        type: string
     KernelId:
       name: kernel_id
       in: path
@@ -1784,6 +1991,26 @@ components:
         type: string
         pattern: ^[A-Za-z0-9_.:-]{1,64}$
   responses:
+    EditorConflict:
+      description: '`conflict`: the runtime is not installed, the manager is ephemeral, or `vsc` was asked to
+
+        install extensions.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    EditorUnavailable:
+      description: '`editor_unavailable`: the editor server did not answer on its socket in time.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ExtensionFailed:
+      description: '`extension_failed`: the server CLI did not install the extension (`data.id`, `data.output`).'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     BadRequest:
       description: The request is malformed.
       content:
@@ -1843,6 +2070,93 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    EditorExtension:
+      type: object
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          description: '`publisher.name`.'
+        version:
+          type: string
+    EditorPresets:
+      type: object
+      properties:
+        extensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EditorExtension'
+        theme:
+          type: string
+          description: '`workbench.colorTheme`.'
+        settings:
+          type: object
+          additionalProperties: true
+    EditorRuntimeStatus:
+      type: object
+      required:
+      - runtime
+      - version
+      - commit
+      - state
+      - path
+      properties:
+        runtime:
+          type: string
+          enum:
+          - ose
+          - vsc
+          - script
+        version:
+          type: string
+        commit:
+          type: string
+        state:
+          type: string
+          enum:
+          - stopped
+          - starting
+          - running
+          - failed
+        path:
+          type: string
+          description: '`/ide/<runtime>/`.'
+        reason:
+          type: string
+        presets:
+          $ref: '#/components/schemas/EditorPresets'
+    EditorStatus:
+      type: object
+      required:
+      - runtimes
+      - default_runtime
+      - autostart
+      properties:
+        runtimes:
+          type: array
+          items:
+            $ref: '#/components/schemas/EditorRuntimeStatus'
+        default_runtime:
+          type: string
+        autostart:
+          type: boolean
+    EditorLaunch:
+      type: object
+      required:
+      - ticket
+      - path
+      - commit
+      - version
+      properties:
+        ticket:
+          type: string
+        path:
+          type: string
+        commit:
+          type: string
+        version:
+          type: string
     InitialToken:
       type: object
       description: 2025 `/kernels/{kernel_id}/tokens/initial` response.
@@ -2314,6 +2628,8 @@ components:
               - password_not_set
               - poll_limit_exceeded
               - token_revoked
+              - editor_unavailable
+              - extension_failed
             message:
               type: string
             data:
