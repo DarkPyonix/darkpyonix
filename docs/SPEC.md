@@ -411,6 +411,48 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 테스트(Rust): `test_fr_m6_plain_stream_survives_manager_kill`(`darkpyonix/manager/crates/darkpyonix/tests/handoff.rs`, 진짜 매니저 프로세스와 파이썬 커널), `test_fr_m6_wait_over_http2_is_pumped_to_the_kernel`(TLS·HTTP/2·터널의 `wait`도 소켓 쌍으로 커널에 넘김), `test_fr_m1_get_run_is_a_rest_call_even_with_handoff`(`getRun`은 스트림이 아니라 `runs.get` 호출), `test_fr_m6_plain_stream_is_handed_off_and_survives_the_manager`, `test_fr_m6_tls_http2_stream_is_pumped_and_ends_with_manager`(h2c로 같은 경로를 탐), `test_fr_m6_unauthenticated_stream_never_reaches_kernel`, `test_fr_m6_revoking_a_share_closes_its_streams`, `test_fr_m6_wait_is_handed_off_with_its_run_ref`(`darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `dkp.rs`의 `test_pr_5_adopt_sends_the_frame_then_the_descriptor`
 - 상태 메모: 평문 TCP는 hyper가 읽기 전에 요청 머리를 `peek`해서 검사하고(`handoff::intercept`), 통과하면 머리를 읽어 치우고 소켓을 `SCM_RIGHTS`로 넘긴 뒤 자기 복사본을 닫습니다. 검사에 실패하면 hyper에 그대로 넘겨 평소의 `401`/`403`/`404`/`400`이 나갑니다. 커널에는 토큰을 뺀 요청을 다시 만들어 보냅니다. Windows는 `WSADuplicateSocketW`로 만든 정보를 제어 파이프 위 `share`로 보내며, 윈도우 러너에서 진짜 매니저와 파이썬 커널로 `test_fr_m6_plain_stream_survives_manager_kill`이 통과한다(이슈 #121). TLS 위 WebSocket은 가짜 커널(`dpx-server/tests/ws_tls.rs`)과 실제 커널(`darkpyonix/tests/ws_tls_real.rs`) 모두 Unix와 Windows에서 시험한다(#49).
 
+### FR-M7 매니저 서비스 등록 — `Agreed` (INTENT D26, 리더 결정 2026-11-25, 구현 대기 #163)
+`darkpyonix service install --dedicated [--host H] [--port P]`는 전용 매니저(FR-M4)를 사용자 서비스로 등록하고 켭니다. 관리자 권한은 쓰지 않습니다. ember-node가 첫 실행에서 부르지만, 사람이 직접 불러도 같습니다.
+- 등록 방식: macOS는 `~/Library/LaunchAgents/dev.darkpyonix.manager.plist`(launchd 사용자 에이전트, `KeepAlive`), Linux는 `~/.config/systemd/user/darkpyonix-manager.service`(`systemd --user`, `Restart=on-failure`), Windows는 로그온 때 시작하는 사용자 예약 작업 `DarkPyonix Manager`. 서비스는 설치된 바이너리의 절대 경로를 실행하고, 환경으로 `DARKPYONIX_HOME`과 마스터 토큰을 줍니다.
+- 마스터 토큰은 `install`이 만들어 `$DARKPYONIX_HOME/manager-token`(0600, Windows는 사용자 전용 ACL)에 두고, 서비스는 그 파일에서 읽습니다. 등록 단위 파일에는 토큰을 쓰지 않습니다.
+- 표준 출력에 FR-M3과 같은 한 줄 `{url, token, pid}`를 한 번 씁니다. 매니저가 `/health`에 답할 때까지 기다린 뒤에 씁니다. 이미 등록돼 있으면 등록을 바꾸지 않고 같은 줄을 씁니다(멱등).
+- `darkpyonix service uninstall`은 서비스를 멈추고 등록을 지웁니다. 토큰 파일과 `manager.db`는 남깁니다. `darkpyonix service status`는 `{installed, running, url, pid}`를 씁니다.
+- 수용 기준: 등록 단위 파일의 내용(실행 경로, 인자, 재시작 정책, 토큰이 없음)을 시험 디렉터리에 써서 확인하고, 각 OS의 CI 러너에서 진짜 등록·`/health`·`uninstall`까지 한 번 돌립니다.
+- 테스트(계획): `test_fr_m7_service_unit_runs_the_dedicated_manager_without_the_token`, `test_fr_m7_install_prints_the_manager_line_once_and_is_idempotent`, `test_fr_m7_token_file_is_0600`, `test_fr_m7_uninstall_removes_the_registration_and_keeps_the_token`
+
+### FR-M8 에디터 서버 설치 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
+매니저는 VS Code 서버 런타임 둘을 다룹니다: `ose`(기본, Ember의 Code-OSS 빌드)와 `vsc`(사용자의 Microsoft VS Code). Ember 에디터 UI는 Ember 클라이언트에 있고 여기서 다루지 않습니다.
+- `darkpyonix editor install --runtime ose --release <태그>`: `<릴리스 주소>/<태그>/dpx-ose-<판>-<대상>.tar.gz`와 같은 릴리스의 `SHA256SUMS`를 받아 확인하고 `$DARKPYONIX_HOME/editor/ose/<태그>/`에 풉니다. 릴리스 주소는 기본 `https://github.com/DarkPyonix/darkpyonix-ember/releases/download`이고 `DARKPYONIX_EDITOR_RELEASES`로 바꿉니다(시험은 `file://`). 대상 이름은 OSE의 것(`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`)입니다. 판은 노드가 넘깁니다(Ember D50). 매니저는 태그를 고르지 않습니다.
+  - 풀어 둔 `product.json`의 `commit`과 `version`을 기록합니다.
+  - 체크섬이 다르거나 내려받기·풀기가 실패하면 아무것도 남기지 않고 설정도 바꾸지 않으며, 종료 코드 1과 이유를 냅니다.
+  - 이미 받은 태그면 다시 받지 않습니다. 새 태그가 설치되면 돌고 있지 않은 옛 태그 디렉터리를 지웁니다.
+- `darkpyonix editor install --runtime vsc [--code <경로>]`: 아무것도 내려받지 않습니다. `code`를 주어진 경로나 PATH에서 찾아 `code --version`과 `code serve-web --help`가 되는지 확인하고 경로와 판을 기록합니다. 찾지 못하면 종료 코드 1과 이유를 냅니다. `code serve-web`이 처음 켤 때 Microsoft에서 서버를 받는 것은 사용자의 도구가 하는 일입니다.
+- `darkpyonix editor use ose|vsc`(VS Code 창의 기본 런타임), `darkpyonix editor autostart on|off`(기본 켜짐), `darkpyonix editor status`(설치된 런타임, 판, 커밋, 상태를 JSON으로).
+- 설정은 `$DARKPYONIX_HOME/editor.toml`에 둡니다.
+- 설치는 CLI로만 합니다. HTTP API로는 아무것도 내려받지 않습니다.
+- 테스트(계획): `test_fr_m8_ose_install_checks_the_sum_and_records_the_commit`, `test_fr_m8_a_bad_sum_leaves_nothing_behind`, `test_fr_m8_the_same_tag_is_not_downloaded_twice`, `test_fr_m8_vsc_records_the_users_code_and_downloads_nothing`, `test_fr_m8_vsc_without_code_is_an_error`
+
+### FR-M9 에디터 서버 수명과 서빙 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
+- **자동 시작.** 전용 매니저(FR-M4)는 시작할 때 설치되고 자동 시작이 켜진 런타임마다 에디터 서버 하나를 자식 프로세스로 띄웁니다. 임시 매니저(FR-M3)는 띄우지 않습니다.
+- **인자.** `--without-connection-token --socket-path $DARKPYONIX_HOME/editor/sockets/<런타임>.sock --server-base-path /ide/<런타임>/ --server-data-dir $DARKPYONIX_HOME/editor/data/<런타임>`, OSE는 `--accept-server-license-terms`를 더합니다. `sockets/`는 0700으로 만든 뒤에 띄우고, 남은 소켓 파일은 지웁니다. 같은 데이터 디렉터리를 쓰므로 확장은 런타임마다 한 번 설치됩니다.
+- **감독.** 에디터 서버가 끝나면 1초부터 두 배씩 최대 60초까지 기다려 다시 띄웁니다. 매니저가 끝나면(정상 종료와 SIGTERM) 에디터 서버도 끝냅니다.
+- **서빙.** 매니저는 `/ide/<런타임>/` 아래의 HTTP와 WebSocket을 그 소켓으로 프록시합니다(접두어를 떼지 않음, `Host` 보존, Upgrade 뒤 바이트 잇기). 이 경로는 `/docs/`처럼 OpenAPI 계약 밖입니다.
+- **인증.** 다음 중 하나가 있어야 합니다. 없으면 `401`이고 요청은 에디터 서버에 닿지 않습니다.
+  - 매니저 토큰 `Authorization: Bearer`(마스터 토큰, 또는 `edit` 능력이 있는 공유 토큰).
+  - 쿠키 `dpx-editor=<표>`: 그 런타임에 대해 살아 있는 실행 표(FR-M10).
+  - 질의 `?dpx-ticket=<표>`: 그 질의만 뺀 같은 주소로 `302`하면서 `Set-Cookie: dpx-editor=<표>; HttpOnly; SameSite=Strict; Path=/ide/<런타임>/`를 줍니다. 다른 질의는 그대로 둡니다.
+- **표 수명.** 256비트 무작위이고 매니저 메모리에만 있습니다. 한 번도 쓰지 않은 표는 5분 뒤, 쓴 표는 마지막 사용 뒤 12시간 뒤 사라집니다. 그 런타임의 `stop`과 매니저 재시작에 모두 사라집니다. 표는 로그에 쓰지 않습니다.
+- **Windows.** 소켓 대신 사용자 전용 ACL의 이름 있는 파이프를 쓸 수 있는지 확인한 뒤 정합니다. 그때까지 Windows의 에디터 서버는 `Draft`입니다.
+- 테스트(계획, 가짜 에디터 서버가 인자를 기록하고 `--socket-path`에서 HTTP와 WebSocket으로 답함): `test_fr_m9_dedicated_manager_starts_the_editor_with_its_socket_and_no_token`, `test_fr_m9_socket_directory_is_0700`, `test_fr_m9_ephemeral_manager_starts_no_editor`, `test_fr_m9_a_crashed_editor_is_restarted`, `test_fr_m9_the_editor_ends_with_the_manager`, `test_fr_m9_unauthenticated_request_never_reaches_the_editor`, `test_fr_m9_bearer_request_and_websocket_are_proxied`, `test_fr_m9_ticket_query_redirects_once_and_sets_the_cookie`, `test_fr_m9_ticket_is_scoped_to_its_runtime`, `test_fr_m9_unused_ticket_expires`, `test_fr_m9_stop_revokes_the_tickets`
+
+### FR-M10 에디터 제어 API — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
+매니저 토큰으로 인증합니다(마스터 토큰, 또는 `edit` 능력의 공유 토큰). `docs/api/manager.openapi.yaml`에 구현과 같은 변경으로 더합니다(NFR-M3).
+- `GET /editor` → `{runtimes: [{runtime, version, commit, state, path, reason?}], default_runtime, autostart}`. `state`는 `running`, `starting`, `stopped`, `failed`. `path`는 `/ide/<런타임>/`. 설치된 것이 없으면 빈 목록입니다. 소켓 경로는 알려 주지 않습니다.
+- `POST /editor/{runtime}/launch` → `{ticket, path, commit, version}`. 멱등하게 에디터 서버를 켜고 소켓이 답할 때까지(최대 30초) 기다린 뒤 새 실행 표를 냅니다. 설치되지 않았으면 `409`와 이유, 30초 안에 답하지 않으면 `503`.
+- `POST /editor/{runtime}/stop` → `204`. 에디터 서버를 끄고 그 런타임의 표를 모두 지웁니다. 다음 `launch`나 매니저 재시작까지 다시 띄우지 않습니다.
+- `POST /editor/{runtime}/extensions {id, version?}` → `{installed: true}`. 그 런타임의 CLI로 같은 `--server-data-dir`에 확장을 설치합니다. OSE는 Open VSX, VSC는 사용자의 Microsoft 마켓플레이스(Ember E4). 실패하면 `422`와 CLI의 출력.
+- 테스트(계획): `test_fr_m10_editor_lists_installed_runtimes_without_the_socket`, `test_fr_m10_launch_is_idempotent_and_returns_a_fresh_ticket`, `test_fr_m10_launch_of_an_uninstalled_runtime_is_409`, `test_fr_m10_stop_ends_the_editor_until_the_next_launch`, `test_fr_m10_extensions_use_the_runtimes_data_dir`
+
 ## 8. CLI (C)
 - 연결 하나의 첫 요청만 넘길 수 있다. 같은 연결을 재사용(keep-alive)한 두 번째 이후의 스트림 요청은 넘기지 않고 매니저가 중계하므로 매니저와 함께 끝난다. 스트림을 구독하는 클라이언트는 새 연결을 써야 한다.
 
@@ -437,6 +479,8 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 | `darkpyonix kernel FILE [--python PATH]` | 실행 없이 커널만 띄움 |
 | `darkpyonix share FILE --capabilities read,history[,execute,edit,manage]` | 공유 토큰 발급(전용 매니저). 능력 이름은 FR-A3 |
 | `darkpyonix manager [--ephemeral\|--dedicated] [--host H] [--port P] [--idle-timeout S]` | 매니저 실행. 기본은 `--ephemeral`(FR-M3: 루프백, 유휴 시 종료, 주소와 토큰은 표준 출력으로), `--dedicated`는 FR-M4. 둘을 함께 주면 오류입니다 |
+| `darkpyonix service install --dedicated [--host H] [--port P]`, `service uninstall`, `service status` | 전용 매니저를 사용자 서비스로 등록·제거·조회(FR-M7, 구현 대기 #163) |
+| `darkpyonix editor install --runtime ose --release T \| --runtime vsc [--code P]`, `editor use ose\|vsc`, `editor autostart on\|off`, `editor status` | 에디터 서버 설치와 설정(FR-M8, 구현 대기 #162) |
 
 - 수용 기준: `darkpyonix run a.py`를 두 번째로 실행하면 종료 코드 75와 함께 현재 실행 정보와 `--queue`/`stop` 안내를 출력합니다.
 - 테스트: Rust `test_fr_c2_cli_commands`, `test_fr_c2_second_run_exits_75_with_hint`, `test_fr_c2_run_follows_outputs_and_exits_0`, `test_fr_c2_run_error_exits_1_with_traceback`, `test_fr_c2_ctrl_c_interrupts_the_run_and_exits_130`, `test_fr_c2_second_ctrl_c_detaches_and_the_run_continues`, `test_fr_c2_detach_prints_the_run_id_and_does_not_follow`, `test_fr_c2_run_options_reach_the_api`, `test_fr_c2_logs_follow_replays_the_executing_run`, `test_fr_c2_attach_follows_every_run_until_ctrl_c_detaches`, `test_fr_c2_share_on_a_dedicated_manager_prints_the_link_and_the_token_once`(`darkpyonix/manager/crates/darkpyonix/tests/cli.rs`), `test_fr_c2_every_command_parses`, `test_fr_c2_invalid_usage_is_rejected`(`darkpyonix/manager/crates/darkpyonix/src/args.rs`)
@@ -455,6 +499,12 @@ PyPI의 `darkpyonix`는 플랫폼마다 `darkpyonix` 명령(Rust 바이너리, �
   5. `py3-none-any` 휠을 설치한 환경에서 `darkpyonix`가 위 안내와 종료 코드 1로 끝나고 `import darkpyonix`는 동작합니다.
   6. 릴리스 워크플로는 태그가 `v` + 버전과 다르거나 바이너리 `--version`이 패키지 버전과 다르면 올리지 않고, 업로드는 GitHub Release `published`일 때 신뢰 게시(OIDC)로만 합니다. 수동 실행(`workflow_dispatch`)과, 패키징 관련 경로를 바꾼 풀 리퀘스트(`pull_request`, `paths` 필터)는 빌드와 스모크 시험까지만 하고 올리지 않습니다.
 - 테스트: 위 1~5는 `publish-pypi.yml`의 플랫폼별 스모크 단계(`packaging/smoke.py`)가 증명합니다. 휠 구성(태그, 스크립트 포함, 대체 휠)은 `tests/test_fr_c3_packaging.py`가 가짜 바이너리로 확인합니다. 각 플랫폼에서 통과한 실행 기록을 여기에 붙인 뒤 `Done`으로 바꿉니다.
+
+### FR-C4 단독 바이너리 릴리스 — `Agreed` (INTENT D26, 리더 결정 2026-11-25, 구현 대기 #163)
+FR-C3의 플랫폼 휠에 들어가는 같은 바이너리를 GitHub Release `v<버전>`에도 올립니다. 파이썬이나 pip 없이 받을 수 있어야 ember-node가 첫 실행에서 매니저를 설치합니다(FR-M7).
+- 아카이브: `darkpyonix-<버전>-macos-arm64.tar.gz`, `-macos-x86_64.tar.gz`, `-linux-x86_64.tar.gz`, `-linux-aarch64.tar.gz`(glibc, manylinux_2_28과 같은 빌드), `-windows-x64.zip`. 안에는 `darkpyonix`(Windows는 `darkpyonix.exe`)와 `LICENSE`만 있습니다. 같은 릴리스에 모든 아카이브의 `SHA256SUMS`를 둡니다.
+- 휠과 같은 빌드 산출물이므로 FR-C3의 버전 확인(태그, `--version`)을 그대로 거칩니다. musl Linux 등 휠이 없는 플랫폼에는 아카이브도 없습니다.
+- 수용 기준: 릴리스 워크플로의 dry run이 다섯 아카이브와 `SHA256SUMS`를 만들고, 플랫폼마다 아카이브를 깨끗한 디렉터리에 풀어 FR-C3 수용 기준 1~3을 돌립니다. 게시는 FR-C3과 같은 조건(Release `published`)에서만 합니다.
 
 ## 9. 인증과 공유 (A)
 
