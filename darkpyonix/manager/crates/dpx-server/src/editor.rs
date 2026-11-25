@@ -132,6 +132,8 @@ pub struct Installed {
     /// Arguments before the server flags (`serve-web` for `code`).
     pub pre_args: Vec<String>,
     pub accept_license: bool,
+    /// Code-OSS has no Marketplace signature verifier: extension checks go off (FR-M10).
+    pub unsigned_extensions: bool,
     pub commit: String,
     pub version: String,
 }
@@ -167,6 +169,7 @@ impl EditorConfig {
                 program: ose_launcher(&o.dir),
                 pre_args: Vec::new(),
                 accept_license: true,
+                unsigned_extensions: true,
                 commit: o.commit.clone(),
                 version: o.version.clone(),
             }),
@@ -174,6 +177,7 @@ impl EditorConfig {
                 program: v.code.clone(),
                 pre_args: vec!["serve-web".into()],
                 accept_license: v.license_accepted,
+                unsigned_extensions: false,
                 commit: v.commit.clone(),
                 version: v.version.clone(),
             }),
@@ -181,6 +185,7 @@ impl EditorConfig {
                 program: s.program.clone(),
                 pre_args: s.args.clone(),
                 accept_license: false,
+                unsigned_extensions: false,
                 commit: s.commit.clone(),
                 version: s.version.clone(),
             }),
@@ -595,6 +600,10 @@ async fn run_once(
     }
     if let Err(e) = crate::util::ensure_private_dir(&data_dir(home, runtime)) {
         return Ended::Failed(format!("cannot create the data dir: {e}"));
+    }
+    if inst.unsigned_extensions {
+        // A user's settings file that is not plain JSON stays as it is; the server still starts.
+        let _ = disable_signature_checks(&data_dir(home, runtime));
     }
     let log = std::fs::OpenOptions::new()
         .create(true)
@@ -1088,9 +1097,43 @@ fn extension_failed(id: &str, what: &str, output: String) -> ApiError {
     .with_data(json!({"id": id, "output": output}))
 }
 
+/// `"extensions.verifySignature": false` in the Machine settings (read by the running server)
+/// and the User settings (read by its CLI) of a data dir, keeping every other key (FR-M10).
+pub fn disable_signature_checks(data: &Path) -> std::io::Result<()> {
+    for scope in ["Machine", "User"] {
+        let dir = data.join("data").join(scope);
+        let path = dir.join("settings.json");
+        let mut settings = match std::fs::read_to_string(&path) {
+            Ok(text) if text.trim().is_empty() => serde_json::Map::new(),
+            Ok(text) => match serde_json::from_str::<Value>(&text) {
+                Ok(Value::Object(m)) => m,
+                _ => {
+                    return Err(std::io::Error::other(format!(
+                        "{} is not plain JSON; add \"extensions.verifySignature\": false to it",
+                        path.display()
+                    )))
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+            Err(e) => return Err(e),
+        };
+        if settings.get("extensions.verifySignature") == Some(&Value::Bool(false)) {
+            continue;
+        }
+        settings.insert("extensions.verifySignature".into(), Value::Bool(false));
+        std::fs::create_dir_all(&dir)?;
+        let text = serde_json::to_string_pretty(&Value::Object(settings)).map_err(std::io::Error::other)?;
+        std::fs::write(&path, text + "\n")?;
+    }
+    Ok(())
+}
+
 /// Runs the runtime's server CLI against its data dir; `Err` carries the output.
 async fn run_server_cli(inst: &Installed, data: &Path, args: &[&str]) -> Result<String, String> {
     crate::util::ensure_private_dir(data).map_err(|e| e.to_string())?;
+    if inst.unsigned_extensions {
+        disable_signature_checks(data).map_err(|e| e.to_string())?;
+    }
     let mut cmd = tokio::process::Command::new(&inst.program);
     cmd.args(&inst.pre_args)
         .args(args)
@@ -1179,23 +1222,20 @@ pub fn presets_extension_dir(home: &Path, runtime: &str) -> PathBuf {
         .join(PRESETS_EXTENSION)
 }
 
-/// Writes (or removes, with no defaults) the presets extension; whether its content changed.
-pub fn write_presets_extension(
-    home: &Path,
-    runtime: &str,
-    presets: &Presets,
-) -> std::io::Result<bool> {
-    let dir = presets_extension_dir(home, runtime);
-    let manifest = dir.join("package.json");
+/// Where the manager keeps the VSIX it last installed for a runtime.
+pub fn presets_vsix_path(home: &Path, runtime: &str) -> PathBuf {
+    editor_dir(home)
+        .join("presets")
+        .join(format!("{runtime}-{PRESETS_EXTENSION}.vsix"))
+}
+
+/// The presets extension's `package.json`, or `None` when there are no defaults (FR-M10).
+pub fn presets_manifest(presets: &Presets) -> Option<String> {
     let defaults = presets.defaults();
     if defaults.is_empty() {
-        let existed = dir.exists();
-        if existed {
-            std::fs::remove_dir_all(&dir)?;
-        }
-        return Ok(existed);
+        return None;
     }
-    let text = serde_json::to_string_pretty(&json!({
+    serde_json::to_string_pretty(&json!({
         "name": "presets",
         "publisher": "darkpyonix",
         "displayName": "DarkPyonix presets",
@@ -1204,13 +1244,123 @@ pub fn write_presets_extension(
         "engines": {"vscode": "*"},
         "contributes": {"configurationDefaults": defaults},
     }))
-    .map_err(|e| std::io::Error::other(e.to_string()))?;
-    if std::fs::read_to_string(&manifest).ok().as_deref() == Some(text.as_str()) {
-        return Ok(false);
+    .ok()
+}
+
+/// A VSIX (an uncompressed zip) holding `manifest` as `extension/package.json`. The server
+/// loads only extensions it installed itself, so the presets go through its CLI (FR-M10).
+pub fn presets_vsix(manifest: &str) -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension=".json" ContentType="application/json"/><Default Extension=".vsixmanifest" ContentType="text/xml"/></Types>
+"#;
+    let vsixmanifest = r#"<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Language="en-US" Id="presets" Version="1.0.0" Publisher="darkpyonix" />
+    <DisplayName>DarkPyonix presets</DisplayName>
+    <Description xml:space="preserve">Default settings written by the DarkPyonix manager.</Description>
+    <Categories>Other</Categories>
+    <Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="*" /></Properties>
+  </Metadata>
+  <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code" /></Installation>
+  <Dependencies />
+  <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" /></Assets>
+</PackageManifest>
+"#;
+    stored_zip(&[
+        ("[Content_Types].xml", content_types.as_bytes()),
+        ("extension.vsixmanifest", vsixmanifest.as_bytes()),
+        ("extension/package.json", manifest.as_bytes()),
+    ])
+}
+
+/// A zip with every entry stored (method 0), dated 1980-01-01.
+fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    const DOS_DATE: u16 = (1 << 5) | 1;
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in entries {
+        let crc = crc32fast::hash(data);
+        let offset = out.len() as u32;
+        let (n, len) = (name.len() as u16, data.len() as u32);
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        for v in [20u16, 0, 0, 0, DOS_DATE] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [crc, len, len] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out.extend_from_slice(&n.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        for v in [20u16, 20, 0, 0, 0, DOS_DATE] {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [crc, len, len] {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [n, 0, 0, 0, 0] {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
     }
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(&manifest, text)?;
-    Ok(true)
+    let (cd_offset, cd_len, count) = (out.len() as u32, central.len() as u32, entries.len() as u16);
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    for v in [0u16, 0, count, count] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&cd_len.to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+/// Installs (or, with no defaults, uninstalls) the presets extension through the runtime's
+/// CLI when it differs from the last one installed; whether anything changed (FR-M10).
+async fn apply_presets_extension(
+    home: &Path,
+    runtime: &str,
+    inst: &Installed,
+    presets: &Presets,
+) -> Result<bool, ApiError> {
+    let data = data_dir(home, runtime);
+    let path = presets_vsix_path(home, runtime);
+    let last = std::fs::read(&path).ok();
+    match presets_manifest(presets) {
+        None => {
+            if last.is_none() {
+                return Ok(false);
+            }
+            run_server_cli(inst, &data, &["--uninstall-extension", PRESETS_ID])
+                .await
+                .map_err(|out| extension_failed(PRESETS_ID, "removed", out))?;
+            std::fs::remove_file(&path).map_err(|e| ApiError::internal(e.to_string()))?;
+            Ok(true)
+        }
+        Some(manifest) => {
+            let vsix = presets_vsix(&manifest);
+            if last.as_deref() == Some(vsix.as_slice()) {
+                return Ok(false);
+            }
+            if let Some(dir) = path.parent() {
+                crate::util::ensure_private_dir(dir).map_err(|e| ApiError::internal(e.to_string()))?;
+            }
+            std::fs::write(&path, &vsix).map_err(|e| ApiError::internal(e.to_string()))?;
+            let spec = path.to_string_lossy().into_owned();
+            if let Err(out) = run_server_cli(inst, &data, &["--install-extension", &spec, "--force"]).await {
+                // Not installed: the next PUT tries again.
+                let _ = std::fs::remove_file(&path);
+                return Err(extension_failed(PRESETS_ID, "installed", out));
+            }
+            Ok(true)
+        }
+    }
 }
 
 /// `publisher.name@version` lines of `--list-extensions --show-versions`, lowercased ids.
@@ -1295,8 +1445,7 @@ pub async fn put_presets(
                 .map_err(|e| ApiError::internal(e.to_string()))
         };
         save(&presets)?;
-        let changed = write_presets_extension(&home, rt, &presets)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let changed = apply_presets_extension(&home, rt, &inst, &presets).await?;
         if !presets.extensions.is_empty() {
             let listed = run_server_cli(&inst, &data, &["--list-extensions", "--show-versions"])
                 .await
@@ -1378,6 +1527,7 @@ mod tests {
             program: "code".into(),
             pre_args: vec!["serve-web".into()],
             accept_license: false,
+            unsigned_extensions: false,
             commit: String::new(),
             version: String::new(),
         };
@@ -1453,25 +1603,21 @@ mod tests {
 
     #[test]
     fn test_fr_m10_presets_extension_carries_the_defaults() {
-        let home = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../.scratch/rust-tests")
-            .join(format!("presets-{}", auth::random_hex(4)));
+        assert_eq!(presets_manifest(&Presets::default()), None);
         let p = Presets {
             extensions: vec![],
             theme: Some("T".into()),
             settings: serde_json::Map::new(),
         };
-        assert!(write_presets_extension(&home, "ose", &p).unwrap());
-        assert!(
-            !write_presets_extension(&home, "ose", &p).unwrap(),
-            "unchanged"
-        );
-        assert!(
-            write_presets_extension(&home, "ose", &Presets::default()).unwrap(),
-            "removed"
-        );
-        assert!(!presets_extension_dir(&home, "ose").exists());
-        let _ = std::fs::remove_dir_all(&home);
+        let manifest = presets_manifest(&p).unwrap();
+        let v: Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(v["contributes"]["configurationDefaults"]["workbench.colorTheme"], "T");
+        let vsix = presets_vsix(&manifest);
+        assert_eq!(&vsix[..4], b"PK\x03\x04");
+        assert_eq!(&vsix[vsix.len() - 22..vsix.len() - 18], b"PK\x05\x06");
+        let text = String::from_utf8_lossy(&vsix);
+        assert!(text.contains("extension/package.json") && text.contains(&manifest));
+        assert_eq!(vsix, presets_vsix(&manifest), "the same presets give the same bytes");
     }
 
     #[test]

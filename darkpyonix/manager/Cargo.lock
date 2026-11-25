@@ -503,6 +503,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bytes",
+ "crc32fast",
  "dpx-core",
  "futures",
  "gethostname",

@@ -579,6 +579,40 @@ async fn test_fr_m10_presets_put_the_theme_in_configuration_defaults() {
 }
 
 #[tokio::test]
+async fn test_fr_m10_presets_extension_is_installed_through_the_cli() {
+    let e = Editor::start(Mode::Dedicated, false, |_| {}).await;
+    let put = |body: Value| {
+        let e = &e;
+        async move {
+            let r = e.s.admin().call("PUT", "/api/editor/ose/presets", Some(body)).await;
+            assert_eq!(r.status, 200, "{}", r.text);
+        }
+    };
+    let vsix_installs = || {
+        e.lines("cli.jsonl")
+            .into_iter()
+            .map(|v| serde_json::from_value::<Vec<String>>(v).unwrap())
+            .filter(|a| {
+                a.windows(2).any(|w| w[0] == "--install-extension" && w[1].ends_with(".vsix"))
+                    && a.iter().any(|x| x == "--force")
+            })
+            .count()
+    };
+    put(json!({"theme": "Default Light Modern"})).await;
+    assert_eq!(vsix_installs(), 1);
+    let installed = std::fs::read_to_string(e.data().join("installed.txt")).unwrap();
+    assert!(installed.contains("darkpyonix.presets@1.0.0"), "{installed}");
+    // The same presets again: nothing to install.
+    put(json!({"theme": "Default Light Modern"})).await;
+    assert_eq!(vsix_installs(), 1);
+    // No defaults: the extension is uninstalled through the CLI.
+    put(json!({})).await;
+    let installed = std::fs::read_to_string(e.data().join("installed.txt")).unwrap();
+    assert!(!installed.contains("darkpyonix.presets"), "{installed}");
+    assert!(!editor::presets_extension_dir(&e.home, "ose").exists());
+}
+
+#[tokio::test]
 async fn test_fr_m10_presets_are_listed_as_applied() {
     let e = Editor::start(Mode::Dedicated, false, |_| {}).await;
     let body = json!({"extensions": [{"id": "redhat.vscode-yaml", "version": "1.2.3"}], "theme": "Default Light Modern"});
@@ -664,4 +698,27 @@ async fn test_fr_m10_extension_delete_refuses_the_presets_extension() {
         .await
         .error(409, "conflict");
     assert!(e.data().join("extensions/darkpyonix.presets-1.0.0/package.json").is_file());
+}
+
+#[tokio::test]
+async fn test_fr_m10_ose_turns_off_extension_signature_checks() {
+    let e = Editor::start(Mode::Dedicated, true, |home| {
+        let user = editor::data_dir(home, "ose").join("data/User");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::write(user.join("settings.json"), r#"{"editor.tabSize": 2}"#).unwrap();
+    })
+    .await;
+    e.wait_state("running").await;
+    let read = |scope: &str| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(e.data().join("data").join(scope).join("settings.json")).unwrap())
+            .unwrap()
+    };
+    // The running server reads the Machine settings.
+    assert_eq!(read("Machine")["extensions.verifySignature"], false);
+    // The CLI reads the User settings; the user's own keys stay.
+    let r = e.s.admin().post("/api/editor/ose/extensions", json!({"id": "redhat.vscode-yaml"})).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let user = read("User");
+    assert_eq!(user["extensions.verifySignature"], false);
+    assert_eq!(user["editor.tabSize"], 2);
 }
