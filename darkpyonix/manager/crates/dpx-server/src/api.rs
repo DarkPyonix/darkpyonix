@@ -44,6 +44,8 @@ pub struct AppState {
     /// later requests of that client carry the same `client` object.
     pub avatars: Mutex<HashMap<(String, String), String>>,
     pub shutdown: watch::Receiver<bool>,
+    /// The editor servers (SPEC FR-M9, FR-M10).
+    pub editors: Arc<crate::editor::Editors>,
 }
 
 type St = State<Arc<AppState>>;
