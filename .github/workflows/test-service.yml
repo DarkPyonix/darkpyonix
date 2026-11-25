@@ -1,0 +1,104 @@
+name: Service test
+
+# SPEC FR-M7: a real user-service registration of the dedicated manager on each OS: install,
+# /health, the restart policy, status and uninstall. Called by ci.yml (dispatch only).
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: Manager service (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: darkpyonix/manager
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: darkpyonix/manager
+      - name: Build the binary
+        run: cargo build -p darkpyonix
+
+      - name: A user systemd for the runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          for _ in $(seq 50); do [ -S "/run/user/$(id -u)/bus" ] && exit 0; sleep 0.2; done
+          echo "no user bus"; exit 1
+
+      - name: Install, restart, status, uninstall (macOS, Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DARKPYONIX_HOME="$GITHUB_WORKSPACE/.scratch/home"
+          dpx="$PWD/target/debug/darkpyonix"
+          line=$("$dpx" service install --dedicated)
+          echo "install: $line"
+          url=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["url"])' "$line")
+          pid=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pid"])' "$line")
+          curl -sf "$url/health"
+          [ "$(stat -c %a "$DARKPYONIX_HOME/manager-token" 2>/dev/null || stat -f %Lp "$DARKPYONIX_HOME/manager-token")" = 600 ]
+          if [ "$RUNNER_OS" = macOS ]; then
+            launchctl print "gui/$(id -u)/dev.darkpyonix.manager" > /dev/null
+          else
+            systemctl --user is-active darkpyonix-manager.service
+          fi
+          [ "$("$dpx" service install --dedicated)" = "$line" ]
+
+          # The restart policy (KeepAlive, Restart=on-failure) brings a killed manager back.
+          kill -9 "$pid"
+          for _ in $(seq 100); do
+            new=$("$dpx" service status | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["pid"] if v["running"] else "")')
+            [ -n "$new" ] && [ "$new" != "$pid" ] && break
+            sleep 0.3
+          done
+          echo "restarted as pid $new"
+          [ -n "$new" ] && [ "$new" != "$pid" ]
+
+          "$dpx" service uninstall
+          sleep 1
+          ! curl -sf -m 2 "$url/health"
+          [ -f "$DARKPYONIX_HOME/manager-token" ]
+          "$dpx" service status | python3 -c 'import json,sys; v=json.load(sys.stdin); assert not v["installed"] and not v["running"], v'
+
+      - name: Install, status, uninstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DARKPYONIX_HOME = "$env:GITHUB_WORKSPACE\.scratch\home"
+          $dpx = "$PWD\target\debug\darkpyonix.exe"
+          $line = & $dpx service install --dedicated
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Output "install: $line"
+          $v = $line | ConvertFrom-Json
+          Invoke-RestMethod "$($v.url)/health" | Out-Null
+          schtasks /Query /TN "DarkPyonix Manager" | Out-Null
+          if ($LASTEXITCODE -ne 0) { Write-Error "no task"; exit 1 }
+          $again = & $dpx service install --dedicated
+          if ($again -ne $line) { Write-Error "second install differs: $again"; exit 1 }
+          $s = (& $dpx service status) | ConvertFrom-Json
+          if (-not $s.running) { Write-Error "status: not running"; exit 1 }
+          & $dpx service uninstall
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Start-Sleep -Seconds 2
+          $s = (& $dpx service status) | ConvertFrom-Json
+          if ($s.installed) { Write-Error "still installed"; exit 1 }
+          $alive = $true
+          try { Invoke-RestMethod -TimeoutSec 2 "$($v.url)/health" | Out-Null } catch { $alive = $false }
+          if ($alive) { Write-Error "the manager still answers"; exit 1 }
+          if (-not (Test-Path "$env:DARKPYONIX_HOME\manager-token")) { Write-Error "token removed"; exit 1 }
