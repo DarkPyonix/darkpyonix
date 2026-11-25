@@ -699,3 +699,26 @@ async fn test_fr_m10_extension_delete_refuses_the_presets_extension() {
         .error(409, "conflict");
     assert!(e.data().join("extensions/darkpyonix.presets-1.0.0/package.json").is_file());
 }
+
+#[tokio::test]
+async fn test_fr_m10_ose_turns_off_extension_signature_checks() {
+    let e = Editor::start(Mode::Dedicated, true, |home| {
+        let user = editor::data_dir(home, "ose").join("data/User");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::write(user.join("settings.json"), r#"{"editor.tabSize": 2}"#).unwrap();
+    })
+    .await;
+    e.wait_state("running").await;
+    let read = |scope: &str| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(e.data().join("data").join(scope).join("settings.json")).unwrap())
+            .unwrap()
+    };
+    // The running server reads the Machine settings.
+    assert_eq!(read("Machine")["extensions.verifySignature"], false);
+    // The CLI reads the User settings; the user's own keys stay.
+    let r = e.s.admin().post("/api/editor/ose/extensions", json!({"id": "redhat.vscode-yaml"})).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let user = read("User");
+    assert_eq!(user["extensions.verifySignature"], false);
+    assert_eq!(user["editor.tabSize"], 2);
+}

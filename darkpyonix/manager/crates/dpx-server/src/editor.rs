@@ -132,6 +132,8 @@ pub struct Installed {
     /// Arguments before the server flags (`serve-web` for `code`).
     pub pre_args: Vec<String>,
     pub accept_license: bool,
+    /// Code-OSS has no Marketplace signature verifier: extension checks go off (FR-M10).
+    pub unsigned_extensions: bool,
     pub commit: String,
     pub version: String,
 }
@@ -167,6 +169,7 @@ impl EditorConfig {
                 program: ose_launcher(&o.dir),
                 pre_args: Vec::new(),
                 accept_license: true,
+                unsigned_extensions: true,
                 commit: o.commit.clone(),
                 version: o.version.clone(),
             }),
@@ -174,6 +177,7 @@ impl EditorConfig {
                 program: v.code.clone(),
                 pre_args: vec!["serve-web".into()],
                 accept_license: v.license_accepted,
+                unsigned_extensions: false,
                 commit: v.commit.clone(),
                 version: v.version.clone(),
             }),
@@ -181,6 +185,7 @@ impl EditorConfig {
                 program: s.program.clone(),
                 pre_args: s.args.clone(),
                 accept_license: false,
+                unsigned_extensions: false,
                 commit: s.commit.clone(),
                 version: s.version.clone(),
             }),
@@ -595,6 +600,10 @@ async fn run_once(
     }
     if let Err(e) = crate::util::ensure_private_dir(&data_dir(home, runtime)) {
         return Ended::Failed(format!("cannot create the data dir: {e}"));
+    }
+    if inst.unsigned_extensions {
+        // A user's settings file that is not plain JSON stays as it is; the server still starts.
+        let _ = disable_signature_checks(&data_dir(home, runtime));
     }
     let log = std::fs::OpenOptions::new()
         .create(true)
@@ -1088,9 +1097,43 @@ fn extension_failed(id: &str, what: &str, output: String) -> ApiError {
     .with_data(json!({"id": id, "output": output}))
 }
 
+/// `"extensions.verifySignature": false` in the Machine settings (read by the running server)
+/// and the User settings (read by its CLI) of a data dir, keeping every other key (FR-M10).
+pub fn disable_signature_checks(data: &Path) -> std::io::Result<()> {
+    for scope in ["Machine", "User"] {
+        let dir = data.join("data").join(scope);
+        let path = dir.join("settings.json");
+        let mut settings = match std::fs::read_to_string(&path) {
+            Ok(text) if text.trim().is_empty() => serde_json::Map::new(),
+            Ok(text) => match serde_json::from_str::<Value>(&text) {
+                Ok(Value::Object(m)) => m,
+                _ => {
+                    return Err(std::io::Error::other(format!(
+                        "{} is not plain JSON; add \"extensions.verifySignature\": false to it",
+                        path.display()
+                    )))
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+            Err(e) => return Err(e),
+        };
+        if settings.get("extensions.verifySignature") == Some(&Value::Bool(false)) {
+            continue;
+        }
+        settings.insert("extensions.verifySignature".into(), Value::Bool(false));
+        std::fs::create_dir_all(&dir)?;
+        let text = serde_json::to_string_pretty(&Value::Object(settings)).map_err(std::io::Error::other)?;
+        std::fs::write(&path, text + "\n")?;
+    }
+    Ok(())
+}
+
 /// Runs the runtime's server CLI against its data dir; `Err` carries the output.
 async fn run_server_cli(inst: &Installed, data: &Path, args: &[&str]) -> Result<String, String> {
     crate::util::ensure_private_dir(data).map_err(|e| e.to_string())?;
+    if inst.unsigned_extensions {
+        disable_signature_checks(data).map_err(|e| e.to_string())?;
+    }
     let mut cmd = tokio::process::Command::new(&inst.program);
     cmd.args(&inst.pre_args)
         .args(args)
@@ -1484,6 +1527,7 @@ mod tests {
             program: "code".into(),
             pre_args: vec!["serve-web".into()],
             accept_license: false,
+            unsigned_extensions: false,
             commit: String::new(),
             version: String::new(),
         };
