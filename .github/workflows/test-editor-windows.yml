@@ -1,8 +1,9 @@
 name: Editor Windows test
 
-# SPEC FR-M9 on Windows (#170). Step 1, a probe: can the VS Code server (Ember's OSE build) listen
-# on a named pipe the manager can proxy to, and is that pipe closed to other users? The answer
-# goes into FR-M9 before the manager code. Called by ci.yml (dispatch only).
+# SPEC FR-M9 on Windows (#170): the editor server listens on 127.0.0.1 with a connection token
+# read from a user-only file, and the manager proxies /ide/<runtime>/ to it with that token.
+# A named pipe was probed first and rejected (FR-M9, run 45564105243: the pipe's DACL grants
+# Everyone read and cannot be set from Node). Called by ci.yml (dispatch only).
 
 on:
   workflow_call:
@@ -15,100 +16,92 @@ env:
   # The dpx-ose windows-x64 build of Ember em-train-25 (until an ose-v release exists).
   OSE_RUN: "45547623834"
   OSE_ARTIFACT: dpx-ose-windows-x64
+  CARGO_TERM_COLOR: always
 
 jobs:
-  probe:
-    name: Editor server named-pipe probe (windows-latest)
+  editor:
+    name: Editor server on Windows (windows-latest)
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: darkpyonix/manager
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: darkpyonix/manager
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Fetch the OSE build
+      - name: Loopback serving with a user-only token file (fake editor)
+        shell: pwsh
+        run: |
+          # A test that did not run is a failure.
+          cargo test -p dpx-server --test editor_loopback 2>&1 | Tee-Object -FilePath editor-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($t in 'listens_on_loopback_with_a_token_file', 'proxy_sends_the_token_cookie',
+                         'token_is_not_in_the_command_line', 'token_file_is_user_only') {
+            if (-not (Select-String -Path editor-win.log -Pattern "test_fr_m9_windows_$t ... ok")) {
+              Write-Error "test_fr_m9_windows_$t did not run"; exit 1
+            }
+          }
+
+      - name: Build the binary
+        run: cargo build -p darkpyonix
+
+      - name: The real OSE through the manager
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          gh run download $env:OSE_RUN -R DarkPyonix/darkpyonix-ember -n $env:OSE_ARTIFACT -D "$env:RUNNER_TEMP\ose-dl"
-          Get-ChildItem "$env:RUNNER_TEMP\ose-dl"
-          $tgz = Get-ChildItem "$env:RUNNER_TEMP\ose-dl\*.tar.gz" | Select-Object -First 1
-          $want = (Get-Content "$($tgz.FullName).sha256").Split(' ')[0]
-          $got = (Get-FileHash $tgz.FullName -Algorithm SHA256).Hash.ToLower()
-          if ($got -ne $want) { throw "sha256 $got, expected $want" }
-          New-Item -ItemType Directory "$env:RUNNER_TEMP\ose" | Out-Null
-          tar -xzf $tgz.FullName -C "$env:RUNNER_TEMP\ose"
-          $dir = (Get-ChildItem "$env:RUNNER_TEMP\ose" -Directory | Select-Object -First 1).FullName
-          "OSE_DIR=$dir" | Out-File -Append $env:GITHUB_ENV
-          Get-ChildItem "$dir\bin"
+          $rel = "$env:RUNNER_TEMP\rel"
+          gh run download $env:OSE_RUN -R DarkPyonix/darkpyonix-ember -n $env:OSE_ARTIFACT -D "$rel\dl"
+          $tgz = Get-ChildItem "$rel\dl\*.tar.gz" | Select-Object -First 1
+          New-Item -ItemType Directory "$rel\ose-v1.139.1" | Out-Null
+          Copy-Item $tgz.FullName "$rel\ose-v1.139.1\"
+          $sum = (Get-FileHash $tgz.FullName -Algorithm SHA256).Hash.ToLower()
+          "$sum  $($tgz.Name)" | Out-File -Encoding ascii "$rel\ose-v1.139.1\SHA256SUMS"
 
-      # One step: the runner ends a step's processes when the step ends, so the server, the
-      # runner-user probe and the other-user probe share a single PowerShell session.
-      - name: Serve on a named pipe, then probe it as the runner user and as another user
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $pipe = 'dpx-ose-probe'
-          $data = "$env:RUNNER_TEMP\ose-data"
-          New-Item -ItemType Directory $data | Out-Null
-          $sargs = @('--without-connection-token', '--socket-path', "\\.\pipe\$pipe",
-                     '--server-base-path', '/ide/ose/', '--server-data-dir', $data, '--accept-server-license-terms')
-          $srv = Start-Process -FilePath "$env:OSE_DIR\bin\dpx-ose-server.cmd" -ArgumentList $sargs -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput "$env:RUNNER_TEMP\ose-out.log" -RedirectStandardError "$env:RUNNER_TEMP\ose-err.log"
-          $up = $false
-          for ($i = 0; $i -lt 120; $i++) {
-            if ((Get-Content "$env:RUNNER_TEMP\ose-out.log" -ErrorAction SilentlyContinue) -match 'Extension host agent started') { $up = $true; break }
-            Start-Sleep -Milliseconds 500
-          }
-          if (-not $up) { Get-Content "$env:RUNNER_TEMP\ose-out.log", "$env:RUNNER_TEMP\ose-err.log"; throw 'the server did not start' }
-          Write-Output "server up after $($i/2)s; pipes: $(([System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*dpx*' }) -join ', ')"
+          $env:DARKPYONIX_HOME = "$env:RUNNER_TEMP\dpx-home"
+          # editor_cmd strips `file://`: the rest must be a Windows path.
+          $env:DARKPYONIX_EDITOR_RELEASES = "file://$($rel -replace '\\', '/')"
+          $env:DARKPYONIX_MANAGER_TOKEN = 'editor-windows-check'
+          $dpx = "$PWD\target\debug\darkpyonix.exe"
+          & $dpx editor install --runtime ose --release ose-v1.139.1
+          if ($LASTEXITCODE -ne 0) { throw 'editor install failed' }
 
-          function Send-Get($stream) {
-            $w = New-Object System.IO.StreamWriter($stream); $w.AutoFlush = $true
-            $w.Write("GET /ide/ose/ HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n")
-            (New-Object System.IO.StreamReader($stream)).ReadLine()
-          }
-
-          $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipe, [System.IO.Pipes.PipeDirection]::InOut)
-          $c.Connect(15000)
-          Write-Output "== runner user: $(Send-Get $c)"
-          $c.Dispose()
-
-          $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipe, [System.IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadPermissions',
-                 [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::None, [System.IO.HandleInheritability]::None)
-          $c.Connect(15000)
-          Write-Output '== DACL of the pipe the server made'
-          $c.GetAccessControl().Access | Format-Table IdentityReference, AccessControlType, PipeAccessRights -AutoSize | Out-String -Width 200
-          $c.Dispose()
-
-          # 14 characters: a longer password makes `net user` stop at a Y/N prompt.
-          $pw = 'Dp' + [guid]::NewGuid().ToString('N').Substring(0, 9) + '!a1'
-          net user dpxprobe $pw /add
-          if ($LASTEXITCODE -ne 0) { throw 'net user failed' }
-          New-Item -ItemType Directory C:\dpxprobe | Out-Null
-          icacls C:\dpxprobe /grant 'Everyone:(OI)(CI)F' | Out-Null
-          @'
+          # One step: the runner ends a step's processes when the step ends.
+          $out = "$env:RUNNER_TEMP\manager.out"
+          $mgr = Start-Process -FilePath $dpx -ArgumentList 'manager', '--dedicated', '--port', '0' -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError "$env:RUNNER_TEMP\manager.err" -WindowStyle Hidden
           try {
-            $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'dpx-ose-probe', [System.IO.Pipes.PipeDirection]::InOut)
-            $c.Connect(10000)
-            $w = New-Object System.IO.StreamWriter($c); $w.AutoFlush = $true
-            $w.Write("GET /ide/ose/ HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n")
-            "connected: " + (New-Object System.IO.StreamReader($c)).ReadLine() | Out-File C:\dpxprobe\result.txt
-          } catch {
-            "refused: " + $_.Exception.GetType().Name + ": " + $_.Exception.Message | Out-File C:\dpxprobe\result.txt
+            $line = $null
+            for ($i = 0; $i -lt 60 -and -not $line; $i++) {
+              Start-Sleep -Milliseconds 500
+              $line = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
+            if (-not $line) { throw 'the manager printed no line' }
+            $url = ($line | ConvertFrom-Json).url
+            $h = @{ Authorization = 'Bearer editor-windows-check' }
+            $launch = Invoke-RestMethod -Method Post "$url/api/editor/ose/launch" -Headers $h -TimeoutSec 120
+            Write-Output "launch: $($launch | ConvertTo-Json -Compress)"
+            $r = Invoke-WebRequest "$url/ide/ose/" -Headers $h -UseBasicParsing -TimeoutSec 60
+            Write-Output "GET /ide/ose/ through the manager: $($r.StatusCode)"
+            if ($r.StatusCode -ne 200 -or $r.Content -notmatch 'workbench') { throw 'no workbench page' }
+            if ("$($r.Headers['Set-Cookie'])" -match 'vscode-tkn') { throw 'the token reached the client' }
+            $token = (Get-Content "$env:DARKPYONIX_HOME\editor\tokens\ose.token").Trim()
+            $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--connection-token-file*' }
+            if (-not $procs) { throw 'no editor server process found' }
+            if ($procs | Where-Object { $_.CommandLine -like "*$token*" }) { throw 'the token is in a command line' }
+            icacls "$env:DARKPYONIX_HOME\editor\tokens\ose.token"
+            $ext = Invoke-RestMethod -Method Post "$url/api/editor/ose/extensions" -Headers $h -ContentType 'application/json' `
+              -Body '{"id": "redhat.vscode-yaml"}' -TimeoutSec 300
+            Write-Output "extension: $($ext | ConvertTo-Json -Compress)"
+          } finally {
+            Stop-Process -Id $mgr.Id -Force -ErrorAction SilentlyContinue
+            Get-Content "$env:RUNNER_TEMP\manager.err" -ErrorAction SilentlyContinue | Select-Object -Last 20
+            Get-Content "$env:DARKPYONIX_HOME\editor\ose.log" -ErrorAction SilentlyContinue | Select-Object -Last 20
           }
-          '@ | Out-File C:\dpxprobe\client.ps1
-          $cred = New-Object System.Management.Automation.PSCredential('dpxprobe', (ConvertTo-SecureString $pw -AsPlainText -Force))
-          try {
-            Start-Process powershell -Credential $cred -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\dpxprobe\client.ps1' `
-              -WorkingDirectory C:\dpxprobe -Wait -LoadUserProfile
-            Write-Output "== other user: $(Get-Content C:\dpxprobe\result.txt)"
-          } catch {
-            Write-Output "== other user: could not run as dpxprobe: $($_.Exception.Message)"
-          }
-          # The probe records the answers; FR-M9 decides from them.
-          Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
-
-      - name: Server log
-        if: always()
-        shell: pwsh
-        run: Get-Content "$env:RUNNER_TEMP\ose-out.log", "$env:RUNNER_TEMP\ose-err.log" -ErrorAction SilentlyContinue | Select-Object -Last 40

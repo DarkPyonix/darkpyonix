@@ -274,6 +274,44 @@ pub fn server_args(inst: &Installed, home: &Path, runtime: &str, socket: &Path) 
     a
 }
 
+/// Where a running editor server answers (SPEC FR-M9).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Endpoint {
+    /// A Unix socket in a 0700 directory, no token.
+    Socket(PathBuf),
+    /// Loopback TCP; every request carries the connection token as the `vscode-tkn` cookie.
+    Loopback { port: u16, token: String },
+}
+
+/// The connection token's file of a runtime (loopback serving, SPEC FR-M9).
+pub fn token_path(home: &Path, runtime: &str) -> PathBuf {
+    editor_dir(home).join("tokens").join(format!("{runtime}.token"))
+}
+
+/// The flags of a loopback start: the token is read from `token_file`, never passed (FR-M9).
+pub fn loopback_args(inst: &Installed, home: &Path, runtime: &str, port: u16, token_file: &Path) -> Vec<String> {
+    let mut a = inst.pre_args.clone();
+    a.extend([
+        "--host".to_string(),
+        "127.0.0.1".into(),
+        "--port".into(),
+        port.to_string(),
+        "--connection-token-file".into(),
+        token_file.to_string_lossy().into_owned(),
+        "--server-base-path".into(),
+        base_path(runtime),
+        "--server-data-dir".into(),
+        data_dir(home, runtime).to_string_lossy().into_owned(),
+    ]);
+    if inst.accept_license {
+        a.push("--accept-server-license-terms".into());
+    }
+    a
+}
+
+/// The name of the server's own token cookie (OSE 1.139.1 `server-main.js`).
+pub const SERVER_TOKEN_COOKIE: &str = "vscode-tkn";
+
 /// Makes the socket's directory, 0700 and ours, and removes a socket left behind.
 fn prepare_socket(socket: &Path) -> std::io::Result<()> {
     let dir = socket
@@ -314,6 +352,7 @@ type Status = (RunState, Option<String>);
 struct Slot {
     want: watch::Sender<bool>,
     status: watch::Receiver<Status>,
+    endpoint: Arc<Mutex<Option<Endpoint>>>,
 }
 
 struct Ticket {
@@ -346,16 +385,19 @@ pub enum LaunchError {
 pub struct Editors {
     home: PathBuf,
     enabled: bool,
+    loopback: bool,
     slots: Mutex<HashMap<String, Slot>>,
     tickets: Mutex<HashMap<String, Ticket>>,
 }
 
 impl Editors {
     /// `enabled` is false for an ephemeral manager: it lists what is installed and starts nothing.
-    pub fn new(home: impl Into<PathBuf>, enabled: bool) -> Arc<Self> {
+    /// `loopback` serves on 127.0.0.1 with a connection token instead of a Unix socket (Windows).
+    pub fn new(home: impl Into<PathBuf>, enabled: bool, loopback: bool) -> Arc<Self> {
         Arc::new(Self {
             home: home.into(),
             enabled,
+            loopback,
             slots: Mutex::new(HashMap::new()),
             tickets: Mutex::new(HashMap::new()),
         })
@@ -385,6 +427,14 @@ impl Editors {
         }
     }
 
+    /// Where the runtime answers while it runs.
+    pub fn endpoint(&self, runtime: &str) -> Option<Endpoint> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let slot = slots.get(runtime)?;
+        let e = slot.endpoint.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        e
+    }
+
     pub fn status(&self, runtime: &str) -> Status {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         slots
@@ -401,10 +451,17 @@ impl Editors {
         }
         let (want_tx, want_rx) = watch::channel(on);
         let (status_tx, status_rx) = watch::channel((RunState::Stopped, None));
+        let endpoint = Arc::new(Mutex::new(None));
+        let transport = if self.loopback {
+            Transport::Loopback
+        } else {
+            Transport::Socket(self.socket(runtime))
+        };
         tokio::spawn(supervise(
             self.home.clone(),
             runtime.to_string(),
-            self.socket(runtime),
+            transport,
+            endpoint.clone(),
             want_rx,
             status_tx,
         ));
@@ -413,6 +470,7 @@ impl Editors {
             Slot {
                 want: want_tx,
                 status: status_rx.clone(),
+                endpoint,
             },
         );
         status_rx
@@ -539,10 +597,17 @@ impl Editors {
 
 /// One runtime's supervisor: starts the child while it is wanted, restarts it with backoff,
 /// and ends it when it is no longer wanted or the manager stops.
+#[derive(Clone)]
+enum Transport {
+    Socket(PathBuf),
+    Loopback,
+}
+
 async fn supervise(
     home: PathBuf,
     runtime: String,
-    socket: PathBuf,
+    transport: Transport,
+    endpoint: Arc<Mutex<Option<Endpoint>>>,
     mut want: watch::Receiver<bool>,
     status: watch::Sender<Status>,
 ) {
@@ -555,7 +620,9 @@ async fn supervise(
             }
         }
         let started = Instant::now();
-        let reason = match run_once(&home, &runtime, &socket, &mut want, &status).await {
+        let ended = run_once(&home, &runtime, &transport, &endpoint, &mut want, &status).await;
+        *endpoint.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        let reason = match ended {
             Ended::Unwanted => continue,
             Ended::Closed => return,
             Ended::Failed(reason) => reason,
@@ -584,7 +651,8 @@ enum Ended {
 async fn run_once(
     home: &Path,
     runtime: &str,
-    socket: &Path,
+    transport: &Transport,
+    endpoint: &Mutex<Option<Endpoint>>,
     want: &mut watch::Receiver<bool>,
     status: &watch::Sender<Status>,
 ) -> Ended {
@@ -595,9 +663,27 @@ async fn run_once(
         },
         Err(e) => return Ended::Failed(e.to_string()),
     };
-    if let Err(e) = prepare_socket(socket) {
-        return Ended::Failed(format!("cannot prepare {}: {e}", socket.display()));
-    }
+    let (args, target) = match transport {
+        Transport::Socket(socket) => {
+            if let Err(e) = prepare_socket(socket) {
+                return Ended::Failed(format!("cannot prepare {}: {e}", socket.display()));
+            }
+            (server_args(&inst, home, runtime, socket), Endpoint::Socket(socket.clone()))
+        }
+        Transport::Loopback => {
+            let port = match std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|l| l.local_addr()) {
+                Ok(a) => a.port(),
+                Err(e) => return Ended::Failed(format!("no free loopback port: {e}")),
+            };
+            // A fresh token for every start, in a file only this user can read.
+            let token = auth::random_hex(32);
+            let file = token_path(home, runtime);
+            if let Err(e) = crate::util::write_user_only(&file, token.as_bytes()) {
+                return Ended::Failed(format!("cannot write {}: {e}", file.display()));
+            }
+            (loopback_args(&inst, home, runtime, port, &file), Endpoint::Loopback { port, token })
+        }
+    };
     if let Err(e) = crate::util::ensure_private_dir(&data_dir(home, runtime)) {
         return Ended::Failed(format!("cannot create the data dir: {e}"));
     }
@@ -610,7 +696,7 @@ async fn run_once(
         .append(true)
         .open(editor_dir(home).join(format!("{runtime}.log")));
     let mut cmd = tokio::process::Command::new(&inst.program);
-    cmd.args(server_args(&inst, home, runtime, socket))
+    cmd.args(&args)
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
     match log {
@@ -654,8 +740,9 @@ async fn run_once(
                 }
             }
             _ = tokio::time::sleep(Duration::from_millis(100)), if !ready => {
-                if answers(socket).await {
+                if answers(&target).await {
                     ready = true;
+                    *endpoint.lock().unwrap_or_else(|p| p.into_inner()) = Some(target.clone());
                     status.send_replace((RunState::Running, None));
                 }
             }
@@ -663,14 +750,14 @@ async fn run_once(
     }
 }
 
-#[cfg(unix)]
-async fn answers(socket: &Path) -> bool {
-    tokio::net::UnixStream::connect(socket).await.is_ok()
-}
-
-#[cfg(not(unix))]
-async fn answers(_socket: &Path) -> bool {
-    false
+async fn answers(target: &Endpoint) -> bool {
+    match target {
+        #[cfg(unix)]
+        Endpoint::Socket(socket) => tokio::net::UnixStream::connect(socket).await.is_ok(),
+        #[cfg(not(unix))]
+        Endpoint::Socket(_) => false,
+        Endpoint::Loopback { port, .. } => tokio::net::TcpStream::connect(("127.0.0.1", *port)).await.is_ok(),
+    }
 }
 
 /// SIGTERM to the child's process group, then SIGKILL after 3 seconds.
@@ -690,6 +777,16 @@ async fn end_child(child: &mut tokio::process::Child) {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
+    }
+    // A Windows launcher is a `.cmd` whose node child outlives a plain kill: end the tree.
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
     }
     let _ = child.start_kill();
     let _ = child.wait().await;
@@ -793,24 +890,63 @@ pub async fn gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next)
             _ => return ApiError::unauthorized().into_response(),
         }
     }
-    if st.editors.status(runtime).0 != RunState::Running {
-        return unavailable(runtime, None);
-    }
+    let endpoint = match st.editors.endpoint(runtime) {
+        Some(e) if st.editors.status(runtime).0 == RunState::Running => e,
+        _ => return unavailable(runtime, None),
+    };
     strip_credentials(&mut req);
-    forward(&st.editors.socket(runtime), req).await
+    forward(endpoint, req).await
 }
 
-#[cfg(unix)]
-async fn forward(socket: &Path, req: Request) -> Response {
-    crate::proxy::forward_unix(socket, req).await
+async fn forward(endpoint: Endpoint, mut req: Request) -> Response {
+    match endpoint {
+        #[cfg(unix)]
+        Endpoint::Socket(socket) => crate::proxy::forward_unix(&socket, req).await,
+        #[cfg(not(unix))]
+        Endpoint::Socket(_) => unavailable("", Some("no Unix sockets here".into())),
+        Endpoint::Loopback { port, token } => {
+            set_server_token(&mut req, &token);
+            let mut resp = crate::proxy::forward_tcp(([127, 0, 0, 1], port).into(), req).await;
+            hide_server_token(&mut resp);
+            resp
+        }
+    }
 }
 
-#[cfg(not(unix))]
-async fn forward(_socket: &Path, _req: Request) -> Response {
-    unavailable(
-        "",
-        Some("the editor server is not served on Windows yet".into()),
-    )
+/// Replaces any `vscode-tkn` cookie of the browser with the manager's (SPEC FR-M9).
+fn set_server_token(req: &mut Request, token: &str) {
+    let mut cookies: Vec<String> = req
+        .headers()
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty() && c.split_once('=').map(|(k, _)| k) != Some(SERVER_TOKEN_COOKIE))
+        .collect();
+    cookies.push(format!("{SERVER_TOKEN_COOKIE}={token}"));
+    req.headers_mut().remove(header::COOKIE);
+    if let Ok(v) = HeaderValue::from_str(&cookies.join("; ")) {
+        req.headers_mut().insert(header::COOKIE, v);
+    }
+}
+
+/// The token never reaches the browser: drop a `Set-Cookie` of it.
+fn hide_server_token(resp: &mut Response) {
+    let keep: Vec<HeaderValue> = resp
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter(|v| {
+            !v.to_str()
+                .is_ok_and(|s| s.trim_start().starts_with(&format!("{SERVER_TOKEN_COOKIE}=")))
+        })
+        .cloned()
+        .collect();
+    resp.headers_mut().remove(header::SET_COOKIE);
+    for v in keep {
+        resp.headers_mut().append(header::SET_COOKIE, v);
+    }
 }
 
 fn unavailable(runtime: &str, reason: Option<String>) -> Response {
@@ -1594,7 +1730,7 @@ mod tests {
 
     #[test]
     fn test_fr_m9_ticket_is_scoped_to_its_runtime() {
-        let e = Editors::new("/nonexistent", true);
+        let e = Editors::new("/nonexistent", true, false);
         let t = e.issue("ose");
         assert!(!e.redeem(&t, "vsc"));
         assert!(!e.redeem(&t, "script"));
@@ -1622,7 +1758,7 @@ mod tests {
 
     #[test]
     fn test_fr_m9_unused_ticket_expires() {
-        let e = Editors::new("/nonexistent", true);
+        let e = Editors::new("/nonexistent", true, false);
         let t = e.issue("ose");
         e.age_tickets_for_test(UNUSED_TICKET_TTL + Duration::from_secs(1));
         assert!(!e.redeem(&t, "ose"));
