@@ -411,7 +411,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 테스트(Rust): `test_fr_m6_plain_stream_survives_manager_kill`(`darkpyonix/manager/crates/darkpyonix/tests/handoff.rs`, 진짜 매니저 프로세스와 파이썬 커널), `test_fr_m6_wait_over_http2_is_pumped_to_the_kernel`(TLS·HTTP/2·터널의 `wait`도 소켓 쌍으로 커널에 넘김), `test_fr_m1_get_run_is_a_rest_call_even_with_handoff`(`getRun`은 스트림이 아니라 `runs.get` 호출), `test_fr_m6_plain_stream_is_handed_off_and_survives_the_manager`, `test_fr_m6_tls_http2_stream_is_pumped_and_ends_with_manager`(h2c로 같은 경로를 탐), `test_fr_m6_unauthenticated_stream_never_reaches_kernel`, `test_fr_m6_revoking_a_share_closes_its_streams`, `test_fr_m6_wait_is_handed_off_with_its_run_ref`(`darkpyonix/manager/crates/dpx-server/tests/handoff.rs`), `dkp.rs`의 `test_pr_5_adopt_sends_the_frame_then_the_descriptor`
 - 상태 메모: 평문 TCP는 hyper가 읽기 전에 요청 머리를 `peek`해서 검사하고(`handoff::intercept`), 통과하면 머리를 읽어 치우고 소켓을 `SCM_RIGHTS`로 넘긴 뒤 자기 복사본을 닫습니다. 검사에 실패하면 hyper에 그대로 넘겨 평소의 `401`/`403`/`404`/`400`이 나갑니다. 커널에는 토큰을 뺀 요청을 다시 만들어 보냅니다. Windows는 `WSADuplicateSocketW`로 만든 정보를 제어 파이프 위 `share`로 보내며, 윈도우 러너에서 진짜 매니저와 파이썬 커널로 `test_fr_m6_plain_stream_survives_manager_kill`이 통과한다(이슈 #121). TLS 위 WebSocket은 가짜 커널(`dpx-server/tests/ws_tls.rs`)과 실제 커널(`darkpyonix/tests/ws_tls_real.rs`) 모두 Unix와 Windows에서 시험한다(#49).
 
-### FR-M7 매니저 서비스 등록 — `Agreed` (INTENT D26, 리더 결정 2026-11-25, 구현 대기 #163)
+### FR-M7 매니저 서비스 등록 — `Done` (INTENT D26, 리더 결정 2026-11-25, #163, CI run 45547951080: Service test macOS·Ubuntu·Windows)
 `darkpyonix service install --dedicated [--host H] [--port P]`는 전용 매니저(FR-M4)를 사용자 서비스로 등록하고 켭니다. 관리자 권한은 쓰지 않습니다. ember-node가 첫 실행에서 부르지만, 사람이 직접 불러도 같습니다.
 - 등록 방식: macOS는 `~/Library/LaunchAgents/dev.darkpyonix.manager.plist`(launchd 사용자 에이전트, `KeepAlive`), Linux는 `~/.config/systemd/user/darkpyonix-manager.service`(`systemd --user`, `Restart=on-failure`), Windows는 로그온 때 시작하는 사용자 예약 작업 `DarkPyonix Manager`. 서비스는 설치된 바이너리의 절대 경로를 실행하고, 환경으로 `DARKPYONIX_HOME`을 줍니다.
 - 마스터 토큰은 `install`이 만들어 `$DARKPYONIX_HOME/manager-token`(0600, Windows는 사용자 전용 ACL)에 두고, 서비스는 그 파일에서 읽습니다. 등록 단위 파일에는 토큰을 쓰지 않습니다.
@@ -485,7 +485,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 | `darkpyonix kernel FILE [--python PATH]` | 실행 없이 커널만 띄움 |
 | `darkpyonix share FILE --capabilities read,history[,execute,edit,manage]` | 공유 토큰 발급(전용 매니저). 능력 이름은 FR-A3 |
 | `darkpyonix manager [--ephemeral\|--dedicated] [--host H] [--port P] [--idle-timeout S]` | 매니저 실행. 기본은 `--ephemeral`(FR-M3: 루프백, 유휴 시 종료, 주소와 토큰은 표준 출력으로), `--dedicated`는 FR-M4. 둘을 함께 주면 오류입니다 |
-| `darkpyonix service install --dedicated [--host H] [--port P]`, `service uninstall`, `service status` | 전용 매니저를 사용자 서비스로 등록·제거·조회(FR-M7, 구현 대기 #163) |
+| `darkpyonix service install --dedicated [--host H] [--port P]`, `service uninstall`, `service status` | 전용 매니저를 사용자 서비스로 등록·제거·조회(FR-M7) |
 | `darkpyonix editor install --runtime ose --release T \| --runtime vsc --accept-server-license-terms [--code P] \| --runtime script --script F`, `editor use ose\|vsc\|script`, `editor autostart on\|off`, `editor status` | 에디터 서버 설치와 설정(FR-M8, 구현 대기 #162) |
 
 - 수용 기준: `darkpyonix run a.py`를 두 번째로 실행하면 종료 코드 75와 함께 현재 실행 정보와 `--queue`/`stop` 안내를 출력합니다.
