@@ -80,8 +80,10 @@ jobs:
           $c.GetAccessControl().Access | Format-Table IdentityReference, AccessControlType, PipeAccessRights -AutoSize | Out-String -Width 200
           $c.Dispose()
 
-          $pw = 'Dpx-' + [guid]::NewGuid().ToString('N').Substring(0, 16) + '!a1'
-          net user dpxprobe $pw /add | Out-Null
+          # 14 characters: a longer password makes `net user` stop at a Y/N prompt.
+          $pw = 'Dp' + [guid]::NewGuid().ToString('N').Substring(0, 9) + '!a1'
+          net user dpxprobe $pw /add
+          if ($LASTEXITCODE -ne 0) { throw 'net user failed' }
           New-Item -ItemType Directory C:\dpxprobe | Out-Null
           icacls C:\dpxprobe /grant 'Everyone:(OI)(CI)F' | Out-Null
           @'
