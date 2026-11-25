@@ -1726,7 +1726,6 @@ paths:
       tags:
       - Editor
       operationId: getEditor
-      x-darkpyonix-status: planned
       summary: Installed editor runtimes and their state
       description: 'Every installed runtime with its version, Code-OSS commit (Ember D50), state, served
 
@@ -1755,7 +1754,6 @@ paths:
       tags:
       - Editor
       operationId: launchEditor
-      x-darkpyonix-status: planned
       summary: Start the editor server if needed and issue a launch ticket
       description: 'Idempotent: starts the runtime unless it runs, waits up to 30 s for its socket, and
 
@@ -1796,7 +1794,6 @@ paths:
       tags:
       - Editor
       operationId: stopEditor
-      x-darkpyonix-status: planned
       summary: Stop the editor server
       description: 'Ends the runtime and revokes its tickets. It stays off until the next `launch` or manager
 
@@ -1821,7 +1818,6 @@ paths:
       tags:
       - Editor
       operationId: installEditorExtension
-      x-darkpyonix-status: planned
       summary: Install one extension into the runtime
       description: 'Runs the runtime''s `--install-extension publisher.name[@version]` against its data dir
 
@@ -1869,7 +1865,6 @@ paths:
       tags:
       - Editor
       operationId: putEditorPresets
-      x-darkpyonix-status: planned
       summary: Apply the presets from Ember settings
       description: 'The final editor settings of this computer (Ember main server settings, overridden per
 

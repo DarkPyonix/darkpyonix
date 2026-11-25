@@ -8,6 +8,7 @@ mod args;
 mod client;
 mod commands;
 mod discovery;
+mod editor_cmd;
 mod manager;
 mod render;
 mod sse;
@@ -25,6 +26,9 @@ fn main() {
             }
         };
         std::process::exit(code);
+    }
+    if let args::Command::Editor(e) = cli.command {
+        std::process::exit(editor_cmd::run(e));
     }
     let out = commands::Out::new(cli.json);
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
