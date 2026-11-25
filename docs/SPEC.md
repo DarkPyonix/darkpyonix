@@ -420,7 +420,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 수용 기준: 등록 단위 파일의 내용(실행 경로, 인자, 재시작 정책, 토큰이 없음)을 시험 디렉터리에 써서 확인하고, 각 OS의 CI 러너에서 진짜 등록·`/health`·`uninstall`까지 한 번 돌립니다.
 - 테스트(계획): `test_fr_m7_service_unit_runs_the_dedicated_manager_without_the_token`, `test_fr_m7_install_prints_the_manager_line_once_and_is_idempotent`, `test_fr_m7_token_file_is_0600`, `test_fr_m7_uninstall_removes_the_registration_and_keeps_the_token`
 
-### FR-M8 에디터 서버 설치 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
+### FR-M8 에디터 서버 설치 — `Done` (INTENT D27, 리더 결정 2026-11-25, #162, CI run 45543434138)
 매니저는 VS Code 서버 런타임 셋을 다룹니다: `ose`(기본, Ember의 Code-OSS 빌드), `vsc`(사용자의 Microsoft VS Code), `script`(Ember 설정의 Manual Script가 설치한 서버). 어느 것을 쓸지와 프리셋은 Ember의 메인 서버 설정과 노드별 상속 설정이 정하고(INTENT D27, Ember D56), 노드가 이 명령과 FR-M10의 `presets`로 넘깁니다. Ember 에디터 UI는 Ember 클라이언트에 있고 여기서 다루지 않습니다.
 - `darkpyonix editor install --runtime ose --release <태그>`: `<릴리스 주소>/<태그>/dpx-ose-<판>-<대상>.tar.gz`와 같은 릴리스의 `SHA256SUMS`를 받아 확인하고 `$DARKPYONIX_HOME/editor/ose/<태그>/`에 풉니다. 릴리스 주소는 기본 `https://github.com/DarkPyonix/darkpyonix-ember/releases/download`이고 `DARKPYONIX_EDITOR_RELEASES`로 바꿉니다(시험은 `file://`). 대상 이름은 OSE의 것(`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`)입니다. 판은 노드가 넘깁니다(Ember D50). 매니저는 태그를 고르지 않습니다.
   - 풀어 둔 `product.json`의 `commit`과 `version`을 기록합니다.
@@ -434,7 +434,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - 설치는 CLI로만 합니다. HTTP API로는 아무것도 내려받지 않습니다.
 - 테스트(계획): `test_fr_m8_ose_install_checks_the_sum_and_records_the_commit`, `test_fr_m8_a_bad_sum_leaves_nothing_behind`, `test_fr_m8_the_same_tag_is_not_downloaded_twice`, `test_fr_m8_vsc_records_the_users_code_and_downloads_nothing`, `test_fr_m8_vsc_without_code_is_an_error`, `test_fr_m8_vsc_needs_the_license_flag`, `test_fr_m8_script_records_the_server_it_prints`, `test_fr_m8_a_failing_script_changes_nothing`
 
-### FR-M9 에디터 서버 수명과 서빙 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
+### FR-M9 에디터 서버 수명과 서빙 — `Done` (INTENT D27, 리더 결정 2026-11-25, #162, CI run 45543434138)
 - **자동 시작.** 전용 매니저(FR-M4)는 시작할 때 설치되고 자동 시작이 켜진 런타임마다 에디터 서버 하나를 자식 프로세스로 띄웁니다. 임시 매니저(FR-M3)는 띄우지 않습니다.
 - **인자.** `--without-connection-token --socket-path $DARKPYONIX_HOME/editor/sockets/<런타임>.sock --server-base-path /ide/<런타임>/ --server-data-dir $DARKPYONIX_HOME/editor/data/<런타임>`, OSE는 `--accept-server-license-terms`를 더합니다. `sockets/`는 0700으로 만든 뒤에 띄우고, 남은 소켓 파일은 지웁니다. 소켓 경로가 유닉스 도메인 소켓 경로 한도(100바이트)를 넘으면 `$TMPDIR/darkpyonix-<uid>-<런타임 홈 경로의 sha256 앞 12자>/<런타임>.sock`(0700, 자기 소유인지 확인)을 대신 씁니다. `$TMPDIR`가 길어 이 경로도 한도를 넘으면 `$TMPDIR` 대신 `/tmp`를 씁니다. 같은 데이터 디렉터리를 쓰므로 확장은 런타임마다 한 번 설치됩니다.
 - **감독.** 에디터 서버가 끝나면 1초부터 두 배씩 최대 60초까지 기다려 다시 띄웁니다. 매니저가 끝나면(정상 종료와 SIGTERM) 에디터 서버도 끝냅니다.
