@@ -448,7 +448,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 - **Windows.** 소켓 대신 사용자 전용 ACL의 이름 있는 파이프를 쓸 수 있는지 확인한 뒤 정합니다. 그때까지 Windows의 에디터 서버는 `Draft`입니다.
 - 테스트(계획, 가짜 에디터 서버가 인자를 기록하고 `--socket-path`에서 HTTP와 WebSocket으로 답함): `test_fr_m9_dedicated_manager_starts_the_editor_with_its_socket_and_no_token`, `test_fr_m9_socket_directory_is_0700`, `test_fr_m9_ephemeral_manager_starts_no_editor`, `test_fr_m9_a_crashed_editor_is_restarted`, `test_fr_m9_the_editor_ends_with_the_manager`, `test_fr_m9_unauthenticated_request_never_reaches_the_editor`, `test_fr_m9_a_share_token_does_not_open_the_editor`, `test_fr_m9_a_long_home_puts_the_socket_in_a_private_temp_dir`, `test_fr_m9_bearer_request_and_websocket_are_proxied`, `test_fr_m9_ticket_query_redirects_once_and_sets_the_cookie`, `test_fr_m9_ticket_is_scoped_to_its_runtime`, `test_fr_m9_unused_ticket_expires`, `test_fr_m9_stop_revokes_the_tickets`
 
-### FR-M10 에디터 제어 API — `Done` (INTENT D27, 리더 결정 2026-11-25, #162, #165, CI run 45545371017)
+### FR-M10 에디터 제어 API — `Agreed` (INTENT D27, 리더 결정 2026-11-25, #162, #165; 프리셋 확장 등록은 구현 대기 #168)
 마스터 토큰으로만 인증합니다(FR-M9와 같은 이유). 공유 토큰은 `403`입니다. `docs/api/manager.openapi.yaml`에 구현과 같은 변경으로 더합니다(NFR-M3).
 - `GET /api/editor` → `{runtimes: [{runtime, version, commit, state, path, reason?}], default_runtime, autostart}`. `state`는 `running`, `starting`, `stopped`, `failed`. `path`는 `/ide/<런타임>/`. 설치된 것이 없으면 빈 목록입니다. 소켓 경로는 알려 주지 않습니다.
 - `POST /api/editor/{runtime}/launch` → `{ticket, path, commit, version}`. 멱등하게 에디터 서버를 켜고 소켓이 답할 때까지(최대 30초) 기다린 뒤 새 실행 표를 냅니다. 설치되지 않았으면 `409`와 이유, 30초 안에 답하지 않으면 `503`.
