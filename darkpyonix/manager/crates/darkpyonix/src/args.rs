@@ -49,6 +49,50 @@ pub enum Command {
     Share(ShareArgs),
     /// Run a kernel manager in the foreground.
     Manager(ManagerArgs),
+    /// Install and configure the VS Code server a dedicated manager runs (OSE, VS Code, script).
+    Editor(EditorArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EditorArgs {
+    #[command(subcommand)]
+    pub command: EditorCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EditorCommand {
+    /// Install a runtime: OSE from Ember's release, the user's own `code`, or a Manual Script.
+    Install(EditorInstallArgs),
+    /// The runtime a VS Code window opens with.
+    Use {
+        #[arg(value_parser = ["ose", "vsc", "script"])]
+        runtime: String,
+    },
+    /// Whether a dedicated manager starts the installed runtimes.
+    Autostart {
+        #[arg(value_parser = ["on", "off"])]
+        value: String,
+    },
+    /// What is installed (JSON).
+    Status,
+}
+
+#[derive(Debug, Args)]
+pub struct EditorInstallArgs {
+    #[arg(long, value_parser = ["ose", "vsc", "script"])]
+    pub runtime: String,
+    /// OSE release tag, e.g. `ose-v1.139.1` (ose).
+    #[arg(long)]
+    pub release: Option<String>,
+    /// The `code` command of your VS Code (vsc; default: found on PATH).
+    #[arg(long)]
+    pub code: Option<PathBuf>,
+    /// The install script (script). Its last stdout line names the server command as JSON.
+    #[arg(long)]
+    pub script: Option<PathBuf>,
+    /// Accept the Microsoft VS Code Server licence (vsc).
+    #[arg(long)]
+    pub accept_server_license_terms: bool,
 }
 
 #[derive(Debug, Args)]

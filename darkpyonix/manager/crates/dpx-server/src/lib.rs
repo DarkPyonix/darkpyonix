@@ -2,7 +2,8 @@
 //!
 //! [`serve`] answers every operation of `docs/api/manager.openapi.yaml` on top of any
 //! [`KernelBackend`], plus three things outside the contract: the API reference page at
-//! `/docs/`, configured reverse-proxy routes ([`ProxyRoute`]) and nothing else. It speaks
+//! `/docs/`, the editor server under `/ide/<runtime>/` ([`editor`]), configured reverse-proxy
+//! routes ([`ProxyRoute`]) and nothing else. It speaks
 //! HTTP/1.1 and HTTP/2 (h2c, or ALPN over TLS), SSE and WebSocket (proxied), without nginx.
 //!
 //! Ephemeral managers (FR-M3) bind `127.0.0.1`, write no registry file (the process that started
@@ -13,6 +14,7 @@
 pub mod api;
 pub mod auth;
 pub mod docs;
+pub mod editor;
 pub mod error;
 pub mod handoff;
 pub mod proxy;
@@ -419,6 +421,11 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .route("/api/kernels/{kernel_id}/cells/{cell_id}/lock", put(api::lock_cell).delete(api::unlock_cell))
         .route("/api/kernels/{kernel_id}/presence", put(api::update_presence).delete(api::leave_presence))
         .route("/api/kernels/{kernel_id}/runs/{run_ref}/wait", get(api::wait_run))
+        .route("/api/editor", get(editor::get_editor))
+        .route("/api/editor/{runtime}/launch", post(editor::launch_editor))
+        .route("/api/editor/{runtime}/stop", post(editor::stop_editor))
+        .route("/api/editor/{runtime}/extensions", post(editor::install_extension))
+        .route("/api/editor/{runtime}/presets", put(editor::put_presets))
         .route("/docs", get(docs::redirect))
         .route("/docs/", get(docs::index))
         .route("/docs/{name}", get(docs::file))
@@ -426,6 +433,9 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .method_not_allowed_fallback(api::method_not_allowed)
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn_with_state(state.clone(), auth_gate))
+        // `/ide/<runtime>/` authenticates by itself (master token or launch ticket) and is
+        // proxied to the editor server before the API's own gate (SPEC FR-M9).
+        .layer(middleware::from_fn_with_state(state.clone(), editor::gate))
         .with_state(state);
     let api = if proxy.is_empty() { api } else { api.layer(middleware::from_fn_with_state(proxy, proxy_gate)) };
     api.layer(middleware::from_fn_with_state(activity, track))
@@ -550,7 +560,10 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         os_user: util::os_user(),
         avatars: Mutex::new(std::collections::HashMap::new()),
         shutdown: rx.clone(),
+        editors: editor::Editors::new(config.home.clone(), mode == Mode::Dedicated),
     });
+    // A dedicated manager starts the installed editor servers (SPEC FR-M9).
+    state.editors.autostart();
     let app = router(state.clone(), proxy, activity.clone());
 
     let idle = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -620,6 +633,8 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         }
         drop(listener);
         let _ = tokio::time::timeout(GRACEFUL_TIMEOUT, graceful.shutdown()).await;
+        // The editor servers end with the manager (SPEC FR-M9, owner 2026-11-25).
+        state.editors.shutdown().await;
         if idle.load(Ordering::SeqCst) {
             ExitReason::Idle
         } else {
