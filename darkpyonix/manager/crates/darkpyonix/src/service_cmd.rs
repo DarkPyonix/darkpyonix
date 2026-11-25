@@ -87,7 +87,7 @@ async fn command(home: &Path, c: ServiceCommand) -> Result<Value, Fail> {
     let unit = kind.unit_path(&root(), home);
     match c {
         ServiceCommand::Install(a) => install(home, kind, &unit, &a).await,
-        ServiceCommand::Uninstall => uninstall(home, kind, &unit),
+        ServiceCommand::Uninstall => uninstall(home, kind, &unit).await,
         ServiceCommand::Status => Ok(status(home, &unit).await),
     }
 }
@@ -256,9 +256,24 @@ async fn manager_pid(url: &str, token: &str) -> Option<u64> {
 
 // ----------------------------------------------------------------------- uninstall, status
 
-fn uninstall(home: &Path, kind: Kind, unit: &Path) -> Result<Value, Fail> {
+async fn uninstall(home: &Path, kind: Kind, unit: &Path) -> Result<Value, Fail> {
     if unit.exists() {
+        let url = recorded_url(home);
+        let pid = match (&url, crate::manager::read_token_file(&home.join(TOKEN_FILE))) {
+            (Some(u), Ok(t)) => manager_pid(u, &t).await,
+            _ => None,
+        };
         ctl(kind, Action::Stop, unit).map_err(fail)?;
+        // Ending a logon task ends its cmd.exe, not always the manager under it: make sure.
+        if let (Some(u), Some(pid)) = (&url, pid) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while healthy(u).await && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            if healthy(u).await {
+                kill(pid);
+            }
+        }
         std::fs::remove_file(unit).map_err(|e| fail(format!("cannot remove {}: {e}", unit.display())))?;
         if kind == Kind::Systemd {
             let _ = run_tool("systemctl", &["--user", "daemon-reload"]);
@@ -342,6 +357,21 @@ fn run_tool(tool: &str, args: &[&str]) -> Result<(), String> {
             String::from_utf8_lossy(&out.stderr).trim()
         ))
     }
+}
+
+#[cfg(unix)]
+fn kill(pid: u64) {
+    // SAFETY: a plain signal to a pid the manager reported for itself.
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+}
+
+#[cfg(not(unix))]
+fn kill(pid: u64) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 #[cfg(unix)]

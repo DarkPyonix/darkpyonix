@@ -5,7 +5,8 @@ Standard library only. Called as `fake_ctl.py <tool> <args...>` through DARKPYON
 It logs every call to `$FAKE_CTL_STATE/calls.jsonl`. Starting a unit runs the command the unit
 file names (ProgramArguments and EnvironmentVariables of the plist, ExecStart and Environment
 of the systemd unit) as a detached process and writes its pid to `$FAKE_CTL_STATE/pid`;
-stopping it sends SIGTERM to that pid and waits for it to end.
+stopping it sends SIGTERM to that pid and waits for it to end (with FAKE_CTL_KEEP set, it
+leaves the process running).
 """
 
 import json
@@ -36,6 +37,8 @@ def start(program_args, env):
 
 
 def stop():
+    if os.environ.get("FAKE_CTL_KEEP"):
+        return  # like a logon task whose end leaves the manager under it running
     if not os.path.exists(pid_file):
         return
     pid = int(open(pid_file).read())

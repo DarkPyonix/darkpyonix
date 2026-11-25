@@ -29,12 +29,17 @@ impl Svc {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        self.run_env(args, &[])
+    }
+
+    fn run_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
         let ctl = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_ctl.py");
         cli(&self.home)
             .env("DARKPYONIX_SERVICE_ROOT", &self.root)
             .env("DARKPYONIX_SERVICE_CTL", ctl)
             .env("FAKE_CTL_STATE", &self.state)
             .env_remove("DARKPYONIX_MANAGER_TOKEN")
+            .envs(env.iter().copied())
             .args(["service"])
             .args(args)
             .output()
@@ -191,4 +196,14 @@ fn test_fr_m7_token_file_sets_the_master_token() {
     let out = cli(&home).args(["manager", "--dedicated", "--port", "0", "--token-file", file.to_str().unwrap()]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out.stderr).contains("holds no token"), "{}", text(&out.stderr));
+}
+
+#[test]
+fn test_fr_m7_uninstall_ends_a_manager_the_service_left_running() {
+    let s = Svc::new("svc-leftover");
+    let line = s.install(&[]);
+    let url = line["url"].as_str().unwrap().to_string();
+    let out = s.run_env(&["uninstall"], &[("FAKE_CTL_KEEP", "1")]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    wait_until("the manager to stop", std::time::Duration::from_secs(10), || !health(&url));
 }
