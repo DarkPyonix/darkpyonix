@@ -413,12 +413,13 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ### FR-M7 매니저 서비스 등록 — `Agreed` (INTENT D26, 리더 결정 2026-11-25, 구현 대기 #163)
 `darkpyonix service install --dedicated [--host H] [--port P]`는 전용 매니저(FR-M4)를 사용자 서비스로 등록하고 켭니다. 관리자 권한은 쓰지 않습니다. ember-node가 첫 실행에서 부르지만, 사람이 직접 불러도 같습니다.
-- 등록 방식: macOS는 `~/Library/LaunchAgents/dev.darkpyonix.manager.plist`(launchd 사용자 에이전트, `KeepAlive`), Linux는 `~/.config/systemd/user/darkpyonix-manager.service`(`systemd --user`, `Restart=on-failure`), Windows는 로그온 때 시작하는 사용자 예약 작업 `DarkPyonix Manager`. 서비스는 설치된 바이너리의 절대 경로를 실행하고, 환경으로 `DARKPYONIX_HOME`과 마스터 토큰을 줍니다.
+- 등록 방식: macOS는 `~/Library/LaunchAgents/dev.darkpyonix.manager.plist`(launchd 사용자 에이전트, `KeepAlive`), Linux는 `~/.config/systemd/user/darkpyonix-manager.service`(`systemd --user`, `Restart=on-failure`), Windows는 로그온 때 시작하는 사용자 예약 작업 `DarkPyonix Manager`. 서비스는 설치된 바이너리의 절대 경로를 실행하고, 환경으로 `DARKPYONIX_HOME`을 줍니다.
 - 마스터 토큰은 `install`이 만들어 `$DARKPYONIX_HOME/manager-token`(0600, Windows는 사용자 전용 ACL)에 두고, 서비스는 그 파일에서 읽습니다. 등록 단위 파일에는 토큰을 쓰지 않습니다.
+- 서비스는 `<바이너리> manager --dedicated --host H --port P --token-file $DARKPYONIX_HOME/manager-token`을 실행합니다. `--token-file`은 첫 줄을 마스터 토큰으로 쓰고(`DARKPYONIX_MANAGER_TOKEN`보다 앞섬), 파일이 없거나 비었으면 매니저가 시작하지 않고 종료 코드 1입니다. `--host`의 기본은 `127.0.0.1`입니다. `--port`를 주지 않으면 `install`이 그때 빈 포트 하나를 골라 등록에 적으므로, 서비스가 다시 떠도 주소가 같습니다.
 - 표준 출력에 FR-M3과 같은 한 줄 `{url, token, pid}`를 한 번 씁니다. 매니저가 `/health`에 답할 때까지 기다린 뒤에 씁니다. 이미 등록돼 있으면 등록을 바꾸지 않고 같은 줄을 씁니다(멱등).
 - `darkpyonix service uninstall`은 서비스를 멈추고 등록을 지웁니다. 토큰 파일과 `manager.db`는 남깁니다. `darkpyonix service status`는 `{installed, running, url, pid}`를 씁니다.
 - 수용 기준: 등록 단위 파일의 내용(실행 경로, 인자, 재시작 정책, 토큰이 없음)을 시험 디렉터리에 써서 확인하고, 각 OS의 CI 러너에서 진짜 등록·`/health`·`uninstall`까지 한 번 돌립니다.
-- 테스트(계획): `test_fr_m7_service_unit_runs_the_dedicated_manager_without_the_token`, `test_fr_m7_install_prints_the_manager_line_once_and_is_idempotent`, `test_fr_m7_token_file_is_0600`, `test_fr_m7_uninstall_removes_the_registration_and_keeps_the_token`
+- 테스트(계획): `test_fr_m7_service_unit_runs_the_dedicated_manager_without_the_token`, `test_fr_m7_install_prints_the_manager_line_once_and_is_idempotent`, `test_fr_m7_token_file_is_0600`, `test_fr_m7_token_file_sets_the_master_token`, `test_fr_m7_install_without_port_keeps_one_port`, `test_fr_m7_uninstall_removes_the_registration_and_keeps_the_token`
 
 ### FR-M8 에디터 서버 설치 — `Done` (INTENT D27, 리더 결정 2026-11-25, #162, CI run 45543434138)
 매니저는 VS Code 서버 런타임 셋을 다룹니다: `ose`(기본, Ember의 Code-OSS 빌드), `vsc`(사용자의 Microsoft VS Code), `script`(Ember 설정의 Manual Script가 설치한 서버). 어느 것을 쓸지와 프리셋은 Ember의 메인 서버 설정과 노드별 상속 설정이 정하고(INTENT D27, Ember D56), 노드가 이 명령과 FR-M10의 `presets`로 넘깁니다. Ember 에디터 UI는 Ember 클라이언트에 있고 여기서 다루지 않습니다.
