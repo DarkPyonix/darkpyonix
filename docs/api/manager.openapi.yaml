@@ -1858,6 +1858,43 @@ paths:
           $ref: '#/components/responses/ExtensionFailed'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/editor/{runtime}/extensions/{extension_id}:
+    parameters:
+    - $ref: '#/components/parameters/EditorRuntime'
+    - $ref: '#/components/parameters/ExtensionId'
+    delete:
+      tags:
+      - Editor
+      operationId: deleteEditorExtension
+      summary: Remove one extension from the runtime
+      description: 'Runs the runtime''s `--uninstall-extension publisher.name` against its data dir. An
+
+        extension that is not installed answers `204` without running anything. `vsc`, a runtime
+
+        that is not installed and `darkpyonix.presets` (which follows `PUT .../presets`) answer
+
+        `409`. `422` (`extension_failed`) carries the CLI output in `data.output`. An extension still
+
+        in the last presets comes back on the next `PUT .../presets`.
+
+        '
+      responses:
+        '204':
+          description: Removed, or was not installed.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/EditorConflict'
+        '422':
+          $ref: '#/components/responses/ExtensionFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/editor/{runtime}/presets:
     parameters:
     - $ref: '#/components/parameters/EditorRuntime'
@@ -1935,6 +1972,13 @@ components:
       in: path
       required: true
       description: '`ose`, `vsc` or `script`; any other name answers `404`.'
+      schema:
+        type: string
+    ExtensionId:
+      name: extension_id
+      in: path
+      required: true
+      description: '`publisher.name`, as the runtime''s CLI lists it.'
       schema:
         type: string
     KernelId:

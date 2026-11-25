@@ -824,6 +824,7 @@ const OP_GET_EDITOR: &[u16] = &[200, 401, 403, 500];
 const OP_LAUNCH_EDITOR: &[u16] = &[200, 401, 403, 404, 409, 500, 503];
 const OP_STOP_EDITOR: &[u16] = &[204, 401, 403, 404, 500];
 const OP_INSTALL_EXTENSION: &[u16] = &[200, 400, 401, 403, 404, 409, 422, 500];
+const OP_DELETE_EXTENSION: &[u16] = &[204, 400, 401, 403, 404, 409, 422, 500];
 
 fn finish(r: Result<Response, ApiError>, documented: &[u16]) -> Response {
     match r {
@@ -1021,18 +1022,68 @@ pub async fn install_extension(
         };
         run_server_cli(&inst, &data, &["--install-extension", &ext.spec()])
             .await
-            .map_err(|out| extension_failed(&ext.id, out))?;
+            .map_err(|out| extension_failed(&ext.id, "installed", out))?;
         Ok((StatusCode::OK, Json(json!({"installed": true}))).into_response())
     }
     .await;
     finish(r, OP_INSTALL_EXTENSION)
 }
 
-fn extension_failed(id: &str, output: String) -> ApiError {
+/// `DELETE /api/editor/{runtime}/extensions/{id}`: uninstalls through the runtime's CLI; an
+/// extension that is not installed is already gone (SPEC FR-M10).
+pub async fn delete_extension(
+    State(st): State<Arc<AppState>>,
+    Extension(p): Extension<Principal>,
+    UrlPath((runtime, id)): UrlPath<(String, String)>,
+) -> Response {
+    let r = async {
+        master_only(&p)?;
+        let rt = runtime_of(&runtime)?;
+        if !is_extension_id(&id) {
+            return Err(ApiError::bad_request("id must be publisher.name"));
+        }
+        if rt == "vsc" {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "conflict",
+                "VS Code manages its own extensions",
+            ));
+        }
+        if id.eq_ignore_ascii_case(PRESETS_ID) {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "conflict",
+                "the presets extension follows PUT /api/editor/{runtime}/presets",
+            ));
+        }
+        let cfg = st.editors.config().map_err(config_error)?;
+        let Some(inst) = cfg.installed(rt) else {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "conflict",
+                format!("{rt} is not installed"),
+            ));
+        };
+        let data = data_dir(&st.editors.home, rt);
+        let listed = run_server_cli(&inst, &data, &["--list-extensions", "--show-versions"])
+            .await
+            .map_err(|out| extension_failed(&id, "removed", out))?;
+        if parse_extension_list(&listed).contains_key(&id.to_ascii_lowercase()) {
+            run_server_cli(&inst, &data, &["--uninstall-extension", &id])
+                .await
+                .map_err(|out| extension_failed(&id, "removed", out))?;
+        }
+        Ok(StatusCode::NO_CONTENT.into_response())
+    }
+    .await;
+    finish(r, OP_DELETE_EXTENSION)
+}
+
+fn extension_failed(id: &str, what: &str, output: String) -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
         "extension_failed",
-        format!("{id} was not installed"),
+        format!("{id} was not {what}"),
     )
     .with_data(json!({"id": id, "output": output}))
 }
@@ -1119,6 +1170,8 @@ pub fn load_presets(home: &Path, runtime: &str) -> Option<Presets> {
 
 /// The folder of the extension that carries the defaults, in the runtime's extensions dir.
 pub const PRESETS_EXTENSION: &str = "darkpyonix.presets-1.0.0";
+/// Its extension id.
+const PRESETS_ID: &str = "darkpyonix.presets";
 
 pub fn presets_extension_dir(home: &Path, runtime: &str) -> PathBuf {
     data_dir(home, runtime)
@@ -1259,7 +1312,7 @@ pub async fn put_presets(
                 if missing {
                     run_server_cli(&inst, &data, &["--install-extension", &e.spec()])
                         .await
-                        .map_err(|out| extension_failed(&e.id, out))?;
+                        .map_err(|out| extension_failed(&e.id, "installed", out))?;
                 }
             }
         }

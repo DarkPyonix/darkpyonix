@@ -594,3 +594,74 @@ async fn test_fr_m10_presets_are_listed_as_applied() {
     assert_eq!(p["extensions"], body["extensions"]);
     assert_eq!(p["theme"], "Default Light Modern");
 }
+
+#[tokio::test]
+async fn test_fr_m10_extension_delete_uninstalls_from_the_data_dir() {
+    let e = Editor::start(Mode::Dedicated, false, |_| {}).await;
+    for id in ["redhat.vscode-yaml", "stuck.ext"] {
+        let r = e.s.admin().post("/api/editor/ose/extensions", json!({"id": id})).await;
+        assert_eq!(r.status, 200, "{}", r.text);
+    }
+    let r = e.s.admin().delete("/api/editor/ose/extensions/redhat.vscode-yaml").await;
+    assert_eq!(r.status, 204, "{}", r.text);
+    let installed = std::fs::read_to_string(e.data().join("installed.txt")).unwrap();
+    assert!(!installed.contains("redhat.vscode-yaml"), "{installed}");
+    let uninstall: Vec<Vec<String>> = e
+        .lines("cli.jsonl")
+        .into_iter()
+        .map(|v| serde_json::from_value(v).unwrap())
+        .filter(|a: &Vec<String>| a.iter().any(|x| x == "--uninstall-extension"))
+        .collect();
+    assert_eq!(uninstall.len(), 1, "{uninstall:?}");
+    assert!(
+        uninstall[0]
+            .windows(2)
+            .any(|w| w[0] == "--server-data-dir" && Path::new(&w[1]) == e.data()),
+        "{uninstall:?}"
+    );
+    // Absent: nothing to do, no CLI call.
+    let r = e.s.admin().delete("/api/editor/ose/extensions/redhat.vscode-yaml").await;
+    assert_eq!(r.status, 204, "{}", r.text);
+    assert_eq!(
+        e.lines("cli.jsonl")
+            .iter()
+            .filter(|v| v.to_string().contains("--uninstall-extension"))
+            .count(),
+        1
+    );
+    let err = e
+        .s
+        .admin()
+        .delete("/api/editor/ose/extensions/stuck.ext")
+        .await
+        .error(422, "extension_failed");
+    assert!(err["data"]["output"].as_str().unwrap().contains("in use"), "{err}");
+    e.s.admin()
+        .delete("/api/editor/ose/extensions/..%2Fx")
+        .await
+        .error(400, "bad_request");
+    e.s.admin()
+        .delete("/api/editor/vsc/extensions/a.b")
+        .await
+        .error(409, "conflict");
+}
+
+#[tokio::test]
+async fn test_fr_m10_extension_delete_refuses_the_presets_extension() {
+    let e = Editor::start(Mode::Dedicated, false, |_| {}).await;
+    let r = e
+        .s
+        .admin()
+        .call(
+            "PUT",
+            "/api/editor/ose/presets",
+            Some(json!({"theme": "Default Dark Modern"})),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    e.s.admin()
+        .delete("/api/editor/ose/extensions/darkpyonix.presets")
+        .await
+        .error(409, "conflict");
+    assert!(e.data().join("extensions/darkpyonix.presets-1.0.0/package.json").is_file());
+}
