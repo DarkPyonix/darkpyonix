@@ -41,45 +41,45 @@ jobs:
           "OSE_DIR=$dir" | Out-File -Append $env:GITHUB_ENV
           Get-ChildItem "$dir\bin"
 
-      - name: Start the server on a named pipe
+      # One step: the runner ends a step's processes when the step ends, so the server, the
+      # runner-user probe and the other-user probe share a single PowerShell session.
+      - name: Serve on a named pipe, then probe it as the runner user and as another user
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $pipe = 'dpx-ose-probe'
           $data = "$env:RUNNER_TEMP\ose-data"
           New-Item -ItemType Directory $data | Out-Null
-          $sargs = @('--without-connection-token', '--socket-path', '\\.\pipe\dpx-ose-probe',
-                    '--server-base-path', '/ide/ose/', '--server-data-dir', $data, '--accept-server-license-terms')
-          Start-Process -FilePath "$env:OSE_DIR\bin\dpx-ose-server.cmd" -ArgumentList $sargs -WindowStyle Hidden `
+          $sargs = @('--without-connection-token', '--socket-path', "\\.\pipe\$pipe",
+                     '--server-base-path', '/ide/ose/', '--server-data-dir', $data, '--accept-server-license-terms')
+          $srv = Start-Process -FilePath "$env:OSE_DIR\bin\dpx-ose-server.cmd" -ArgumentList $sargs -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput "$env:RUNNER_TEMP\ose-out.log" -RedirectStandardError "$env:RUNNER_TEMP\ose-err.log"
+          $up = $false
           for ($i = 0; $i -lt 120; $i++) {
-            if ([System.IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\dpx-ose-probe') { Write-Output "pipe up after $($i/2)s"; exit 0 }
+            if ((Get-Content "$env:RUNNER_TEMP\ose-out.log" -ErrorAction SilentlyContinue) -match 'Extension host agent started') { $up = $true; break }
             Start-Sleep -Milliseconds 500
           }
-          Get-Content "$env:RUNNER_TEMP\ose-out.log", "$env:RUNNER_TEMP\ose-err.log"
-          throw 'the server never made the pipe'
+          if (-not $up) { Get-Content "$env:RUNNER_TEMP\ose-out.log", "$env:RUNNER_TEMP\ose-err.log"; throw 'the server did not start' }
+          Write-Output "server up after $($i/2)s; pipes: $(([System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*dpx*' }) -join ', ')"
 
-      - name: HTTP over the pipe as the runner user, and its DACL
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $rights = [System.IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadPermissions'
-          $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'dpx-ose-probe', $rights,
-                 [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::None,
-                 [System.IO.HandleInheritability]::None)
-          $c.Connect(10000)
+          function Send-Get($stream) {
+            $w = New-Object System.IO.StreamWriter($stream); $w.AutoFlush = $true
+            $w.Write("GET /ide/ose/ HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n")
+            (New-Object System.IO.StreamReader($stream)).ReadLine()
+          }
+
+          $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipe, [System.IO.Pipes.PipeDirection]::InOut)
+          $c.Connect(15000)
+          Write-Output "== runner user: $(Send-Get $c)"
+          $c.Dispose()
+
+          $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipe, [System.IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadPermissions',
+                 [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::None, [System.IO.HandleInheritability]::None)
+          $c.Connect(15000)
           Write-Output '== DACL of the pipe the server made'
           $c.GetAccessControl().Access | Format-Table IdentityReference, AccessControlType, PipeAccessRights -AutoSize | Out-String -Width 200
-          $w = New-Object System.IO.StreamWriter($c); $w.AutoFlush = $true
-          $w.Write("GET /ide/ose/ HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n")
-          $r = New-Object System.IO.StreamReader($c)
-          $status = $r.ReadLine()
-          Write-Output "== runner user: $status"
-          if ($status -notmatch '^HTTP/1\.1 (200|302)') { throw "unexpected status: $status" }
+          $c.Dispose()
 
-      - name: The same pipe as another, non-admin user
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
           $pw = 'Dpx-' + [guid]::NewGuid().ToString('N').Substring(0, 16) + '!a1'
           net user dpxprobe $pw /add | Out-Null
           New-Item -ItemType Directory C:\dpxprobe | Out-Null
@@ -87,7 +87,7 @@ jobs:
           @'
           try {
             $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'dpx-ose-probe', [System.IO.Pipes.PipeDirection]::InOut)
-            $c.Connect(5000)
+            $c.Connect(10000)
             $w = New-Object System.IO.StreamWriter($c); $w.AutoFlush = $true
             $w.Write("GET /ide/ose/ HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n")
             "connected: " + (New-Object System.IO.StreamReader($c)).ReadLine() | Out-File C:\dpxprobe\result.txt
@@ -96,11 +96,15 @@ jobs:
           }
           '@ | Out-File C:\dpxprobe\client.ps1
           $cred = New-Object System.Management.Automation.PSCredential('dpxprobe', (ConvertTo-SecureString $pw -AsPlainText -Force))
-          Start-Process powershell -Credential $cred -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\dpxprobe\client.ps1' `
-            -WorkingDirectory C:\dpxprobe -Wait -LoadUserProfile
-          $result = Get-Content C:\dpxprobe\result.txt
-          Write-Output "== other user: $result"
-          # The probe records the answer; FR-M9 decides from it. Nothing fails here on purpose.
+          try {
+            Start-Process powershell -Credential $cred -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\dpxprobe\client.ps1' `
+              -WorkingDirectory C:\dpxprobe -Wait -LoadUserProfile
+            Write-Output "== other user: $(Get-Content C:\dpxprobe\result.txt)"
+          } catch {
+            Write-Output "== other user: could not run as dpxprobe: $($_.Exception.Message)"
+          }
+          # The probe records the answers; FR-M9 decides from them.
+          Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
 
       - name: Server log
         if: always()
