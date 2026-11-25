@@ -7,7 +7,9 @@ saw and logs the request to `<data>/requests.jsonl`; a request with `Upgrade` an
 echoes every byte. When `<data>/crash-once` exists it is removed and the server exits 3 at once.
 
 CLI mode: `--install-extension X` appends X to `<data>/installed.txt` (an id starting with `fail.`
-exits 1 with a message); `--uninstall-extension X` removes X from it (an id starting with
+exits 1 with a message). A path ending in `.vsix` is unpacked like the real server does: its
+`extension/package.json` goes to `<data>/extensions/<publisher.name>-<version>/` and the id is
+registered in `installed.txt`; a folder written there by anything else is never listed. `--uninstall-extension X` removes X from it (an id starting with
 `stuck.` exits 1); `--list-extensions --show-versions` prints `id@version` lines from it.
 """
 
@@ -35,6 +37,22 @@ def append(name, line):
 if arg("--install-extension"):
     spec = arg("--install-extension")
     append("cli.jsonl", json.dumps(sys.argv[1:]))
+    if spec.endswith(".vsix"):
+        import zipfile
+        with zipfile.ZipFile(spec) as z:
+            manifest = z.read("extension/package.json")
+        pkg = json.loads(manifest)
+        ext_id = "%s.%s" % (pkg["publisher"], pkg["name"])
+        folder = os.path.join(data, "extensions", "%s-%s" % (ext_id, pkg["version"]))
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "package.json"), "wb") as f:
+            f.write(manifest)
+        path = os.path.join(data, "installed.txt")
+        lines = open(path).read().split() if os.path.exists(path) else []
+        lines = [l for l in lines if l.split("@")[0] != ext_id] + ["%s@%s" % (ext_id, pkg["version"])]
+        with open(path, "w") as f:
+            f.write("".join(l + "\n" for l in lines))
+        sys.exit(0)
     if spec.startswith("fail."):
         print("Extension '%s' not found." % spec)
         sys.exit(1)
@@ -53,6 +71,11 @@ if arg("--uninstall-extension"):
         for line in lines:
             if line.split("@")[0] != spec:
                 f.write(line + "\n")
+    extensions = os.path.join(data, "extensions")
+    for name in os.listdir(extensions) if os.path.isdir(extensions) else []:
+        if name.startswith(spec + "-"):
+            import shutil
+            shutil.rmtree(os.path.join(extensions, name))
     sys.exit(0)
 
 if "--list-extensions" in sys.argv:
