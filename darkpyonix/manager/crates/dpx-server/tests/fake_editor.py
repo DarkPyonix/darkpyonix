@@ -7,7 +7,8 @@ saw and logs the request to `<data>/requests.jsonl`; a request with `Upgrade` an
 echoes every byte. When `<data>/crash-once` exists it is removed and the server exits 3 at once.
 
 CLI mode: `--install-extension X` appends X to `<data>/installed.txt` (an id starting with `fail.`
-exits 1 with a message); `--list-extensions --show-versions` prints `id@version` lines from it.
+exits 1 with a message); `--uninstall-extension X` removes X from it (an id starting with
+`stuck.` exits 1); `--list-extensions --show-versions` prints `id@version` lines from it.
 """
 
 import json
@@ -38,6 +39,20 @@ if arg("--install-extension"):
         print("Extension '%s' not found." % spec)
         sys.exit(1)
     append("installed.txt", spec)
+    sys.exit(0)
+
+if arg("--uninstall-extension"):
+    spec = arg("--uninstall-extension")
+    append("cli.jsonl", json.dumps(sys.argv[1:]))
+    if spec.startswith("stuck."):
+        print("Cannot uninstall '%s': in use." % spec)
+        sys.exit(1)
+    path = os.path.join(data, "installed.txt")
+    lines = open(path).read().split() if os.path.exists(path) else []
+    with open(path, "w") as f:
+        for line in lines:
+            if line.split("@")[0] != spec:
+                f.write(line + "\n")
     sys.exit(0)
 
 if "--list-extensions" in sys.argv:
