@@ -97,7 +97,7 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
         Command::Shutdown(a) => Some(a.file.clone()),
         Command::Kernel(a) => Some(a.file.clone()),
         Command::Share(a) => Some(a.file.clone()),
-        Command::Ps | Command::Manager(_) | Command::Editor(_) => None,
+        Command::Ps | Command::Manager(_) | Command::Editor(_) | Command::Service(_) => None,
     };
     let target = file.as_deref().map(resolve_file).transpose()?;
     let http = http_client();
@@ -235,7 +235,7 @@ async fn dispatch_inner(cmd: Command, out: &Out) -> Result<i32, CliError> {
             out.result(&human, &v);
             Ok(EXIT_OK)
         }
-        Command::Manager(_) | Command::Editor(_) => unreachable!("handled in main"),
+        Command::Manager(_) | Command::Editor(_) | Command::Service(_) => unreachable!("handled in main"),
     }
 }
 

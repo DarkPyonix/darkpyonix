@@ -19,6 +19,8 @@ pub struct ManagerOpts {
     pub port: u16,
     /// Seconds; `None` for a dedicated manager.
     pub idle_timeout: Option<u64>,
+    /// The master token's file (SPEC FR-M7); wins over `DARKPYONIX_MANAGER_TOKEN`.
+    pub token_file: Option<std::path::PathBuf>,
 }
 
 pub const DEFAULT_IDLE_TIMEOUT: u64 = 120;
@@ -34,6 +36,7 @@ impl From<&ManagerArgs> for ManagerOpts {
                 Mode::Ephemeral => Some(a.idle_timeout.unwrap_or(DEFAULT_IDLE_TIMEOUT)),
                 Mode::Dedicated => a.idle_timeout,
             },
+            token_file: a.token_file.clone(),
         }
     }
 }
@@ -46,6 +49,10 @@ impl From<&ManagerArgs> for ManagerOpts {
 /// `{"url", "token", "pid"}` on stdout for the process that started it (SPEC FR-M3, FR-C1).
 /// They exit after `idle_timeout` and never touch kernels. Never reads stdin.
 pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
+    let file_token = match &opts.token_file {
+        Some(path) => Some(read_token_file(path)?),
+        None => None,
+    };
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -67,6 +74,9 @@ pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
                 config.master_token = Some(token);
             }
         }
+        if file_token.is_some() {
+            config.master_token = file_token;
+        }
         let dedicated_random_token = opts.mode == Mode::Dedicated && config.master_token.is_none();
         let handle = dpx_server::serve(config, std::sync::Arc::new(backend))
             .await
@@ -82,6 +92,15 @@ pub fn run_manager(opts: ManagerOpts) -> Result<(), String> {
         dpx_server::run_until_signal(handle).await;
         Ok(())
     })
+}
+
+/// The first line of `--token-file`; a missing or empty file is an error (SPEC FR-M7).
+pub fn read_token_file(path: &std::path::Path) -> Result<String, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    match text.lines().next().map(str::trim) {
+        Some(t) if !t.is_empty() => Ok(t.to_string()),
+        _ => Err(format!("{} holds no token", path.display())),
+    }
 }
 
 /// The one stdout line a manager prints once it listens (SPEC FR-M3, FR-C1).
@@ -122,13 +141,13 @@ mod tests {
     }
 
     fn args(dedicated: bool, port: Option<u16>, idle: Option<u64>) -> ManagerArgs {
-        ManagerArgs { dedicated, ephemeral: !dedicated, host: None, port, idle_timeout: idle }
+        ManagerArgs { dedicated, ephemeral: !dedicated, host: None, port, idle_timeout: idle, token_file: None }
     }
 
     #[test]
     fn test_fr_m3_ephemeral_defaults() {
         let o = ManagerOpts::from(&args(false, None, None));
-        assert_eq!(o, ManagerOpts { mode: Mode::Ephemeral, host: "127.0.0.1".into(), port: 0, idle_timeout: Some(120) });
+        assert_eq!(o, ManagerOpts { mode: Mode::Ephemeral, host: "127.0.0.1".into(), port: 0, idle_timeout: Some(120), token_file: None });
         assert_eq!(ManagerOpts::from(&args(false, None, Some(5))).idle_timeout, Some(5));
     }
 
