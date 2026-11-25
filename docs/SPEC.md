@@ -436,7 +436,7 @@ INTENT D6, PROTOCOL §3.7. 사용자 결정: "스트림만 넘김". 매니저는
 
 ### FR-M9 에디터 서버 수명과 서빙 — `Agreed` (INTENT D27, 리더 결정 2026-11-25, 구현 대기 #162)
 - **자동 시작.** 전용 매니저(FR-M4)는 시작할 때 설치되고 자동 시작이 켜진 런타임마다 에디터 서버 하나를 자식 프로세스로 띄웁니다. 임시 매니저(FR-M3)는 띄우지 않습니다.
-- **인자.** `--without-connection-token --socket-path $DARKPYONIX_HOME/editor/sockets/<런타임>.sock --server-base-path /ide/<런타임>/ --server-data-dir $DARKPYONIX_HOME/editor/data/<런타임>`, OSE는 `--accept-server-license-terms`를 더합니다. `sockets/`는 0700으로 만든 뒤에 띄우고, 남은 소켓 파일은 지웁니다. 소켓 경로가 유닉스 도메인 소켓 경로 한도(100바이트)를 넘으면 `$TMPDIR/darkpyonix-<uid>-<런타임 홈 경로의 sha256 앞 12자>/<런타임>.sock`(0700, 자기 소유인지 확인)을 대신 씁니다. 같은 데이터 디렉터리를 쓰므로 확장은 런타임마다 한 번 설치됩니다.
+- **인자.** `--without-connection-token --socket-path $DARKPYONIX_HOME/editor/sockets/<런타임>.sock --server-base-path /ide/<런타임>/ --server-data-dir $DARKPYONIX_HOME/editor/data/<런타임>`, OSE는 `--accept-server-license-terms`를 더합니다. `sockets/`는 0700으로 만든 뒤에 띄우고, 남은 소켓 파일은 지웁니다. 소켓 경로가 유닉스 도메인 소켓 경로 한도(100바이트)를 넘으면 `$TMPDIR/darkpyonix-<uid>-<런타임 홈 경로의 sha256 앞 12자>/<런타임>.sock`(0700, 자기 소유인지 확인)을 대신 씁니다. `$TMPDIR`가 길어 이 경로도 한도를 넘으면 `$TMPDIR` 대신 `/tmp`를 씁니다. 같은 데이터 디렉터리를 쓰므로 확장은 런타임마다 한 번 설치됩니다.
 - **감독.** 에디터 서버가 끝나면 1초부터 두 배씩 최대 60초까지 기다려 다시 띄웁니다. 매니저가 끝나면(정상 종료와 SIGTERM) 에디터 서버도 끝냅니다.
 - **서빙.** 매니저는 `/ide/<런타임>/` 아래의 HTTP와 WebSocket을 그 소켓으로 프록시합니다(접두어를 떼지 않음, `Host` 보존, Upgrade 뒤 바이트 잇기). 이 경로는 `/docs/`처럼 OpenAPI 계약 밖입니다.
 - **인증.** 다음 중 하나가 있어야 합니다. 없으면 `401`이고 요청은 에디터 서버에 닿지 않습니다.
