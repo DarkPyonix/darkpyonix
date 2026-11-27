@@ -9,7 +9,9 @@ use std::net::SocketAddr;
 
 use axum::body::Body;
 use axum::http::uri::{Authority, PathAndQuery, Scheme};
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Uri, Version};
+use axum::http::{
+    header, HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Uri, Version,
+};
 use axum::response::IntoResponse;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
@@ -30,7 +32,11 @@ pub struct ProxyRoute {
 
 impl ProxyRoute {
     pub fn new(prefix: impl Into<String>, upstream: impl Into<String>) -> Self {
-        Self { prefix: prefix.into(), upstream: upstream.into(), strip_prefix: false }
+        Self {
+            prefix: prefix.into(),
+            upstream: upstream.into(),
+            strip_prefix: false,
+        }
     }
 
     pub fn matches(&self, path: &str) -> bool {
@@ -86,22 +92,33 @@ fn is_upgrade(h: &HeaderMap) -> bool {
         && h.get_all(header::CONNECTION)
             .iter()
             .filter_map(|v| v.to_str().ok())
-            .any(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("upgrade")))
+            .any(|v| {
+                v.split(',')
+                    .any(|t| t.trim().eq_ignore_ascii_case("upgrade"))
+            })
 }
 
 fn bad_gateway(msg: impl std::fmt::Display) -> Response<Body> {
-    ApiError::new(StatusCode::BAD_GATEWAY, "internal", format!("proxy upstream: {msg}")).into_response()
+    ApiError::new(
+        StatusCode::BAD_GATEWAY,
+        "internal",
+        format!("proxy upstream: {msg}"),
+    )
+    .into_response()
 }
 
 impl Proxy {
     pub fn new(routes: &[ProxyRoute]) -> std::io::Result<Self> {
         let mut out = Vec::new();
         for r in routes {
-            let uri: Uri = r
-                .upstream
-                .parse()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("proxy {}: {e}", r.upstream)))?;
-            let (Some(scheme), Some(auth)) = (uri.scheme().cloned(), uri.authority().cloned()) else {
+            let uri: Uri = r.upstream.parse().map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("proxy {}: {e}", r.upstream),
+                )
+            })?;
+            let (Some(scheme), Some(auth)) = (uri.scheme().cloned(), uri.authority().cloned())
+            else {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("proxy {}: need http://host:port", r.upstream),
@@ -117,7 +134,10 @@ impl Proxy {
             out.push((r.clone(), scheme, auth, base));
         }
         let client = Client::builder(TokioExecutor::new()).build_http::<Body>();
-        Ok(Self { routes: out, client })
+        Ok(Self {
+            routes: out,
+            client,
+        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -128,66 +148,72 @@ impl Proxy {
         self.routes.iter().position(|(r, ..)| r.matches(path))
     }
 
-    pub async fn forward(&self, idx: usize, mut req: Request<Body>) -> Response<Body> {
+    pub async fn forward(&self, idx: usize, req: Request<Body>) -> Response<Body> {
         let (route, scheme, authority, base) = &self.routes[idx];
-        let conn = req.extensions().get::<ConnInfo>().copied();
-        let activity = req.extensions().get::<std::sync::Arc<crate::Activity>>().cloned();
         let path = req.uri().path();
-        let rest = if route.strip_prefix { &path[route.prefix.trim_end_matches('/').len()..] } else { path };
-        let rest = if rest.starts_with('/') { rest.to_string() } else { format!("/{rest}") };
+        let rest = if route.strip_prefix {
+            &path[route.prefix.trim_end_matches('/').len()..]
+        } else {
+            path
+        };
+        let rest = if rest.starts_with('/') {
+            rest.to_string()
+        } else {
+            format!("/{rest}")
+        };
         let pq = match req.uri().query() {
             Some(q) => format!("{base}{rest}?{q}"),
             None => format!("{base}{rest}"),
         };
-        let Ok(pq) = PathAndQuery::try_from(pq) else { return bad_gateway("bad path") };
+        let Ok(pq) = PathAndQuery::try_from(pq) else {
+            return bad_gateway("bad path");
+        };
         // Origin-form for the dedicated upgrade connection (hyper's conn API writes the URI
         // verbatim); absolute-form for the pooled client, which rewrites it itself.
         let origin_form = Uri::from(pq.clone());
-        let target = Uri::builder().scheme(scheme.clone()).authority(authority.clone()).path_and_query(pq).build();
-        let Ok(target) = target else { return bad_gateway("bad target") };
-
-        let upgrade = req.version() == Version::HTTP_11 && is_upgrade(req.headers());
-        let upgrade_proto = req.headers().get(header::UPGRADE).cloned();
-        // HTTP/2 carries the host in :authority; HTTP/1.1 in Host. Preserve whichever came.
-        let host = req
-            .headers()
-            .get(header::HOST)
-            .cloned()
-            .or_else(|| req.uri().authority().and_then(|a| HeaderValue::from_str(a.as_str()).ok()));
-
-        let mut headers = req.headers().clone();
-        strip_hop_by_hop(&mut headers);
-        if let Some(h) = &host {
-            headers.insert(header::HOST, h.clone());
-            headers.insert("x-forwarded-host", h.clone());
-        }
-        if let Some(c) = conn {
-            let ip = c.peer.ip().to_string();
-            let xff = match headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-                Some(prev) => format!("{prev}, {ip}"),
-                None => ip,
+        let target = Uri::builder()
+            .scheme(scheme.clone())
+            .authority(authority.clone())
+            .path_and_query(pq)
+            .build();
+        let Ok(target) = target else {
+            return bad_gateway("bad target");
+        };
+        let Prepared {
+            req,
+            headers,
+            upgrade,
+        } = prepare(req);
+        if let Some((on_client_upgrade, activity)) = upgrade {
+            let addr = match authority.port_u16() {
+                Some(_) => authority.as_str().to_string(),
+                None => format!("{}:80", authority.host()),
             };
-            if let Ok(v) = HeaderValue::from_str(&xff) {
-                headers.insert("x-forwarded-for", v);
-            }
-            headers.insert("x-forwarded-proto", HeaderValue::from_static(if c.tls { "https" } else { "http" }));
-        }
-        if upgrade {
-            headers.insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
-            if let Some(p) = upgrade_proto {
-                headers.insert(header::UPGRADE, p);
-            }
-            let on_client_upgrade = hyper::upgrade::on(&mut req);
-            let mut out = Request::builder().method(req.method().clone()).uri(origin_form).version(Version::HTTP_11);
+            let stream = match tokio::net::TcpStream::connect(&addr).await {
+                Ok(s) => s,
+                Err(e) => return bad_gateway(e),
+            };
+            let _ = stream.set_nodelay(true);
+            let mut out = Request::builder()
+                .method(req.method().clone())
+                .uri(origin_form)
+                .version(Version::HTTP_11);
             *out.headers_mut().expect("builder") = headers;
-            let Ok(out) = out.body(Body::empty()) else { return bad_gateway("bad request") };
-            return self.forward_upgrade(authority, out, on_client_upgrade, activity).await;
+            let Ok(out) = out.body(Body::empty()) else {
+                return bad_gateway("bad request");
+            };
+            return send_over(stream, out, Some((on_client_upgrade, activity))).await;
         }
 
         let (parts, body) = req.into_parts();
-        let mut out = Request::builder().method(parts.method).uri(target).version(Version::HTTP_11);
+        let mut out = Request::builder()
+            .method(parts.method)
+            .uri(target)
+            .version(Version::HTTP_11);
         *out.headers_mut().expect("builder") = headers;
-        let Ok(out) = out.body(body) else { return bad_gateway("bad request") };
+        let Ok(out) = out.body(body) else {
+            return bad_gateway("bad request");
+        };
         match self.client.request(out).await {
             Ok(resp) => {
                 let (mut parts, body) = resp.into_parts();
@@ -197,40 +223,156 @@ impl Proxy {
             Err(e) => bad_gateway(e),
         }
     }
+}
 
-    async fn forward_upgrade(
-        &self,
-        authority: &Authority,
-        out: Request<Body>,
-        on_client_upgrade: hyper::upgrade::OnUpgrade,
-        activity: Option<std::sync::Arc<crate::Activity>>,
-    ) -> Response<Body> {
-        let addr = match authority.port_u16() {
-            Some(_) => authority.as_str().to_string(),
-            None => format!("{}:80", authority.host()),
+/// A request ready to forward: its headers for the upstream, and the client's side of an
+/// upgrade when it asks for one.
+struct Prepared {
+    req: Request<Body>,
+    headers: HeaderMap,
+    upgrade: Option<(
+        hyper::upgrade::OnUpgrade,
+        Option<std::sync::Arc<crate::Activity>>,
+    )>,
+}
+
+/// The upstream headers (hop-by-hop removed; `Host` and the `X-Forwarded-*` set) and, for an
+/// HTTP/1.1 upgrade, the client's half of it.
+fn prepare(mut req: Request<Body>) -> Prepared {
+    let conn = req.extensions().get::<ConnInfo>().copied();
+    let activity = req
+        .extensions()
+        .get::<std::sync::Arc<crate::Activity>>()
+        .cloned();
+    let upgrade = req.version() == Version::HTTP_11 && is_upgrade(req.headers());
+    let upgrade_proto = req.headers().get(header::UPGRADE).cloned();
+    // HTTP/2 carries the host in :authority; HTTP/1.1 in Host. Preserve whichever came.
+    let host = req.headers().get(header::HOST).cloned().or_else(|| {
+        req.uri()
+            .authority()
+            .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
+    });
+
+    let mut headers = req.headers().clone();
+    strip_hop_by_hop(&mut headers);
+    if let Some(h) = &host {
+        headers.insert(header::HOST, h.clone());
+        headers.insert("x-forwarded-host", h.clone());
+    }
+    if let Some(c) = conn {
+        let ip = c.peer.ip().to_string();
+        let xff = match headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            Some(prev) => format!("{prev}, {ip}"),
+            None => ip,
         };
-        let stream = match tokio::net::TcpStream::connect(&addr).await {
-            Ok(s) => s,
-            Err(e) => return bad_gateway(e),
-        };
-        let _ = stream.set_nodelay(true);
-        let (mut sender, conn) = match hyper::client::conn::http1::handshake(TokioIo::new(stream)).await {
-            Ok(x) => x,
-            Err(e) => return bad_gateway(e),
-        };
-        tokio::spawn(async move {
-            let _ = conn.with_upgrades().await;
-        });
-        let mut resp = match sender.send_request(out).await {
-            Ok(r) => r,
-            Err(e) => return bad_gateway(e),
-        };
+        if let Ok(v) = HeaderValue::from_str(&xff) {
+            headers.insert("x-forwarded-for", v);
+        }
+        headers.insert(
+            "x-forwarded-proto",
+            HeaderValue::from_static(if c.tls { "https" } else { "http" }),
+        );
+    }
+    let upgrade = if upgrade {
+        headers.insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+        if let Some(p) = upgrade_proto {
+            headers.insert(header::UPGRADE, p);
+        }
+        Some((hyper::upgrade::on(&mut req), activity))
+    } else {
+        None
+    };
+    Prepared {
+        req,
+        headers,
+        upgrade,
+    }
+}
+
+/// Forwards a request to an HTTP server on a Unix socket (the editor server, SPEC FR-M9): one
+/// connection per request, and an upgrade spliced byte for byte.
+#[cfg(unix)]
+pub async fn forward_unix(socket: &std::path::Path, req: Request<Body>) -> Response<Body> {
+    forward_on(tokio::net::UnixStream::connect(socket).await, req).await
+}
+
+/// The same over loopback TCP (the editor server on Windows, SPEC FR-M9).
+pub async fn forward_tcp(addr: std::net::SocketAddr, req: Request<Body>) -> Response<Body> {
+    forward_on(tokio::net::TcpStream::connect(addr).await, req).await
+}
+
+async fn forward_on<S>(stream: std::io::Result<S>, req: Request<Body>) -> Response<Body>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| "/".into());
+    let Ok(uri) = pq.parse::<Uri>() else {
+        return bad_gateway("bad path");
+    };
+    let Prepared {
+        req,
+        headers,
+        upgrade,
+    } = prepare(req);
+    let stream = match stream {
+        Ok(s) => s,
+        Err(e) => return bad_gateway(e),
+    };
+    let (parts, body) = req.into_parts();
+    let body = if upgrade.is_some() {
+        Body::empty()
+    } else {
+        body
+    };
+    let mut out = Request::builder()
+        .method(parts.method)
+        .uri(uri)
+        .version(Version::HTTP_11);
+    *out.headers_mut().expect("builder") = headers;
+    let Ok(out) = out.body(body) else {
+        return bad_gateway("bad request");
+    };
+    send_over(stream, out, upgrade).await
+}
+
+/// Sends `out` on a fresh HTTP/1.1 connection over `stream`; with `upgrade`, a `101` answer
+/// splices the client and the upstream until either side closes.
+async fn send_over<S>(
+    stream: S,
+    out: Request<Body>,
+    upgrade: Option<(
+        hyper::upgrade::OnUpgrade,
+        Option<std::sync::Arc<crate::Activity>>,
+    )>,
+) -> Response<Body>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (mut sender, conn) = match hyper::client::conn::http1::handshake(TokioIo::new(stream)).await
+    {
+        Ok(x) => x,
+        Err(e) => return bad_gateway(e),
+    };
+    tokio::spawn(async move {
+        let _ = conn.with_upgrades().await;
+    });
+    let mut resp = match sender.send_request(out).await {
+        Ok(r) => r,
+        Err(e) => return bad_gateway(e),
+    };
+    if let Some((on_client_upgrade, activity)) = upgrade {
         if resp.status() == StatusCode::SWITCHING_PROTOCOLS {
             let on_upstream_upgrade = hyper::upgrade::on(&mut resp);
             tokio::spawn(async move {
                 // An open tunnel keeps an ephemeral manager alive like an open stream.
                 let _active = activity.as_ref().map(|a| a.enter());
-                let (Ok(client), Ok(upstream)) = tokio::join!(on_client_upgrade, on_upstream_upgrade) else {
+                let (Ok(client), Ok(upstream)) =
+                    tokio::join!(on_client_upgrade, on_upstream_upgrade)
+                else {
                     return;
                 };
                 let mut client = TokioIo::new(client);
@@ -240,8 +382,8 @@ impl Proxy {
             let (parts, _) = resp.into_parts();
             return Response::from_parts(parts, Body::empty());
         }
-        let (mut parts, body) = resp.into_parts();
-        strip_hop_by_hop(&mut parts.headers);
-        Response::from_parts(parts, Body::new(body))
     }
+    let (mut parts, body) = resp.into_parts();
+    strip_hop_by_hop(&mut parts.headers);
+    Response::from_parts(parts, Body::new(body))
 }

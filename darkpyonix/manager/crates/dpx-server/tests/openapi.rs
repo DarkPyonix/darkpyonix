@@ -16,6 +16,8 @@ fn probe_url(path: &str) -> String {
         .replace("{cell_id}", "c_probe")
         .replace("{token_type}", "read+history")
         .replace("{token}", "t_probe")
+        .replace("{runtime}", "ose")
+        .replace("{extension_id}", "redhat.vscode-yaml")
 }
 
 fn probe_body(op: &str) -> Option<Value> {
@@ -27,6 +29,8 @@ fn probe_body(op: &str) -> Option<Value> {
         "createShareToken" => Some(json!({"capabilities": ["read"]})),
         "setPassword" => Some(json!({"password": "probe"})),
         "kernelLogin" => Some(json!({"password": "probe"})),
+        "installEditorExtension" => Some(json!({"id": "redhat.vscode-yaml"})),
+        "putEditorPresets" => Some(json!({"theme": "Default Dark Modern"})),
         _ => None,
     }
 }
@@ -107,7 +111,7 @@ async fn test_nfr_m3_every_operation_answers_with_a_documented_status() {
     let s = TestServer::start(Mode::Ephemeral).await;
     let n = probe_all(&s, None).await;
     assert_eq!(n, contract().operations().count());
-    assert_eq!(n, 37, "operation count changed; update the router and the tests");
+    assert_eq!(n, 43, "operation count changed; update the router and the tests");
     assert_eq!(probe_planned(&s, None).await, contract().planned.len());
     s.admin().get("/api/not-in-the-contract").await.error(404, "not_found");
 }
@@ -116,7 +120,7 @@ async fn test_nfr_m3_every_operation_answers_with_a_documented_status() {
 async fn test_nfr_m3_documented_statuses_with_a_live_kernel_and_dedicated_mode() {
     let s = TestServer::start(Mode::Dedicated).await;
     let (kid, _) = s.kernel("train.py");
-    assert_eq!(probe_all(&s, Some(&kid)).await, 37);
+    assert_eq!(probe_all(&s, Some(&kid)).await, 43);
     assert_eq!(probe_planned(&s, Some(&kid)).await, contract().planned.len());
 }
 

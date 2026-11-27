@@ -1,5 +1,5 @@
 // Routing for darkpyonix.dev (docs/api/hub.openapi.yaml). Every operation of that file that is
-// served by this Worker is listed here, and nothing else (CLAUDE.md: the OpenAPI is the SPEC).
+// served by this Worker is listed here, and nothing else (AGENTS.md: the OpenAPI is the SPEC).
 
 import {
   claimLink,
@@ -27,7 +27,7 @@ import { linkPage } from "./pages";
 import { ashPage, publishShare, resolveShare, sharePage, unpublishShare } from "./shares";
 import { hashToken, normalizeUserCode, nowSecs } from "./util";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 type Handler = (request: Request, env: Env, deps: Deps, ...params: string[]) => Promise<Response> | Response;
 

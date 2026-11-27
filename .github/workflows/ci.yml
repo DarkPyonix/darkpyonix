@@ -9,8 +9,14 @@ concurrency:
 
 permissions:
   contents: read
+  # test-editor-windows.yml downloads Ember's OSE build artifact.
+  actions: read
 
 jobs:
   test:
     uses: ./.github/workflows/test.yml
     secrets: inherit
+  service:
+    uses: ./.github/workflows/test-service.yml
+  editor-windows:
+    uses: ./.github/workflows/test-editor-windows.yml

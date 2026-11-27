@@ -20,7 +20,7 @@ pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..").canonicalize().unwrap()
 }
 
-/// A fresh directory under `<repo>/.scratch/rust-tests/` (CLAUDE.md "Where files go").
+/// A fresh directory under `<repo>/.scratch/rust-tests/` (AGENTS.md "Where files go").
 pub fn scratch(name: &str) -> PathBuf {
     let dir = repo_root().join(".scratch").join("rust-tests").join(format!("{name}-{}", dpx_server::auth::random_hex(6)));
     std::fs::create_dir_all(&dir).unwrap();
@@ -472,7 +472,8 @@ impl KernelBackend for FakeBackend {
                     .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
                     .unwrap_or_default();
                 let share_id = (kind == "share").then(|| format!("s_{n:016x}"));
-                let token = format!("kt_{}_{n}", &kernel_id[2..10]);
+                // The kernel's own format: `dpk_` + random (SPEC FR-A6).
+                let token = format!("dpk_{}_{n}", &kernel_id[2..10]);
                 list.push(FakeToken { token: token.clone(), kind, capabilities: caps, share_id: share_id.clone(), revoked: false });
                 Ok(match share_id {
                     Some(id) => json!({"token": token, "share_id": id}),

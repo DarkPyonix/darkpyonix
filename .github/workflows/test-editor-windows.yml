@@ -1,0 +1,120 @@
+name: Editor Windows test
+
+# SPEC FR-M9 on Windows (#170): the editor server listens on 127.0.0.1 with a connection token
+# read from a user-only file, and the manager proxies /ide/<runtime>/ to it with that token.
+# A named pipe was probed first and rejected (FR-M9, run 45564105243: the pipe's DACL grants
+# Everyone read and cannot be set from Node). Called by ci.yml (dispatch only).
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # The dpx-ose windows-x64 build of Ember em-train-25 (until an ose-v release exists).
+  OSE_RUN: "45547623834"
+  OSE_ARTIFACT: dpx-ose-windows-x64
+  CARGO_TERM_COLOR: always
+
+jobs:
+  editor:
+    name: Editor server on Windows (windows-latest)
+    runs-on: windows-latest
+    # A hang never holds a runner for GitHub's 6 hours (run 45566280026 did).
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: darkpyonix/manager
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+      - uses: dtolnay/rust-toolchain@stable
+        timeout-minutes: 10
+      - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 10
+        with:
+          workspaces: darkpyonix/manager
+      - uses: actions/setup-python@v5
+        timeout-minutes: 5
+        with:
+          python-version: "3.12"
+
+      - name: Loopback serving with a user-only token file (fake editor)
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          # A test that did not run is a failure.
+          cargo test -p dpx-server --test editor_loopback 2>&1 | Tee-Object -FilePath editor-win.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($t in 'editor_listens_on_loopback_with_a_token_file', 'proxy_sends_the_token_cookie',
+                         'token_is_not_in_the_command_line', 'token_file_is_user_only',
+                         'stop_ends_the_whole_server_tree', 'server_tree_ends_when_the_manager_dies') {
+            if (-not (Select-String -Path editor-win.log -Pattern "test_fr_m9_windows_$t ... ok")) {
+              Write-Error "test_fr_m9_windows_$t did not run"; exit 1
+            }
+          }
+
+      - name: Build the binary
+        timeout-minutes: 20
+        run: cargo build -p darkpyonix
+
+      - name: The real OSE through the manager
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rel = "$env:RUNNER_TEMP\rel"
+          gh run download $env:OSE_RUN -R DarkPyonix/darkpyonix-ember -n $env:OSE_ARTIFACT -D "$rel\dl"
+          $tgz = Get-ChildItem "$rel\dl\*.tar.gz" | Select-Object -First 1
+          New-Item -ItemType Directory "$rel\ose-v1.139.1" | Out-Null
+          Copy-Item $tgz.FullName "$rel\ose-v1.139.1\"
+          $sum = (Get-FileHash $tgz.FullName -Algorithm SHA256).Hash.ToLower()
+          "$sum  $($tgz.Name)" | Out-File -Encoding ascii "$rel\ose-v1.139.1\SHA256SUMS"
+
+          $env:DARKPYONIX_HOME = "$env:RUNNER_TEMP\dpx-home"
+          # editor_cmd strips `file://`: the rest must be a Windows path.
+          $env:DARKPYONIX_EDITOR_RELEASES = "file://$($rel -replace '\\', '/')"
+          $env:DARKPYONIX_MANAGER_TOKEN = 'editor-windows-check'
+          $dpx = "$PWD\target\debug\darkpyonix.exe"
+          & $dpx editor install --runtime ose --release ose-v1.139.1
+          if ($LASTEXITCODE -ne 0) { throw 'editor install failed' }
+
+          # One step: the runner ends a step's processes when the step ends.
+          $out = "$env:RUNNER_TEMP\manager.out"
+          $mgr = Start-Process -FilePath $dpx -ArgumentList 'manager', '--dedicated', '--port', '0' -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError "$env:RUNNER_TEMP\manager.err" -WindowStyle Hidden
+          try {
+            $line = $null
+            for ($i = 0; $i -lt 60 -and -not $line; $i++) {
+              Start-Sleep -Milliseconds 500
+              $line = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
+            if (-not $line) { throw 'the manager printed no line' }
+            $url = ($line | ConvertFrom-Json).url
+            $h = @{ Authorization = 'Bearer editor-windows-check' }
+            $launch = Invoke-RestMethod -Method Post "$url/api/editor/ose/launch" -Headers $h -TimeoutSec 120
+            Write-Output "launch: $($launch | ConvertTo-Json -Compress)"
+            $r = Invoke-WebRequest "$url/ide/ose/" -Headers $h -UseBasicParsing -TimeoutSec 60
+            Write-Output "GET /ide/ose/ through the manager: $($r.StatusCode)"
+            if ($r.StatusCode -ne 200 -or $r.Content -notmatch 'workbench') { throw 'no workbench page' }
+            if ("$($r.Headers['Set-Cookie'])" -match 'vscode-tkn') { throw 'the token reached the client' }
+            $token = (Get-Content "$env:DARKPYONIX_HOME\editor\tokens\ose.token").Trim()
+            $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--connection-token-file*' }
+            if (-not $procs) { throw 'no editor server process found' }
+            if ($procs | Where-Object { $_.CommandLine -like "*$token*" }) { throw 'the token is in a command line' }
+            icacls "$env:DARKPYONIX_HOME\editor\tokens\ose.token"
+            $ext = Invoke-RestMethod -Method Post "$url/api/editor/ose/extensions" -Headers $h -ContentType 'application/json' `
+              -Body '{"id": "redhat.vscode-yaml"}' -TimeoutSec 300
+            Write-Output "extension: $($ext | ConvertTo-Json -Compress)"
+          } finally {
+            # Hard kill: the manager's tree, then anything left that serves an editor.
+            taskkill /PID $mgr.Id /T /F 2>&1 | Out-Null
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--connection-token-file*' } |
+              ForEach-Object { Write-Output "left over: $($_.ProcessId) $($_.Name)"; taskkill /PID $_.ProcessId /T /F 2>&1 | Out-Null }
+            Get-Content "$env:RUNNER_TEMP\manager.err" -ErrorAction SilentlyContinue | Select-Object -Last 20
+            Get-Content "$env:DARKPYONIX_HOME\editor\ose.log" -ErrorAction SilentlyContinue | Select-Object -Last 20
+          }

@@ -2,7 +2,8 @@
 //!
 //! [`serve`] answers every operation of `docs/api/manager.openapi.yaml` on top of any
 //! [`KernelBackend`], plus three things outside the contract: the API reference page at
-//! `/docs/`, configured reverse-proxy routes ([`ProxyRoute`]) and nothing else. It speaks
+//! `/docs/`, the editor server under `/ide/<runtime>/` ([`editor`]), configured reverse-proxy
+//! routes ([`ProxyRoute`]) and nothing else. It speaks
 //! HTTP/1.1 and HTTP/2 (h2c, or ALPN over TLS), SSE and WebSocket (proxied), without nginx.
 //!
 //! Ephemeral managers (FR-M3) bind `127.0.0.1`, write no registry file (the process that started
@@ -13,8 +14,11 @@
 pub mod api;
 pub mod auth;
 pub mod docs;
+pub mod editor;
 pub mod error;
 pub mod handoff;
+#[cfg(windows)]
+mod proctree;
 pub mod proxy;
 pub mod sse;
 pub mod tls;
@@ -104,6 +108,9 @@ pub struct ServerConfig {
     pub password_free_attempts: u32,
     /// First lock length; it doubles with every further wrong password, up to 5 minutes (FR-A4, 1 s).
     pub password_delay_base: Duration,
+    /// Serve the editor server on loopback TCP with a connection token instead of a Unix socket
+    /// (SPEC FR-M9; the default on Windows).
+    pub editor_loopback: bool,
 }
 
 impl ServerConfig {
@@ -122,6 +129,7 @@ impl ServerConfig {
             presence_heartbeat: PRESENCE_HEARTBEAT,
             password_free_attempts: auth::DEFAULT_FREE_ATTEMPTS,
             password_delay_base: auth::DEFAULT_DELAY_BASE,
+            editor_loopback: cfg!(windows),
         }
     }
 
@@ -286,6 +294,26 @@ async fn kernel_principal(st: &AppState, kernel_id: &str, token: &str) -> Result
     }))
 }
 
+/// Kernel access tokens start with this (SPEC FR-A6, owner decision 2026-11-23).
+const KERNEL_TOKEN_PREFIX: &str = "dpk_";
+
+/// Whether a running kernel other than `except` holds `token`. Only a token with the kernel
+/// prefix is asked about, so a wrong token costs no kernel round trips.
+async fn held_by_another_kernel(st: &AppState, except: Option<&str>, token: &str) -> bool {
+    if !token.starts_with(KERNEL_TOKEN_PREFIX) {
+        return false;
+    }
+    for k in st.backend.list(false).await.unwrap_or_default() {
+        if Some(k.kernel_id.as_str()) == except {
+            continue;
+        }
+        if let Ok(Some(_)) = kernel_principal(st, &k.kernel_id, token).await {
+            return true;
+        }
+    }
+    false
+}
+
 /// Authenticates before routing, so an anonymous caller always gets 401 (never 400/404).
 async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
@@ -318,7 +346,15 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
         }
         auth::Lookup::Unknown => match (token.as_deref().filter(|t| !t.is_empty()), path_kernel_id(&path)) {
             (Some(t), Some(kid)) => match kernel_principal(&st, kid, t).await {
-                Ok(p) => p,
+                Ok(Some(p)) => Some(p),
+                Ok(None) => {
+                    // A kernel token of another kernel: answered as if this kernel did not
+                    // exist, the FR-A6 rule for a token pointed at another kernel.
+                    if held_by_another_kernel(&st, Some(kid), t).await {
+                        return ApiError::not_found(format!("no such kernel: {kid}")).into_response();
+                    }
+                    None
+                }
                 Err(e) => return e.into_response(),
             },
             // The password path names no kernel: an initial token (FR-A4) is looked for among
@@ -332,6 +368,13 @@ async fn auth_gate(State(st): State<Arc<AppState>>, mut req: Request, next: Next
                     }
                 }
                 found
+            }
+            // A path that names no kernel reaches beyond the token's kernel (K4).
+            (Some(t), None) => {
+                if held_by_another_kernel(&st, None, t).await {
+                    return ApiError::forbidden("a kernel access token works only on its own kernel").into_response();
+                }
+                None
             }
             _ => None,
         },
@@ -384,6 +427,12 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .route("/api/kernels/{kernel_id}/cells/{cell_id}/lock", put(api::lock_cell).delete(api::unlock_cell))
         .route("/api/kernels/{kernel_id}/presence", put(api::update_presence).delete(api::leave_presence))
         .route("/api/kernels/{kernel_id}/runs/{run_ref}/wait", get(api::wait_run))
+        .route("/api/editor", get(editor::get_editor))
+        .route("/api/editor/{runtime}/launch", post(editor::launch_editor))
+        .route("/api/editor/{runtime}/stop", post(editor::stop_editor))
+        .route("/api/editor/{runtime}/extensions", post(editor::install_extension))
+        .route("/api/editor/{runtime}/extensions/{extension_id}", delete(editor::delete_extension))
+        .route("/api/editor/{runtime}/presets", put(editor::put_presets))
         .route("/docs", get(docs::redirect))
         .route("/docs/", get(docs::index))
         .route("/docs/{name}", get(docs::file))
@@ -391,6 +440,9 @@ pub fn router(state: Arc<AppState>, proxy: Arc<Proxy>, activity: Arc<Activity>) 
         .method_not_allowed_fallback(api::method_not_allowed)
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn_with_state(state.clone(), auth_gate))
+        // `/ide/<runtime>/` authenticates by itself (master token or launch ticket) and is
+        // proxied to the editor server before the API's own gate (SPEC FR-M9).
+        .layer(middleware::from_fn_with_state(state.clone(), editor::gate))
         .with_state(state);
     let api = if proxy.is_empty() { api } else { api.layer(middleware::from_fn_with_state(proxy, proxy_gate)) };
     api.layer(middleware::from_fn_with_state(activity, track))
@@ -515,7 +567,10 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         os_user: util::os_user(),
         avatars: Mutex::new(std::collections::HashMap::new()),
         shutdown: rx.clone(),
+        editors: editor::Editors::new(config.home.clone(), mode == Mode::Dedicated, config.editor_loopback),
     });
+    // A dedicated manager starts the installed editor servers (SPEC FR-M9).
+    state.editors.autostart();
     let app = router(state.clone(), proxy, activity.clone());
 
     let idle = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -585,6 +640,8 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         }
         drop(listener);
         let _ = tokio::time::timeout(GRACEFUL_TIMEOUT, graceful.shutdown()).await;
+        // The editor servers end with the manager (SPEC FR-M9, owner 2026-11-25).
+        state.editors.shutdown().await;
         if idle.load(Ordering::SeqCst) {
             ExitReason::Idle
         } else {

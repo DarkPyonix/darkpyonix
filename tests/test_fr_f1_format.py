@@ -204,3 +204,33 @@ def test_fr_f1_to_dict_is_json_ready():
 @pytest.mark.parametrize("text", ["# %% [code]\n", "x\n# %% [code]\ny\n"])
 def test_fr_f1_preamble_always_present(text):
     assert fmt.parse(text).cells[0].type == fmt.PREAMBLE
+
+
+def test_fr_f14_parser_preserves_markup_metadata(scratch):
+    text = (
+        "import darkpyonix\n\n"
+        "# %% [markdown]\n"
+        "# @markup: quarkdown\n"
+        'darkpyonix.markdown("""\n'
+        ".doctype {paged}\n"
+        "# Title\n"
+        '""", silent=True, markup="quarkdown")\n'
+    )
+    doc = fmt.parse(text)
+    cell = doc.cells[1]
+    assert cell.type == "markdown"
+    assert cell.metadata["markup"] == "quarkdown"
+    assert "# @markup" not in cell.source
+    assert fmt.serialize(doc) == text
+
+    path = os.path.join(scratch, "quarkdown.pynb")
+    with open(path, "wb") as f:
+        f.write(text.encode("utf-8"))
+    loaded = fmt.load(path)
+    assert loaded.cells[1].metadata["markup"] == "quarkdown"
+    assert fmt.serialize(loaded).encode("utf-8") == text.encode("utf-8")
+
+    # Newly created cell without a recorded header serializes # @markup too.
+    doc.cells.append(fmt.Cell(2, "markdown", "m()\n", metadata={"markup": "quarkdown"}))
+    rebuilt = fmt.parse(fmt.serialize(doc))
+    assert rebuilt.cells[2].metadata["markup"] == "quarkdown"

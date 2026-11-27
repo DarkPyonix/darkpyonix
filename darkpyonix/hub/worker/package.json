@@ -1,6 +1,6 @@
 {
   "name": "darkpyonix-hub-worker",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "darkpyonix.dev hub API on Cloudflare Workers (SPEC §10)",
   "license": "Apache-2.0",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "migrate:local": "wrangler d1 migrations apply darkpyonix-hub --local",
     "migrate:remote": "wrangler d1 migrations apply darkpyonix-hub --remote",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "check:live": "node scripts/run-live-check.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

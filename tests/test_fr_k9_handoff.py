@@ -156,6 +156,24 @@ def test_fr_k9_label_without_history_filters_outputs(kernel):
     full.close()
 
 
+def test_fr_k9_label_without_read_blanks_cell_source_on_sse(kernel):
+    info, client = kernel
+    blind = handed(info, "events", events_path(info), label(["history"]))
+    full = handed(info, "events", events_path(info), label())
+    _, rb = h.read_head(blind)
+    _, rf = h.read_head(full)
+    h.edit_reload_and_conflict(info, client)
+    seen_full = h.read_until(full, b"event: doc.conflict", rf, timeout=15)
+    seen_blind = h.read_until(blind, b"event: doc.conflict", rb, timeout=15)
+    for word in (b"CREATEDSECRET", b"LOCALSECRET", b"DISKSECRET", b"RELOADSECRET"):
+        assert word in seen_full, word
+        assert word not in seen_blind, word
+    for kind in (b"event: doc.cell.created", b"event: doc.cell.updated", b"event: doc.reloaded"):
+        assert kind in seen_blind, kind
+    blind.close()
+    full.close()
+
+
 def test_fr_k9_last_event_id_replays_from_the_kernel_ring(kernel):
     info, client = kernel
     client.request("run", {"mode": "all"})
@@ -225,10 +243,6 @@ def test_fr_k9_ws_upgrade_is_answered_with_101(kernel):
         key.encode() + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest()).decode()
     assert ("sec-websocket-accept: " + accept).lower() in head.lower()
     c.close()
-
-
-def test_fr_k9_adopted_socket_on_windows():
-    pytest.skip("Windows socket.fromshare handoff is a follow-up of #47 (needs a Windows runner)")
 
 
 # ------------------------------------------------------------------ PR-5, PR-6 (in-process server)
@@ -336,3 +350,32 @@ def test_fr_k10_revoking_a_token_closes_that_shares_adopted_streams(kernel):
     client.request("run", {"mode": "all"})
     assert b"event: run.finished" in h.read_until(other, b"event: run.finished", rest)
     other.close()
+
+
+def test_fr_s4_sse_presence_heartbeat_survives_a_steady_event_stream(monkeypatch):
+    """A busy SSE stream still renews its presence (PROTOCOL §3.7.3a, §3.7.5)."""
+    from darkpyonix import _streams
+    monkeypatch.setattr(_streams, "PRESENCE_HEARTBEAT", 0.3)
+    monkeypatch.setattr(_streams, "POLL", 0.2)
+    beats = []
+    log = EventLog()
+    hub = _streams.StreamHub(KID, log, {"presence.update": lambda params: beats.append(time.monotonic())})
+    client, server_side = h.tcp_pair()
+    try:
+        hub.adopt(server_side, "events", h.http_get("/api/kernels/%s/events" % KID),
+                  label(client_id="dev_aaaaaaaa"))
+        h.read_head(client)
+        client.settimeout(0.05)
+        start = time.monotonic()
+        while time.monotonic() - start < 2.0:      # an event every 20 ms: the queue never idles
+            log.append("kernel.status", {"status": "busy"})
+            try:
+                client.recv(65536)
+            except socket.timeout:
+                pass
+            time.sleep(0.02)
+        assert beats and beats[0] - start < 0.3, "no presence on connect"
+        assert len(beats) >= 4, "presence starved by the event stream: %d beats" % len(beats)
+    finally:
+        hub.stop()
+        client.close()

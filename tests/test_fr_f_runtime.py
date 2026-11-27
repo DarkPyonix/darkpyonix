@@ -77,7 +77,10 @@ def test_runtime_import_is_cheap_and_never_loads_the_kernel_process(python, scra
     # Every module in the package root is either a kernel-process module or a runtime one, so a
     # new file cannot slip past the assertion above unnoticed.
     from conftest import PACKAGE_DIR
-    runtime = {"__init__", "_binding", "_command", "_home", "_host", "_markdown", "_misc", "_params"}
+    runtime = {
+        "__init__", "_binding", "_command", "_data", "_errors", "_home",
+        "_host", "_markdown", "_misc", "_parallel", "_params", "_sql",
+    }
     present = {n[:-3] for n in os.listdir(PACKAGE_DIR) if n.endswith(".py")}
     assert present == runtime | set(KERNEL_MODULES)
 
@@ -119,6 +122,144 @@ def test_fr_f2_markdown_in_kernel_and_plain_python(python, scratch, kernel):
     assert out.returncode == 0, out.stderr
     assert out.stdout == "before\nafter\n"
     assert out.stderr.count("slient") >= 1 and out.stderr.count("UserWarning") == 1
+
+
+# --------------------------------------------------------------------------- FR-F14
+
+
+def test_fr_f14_markdown_emits_markup_mime_and_metadata(kernel):
+    _, emitted = kernel
+    src = """
+        .doctype {paged}
+        # Title
+    """
+    darkpyonix.markdown(src, markup="quarkdown")
+    darkpyonix.markdown("# Normalized", markup="  Quarkdown  ")
+    darkpyonix.markdown("default")
+    darkpyonix.markdown("explicit", markup="markdown")
+
+    expected_body = ".doctype {paged}\n# Title"
+    assert emitted == [
+        (
+            {
+                "data": {
+                    "text/vnd.darkpyonix.quarkdown": expected_body,
+                    "text/plain": expected_body,
+                },
+                "metadata": {"darkpyonix": {"markup": "quarkdown"}},
+            },
+            False,
+        ),
+        (
+            {
+                "data": {
+                    "text/vnd.darkpyonix.quarkdown": "# Normalized",
+                    "text/plain": "# Normalized",
+                },
+                "metadata": {"darkpyonix": {"markup": "quarkdown"}},
+            },
+            False,
+        ),
+        ({"text/markdown": "default"}, False),
+        ({"text/markdown": "explicit"}, False),
+    ]
+
+
+def test_fr_f14_unknown_markup_falls_back_cleanly(kernel):
+    _, emitted = kernel
+    darkpyonix.markdown("hello myst", markup="myst")
+    darkpyonix.markdown("trimmed", markup="  MyST  ")
+    assert emitted == [
+        (
+            {
+                "data": {
+                    "text/vnd.darkpyonix.myst": "hello myst",
+                    "text/plain": "hello myst",
+                },
+                "metadata": {"darkpyonix": {"markup": "myst"}},
+            },
+            False,
+        ),
+        (
+            {
+                "data": {
+                    "text/vnd.darkpyonix.myst": "trimmed",
+                    "text/plain": "trimmed",
+                },
+                "metadata": {"darkpyonix": {"markup": "myst"}},
+            },
+            False,
+        ),
+    ]
+
+
+def test_fr_f14_quarkdown_is_noop_in_plain_python(python, scratch):
+    path = _write(scratch, "qd_plain.py", '''
+        import darkpyonix
+
+        # %% [markdown]
+        # @markup: quarkdown
+        darkpyonix.markdown("""
+        .doctype {paged}
+        # Quiet
+        """, markup="quarkdown")
+    ''')
+    out = _run(python, path)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout == ""
+    assert out.stderr == ""
+
+
+def test_fr_f14_quarkdown_silent_is_not_logged(python, scratch, real_kernel):
+    from kernel_procs import run_and_wait
+    path = _write(scratch, "qd_kernel.py", '''
+        import darkpyonix
+
+        # %% [markdown]
+        # @markup: quarkdown
+        darkpyonix.markdown("""
+            .doctype {paged}
+            # Shown
+        """, markup="quarkdown")
+        darkpyonix.markdown("# Hidden", silent=True, markup="quarkdown")
+        print("done")
+    ''')
+    c = real_kernel(path, python)
+    status, events = run_and_wait(c)
+    assert status == "ok"
+    live = [e["data"]["output"] for e in events if e["type"] == "output"
+            and e["data"]["output"]["output_type"] == "display_data"]
+    assert [(o["data"], o.get("metadata")) for o in live] == [
+        (
+            {
+                "text/vnd.darkpyonix.quarkdown": ".doctype {paged}\n# Shown",
+                "text/plain": ".doctype {paged}\n# Shown",
+            },
+            {"darkpyonix": {"markup": "quarkdown"}},
+        ),
+        (
+            {
+                "text/vnd.darkpyonix.quarkdown": "# Hidden",
+                "text/plain": "# Hidden",
+            },
+            {"darkpyonix": {"markup": "quarkdown"}},
+        ),
+    ]
+    nb = c.request("runs.get", {"run_id": "latest"})
+    logged = [o for cell in nb["cells"] for o in cell["outputs"]
+              if o["output_type"] == "display_data"]
+    assert [(o["data"], o.get("metadata")) for o in logged] == [
+        (
+            {
+                "text/vnd.darkpyonix.quarkdown": ".doctype {paged}\n# Shown",
+                "text/plain": ".doctype {paged}\n# Shown",
+            },
+            {"darkpyonix": {"markup": "quarkdown"}},
+        ),
+    ]
+    outputs = [o for cell in nb["cells"] for o in cell["outputs"]]
+    assert not any("# Hidden" in str(o) for o in outputs)
+    assert [o.get("text") for o in outputs if o["output_type"] == "stream"] == ["done\n"]
 
 
 # --------------------------------------------------------------------------- FR-F3
@@ -368,9 +509,11 @@ def test_display_parallel_and_reserved_interop(kernel, capsys):
         return v
 
     t0 = time.monotonic()
-    assert darkpyonix.run_parallel(slow(1, 0.3), slow(2, 0.1), 3) == [1, 2, 3]
+    assert darkpyonix.run_parallel(slow(1, 0.3), slow(2, 0.1)) == [1, 2]
     assert time.monotonic() - t0 < 0.55
     assert darkpyonix.run_parallel() == []
+    with pytest.raises(TypeError):
+        darkpyonix.run_parallel(slow(1, 0), 3)
 
     async def nested():
         return darkpyonix.run_parallel(slow(1, 0))

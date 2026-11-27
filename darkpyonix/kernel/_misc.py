@@ -1,7 +1,5 @@
-"""``darkpyonix.display``, ``run_parallel`` and the reserved interop calls (FORMAT §4)."""
+"""``darkpyonix.display`` and the reserved interop calls (FORMAT §4)."""
 from __future__ import annotations
-
-import inspect
 
 from darkpyonix import _host
 
@@ -23,33 +21,6 @@ def display(*objs):
     for obj in objs:
         host.emit_display({"text/plain": repr(obj)})
     return None
-
-
-def run_parallel(*aws):
-    """Run coroutines / awaitables concurrently; return their results in argument order.
-
-    Values that are not awaitable are returned as they are.
-    """
-    import asyncio
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        for aw in aws:
-            if inspect.iscoroutine(aw):
-                aw.close()
-        raise RuntimeError("darkpyonix.run_parallel() cannot run inside a running event loop; "
-                           "use 'await asyncio.gather(...)' there instead")
-
-    async def _gather():
-        slots = [aw for aw in aws if inspect.isawaitable(aw)]
-        done = await asyncio.gather(*slots)
-        it = iter(done)
-        return [next(it) if inspect.isawaitable(aw) else aw for aw in aws]
-
-    return asyncio.run(_gather()) if aws else []
 
 
 def _reserved(api):

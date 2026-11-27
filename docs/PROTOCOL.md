@@ -163,13 +163,13 @@ INTENT D5. 사용자 결정(2026-10-04): "같은 컴퓨터의 같은 계정만 �
 | `run.queued` | `{run_id, position}` |
 | `run.started` | `{run_id, mode, cells: [int], cell_ids: [str\|null], params}` |
 | `run.finished` | `{run_id, status: "ok"\|"error"\|"interrupted"\|"cancelled", duration}` |
-| `cell.started` | `{run_id, index, cell_id, execution_count}` |
+| `cell.started` | `{run_id, index, cell_id, execution_count, group?: {head, end}}` |
 | `cell.finished` | `{run_id, index, cell_id, status: "ok"\|"error"\|"interrupted", duration}` |
 | `output` | `{run_id, index, cell_id, output: <nbformat 4 output>}` |
 | `output.clear` | `{run_id, index, cell_id, wait: bool}` |
 | `replay_truncated` | `{oldest_seq}` |
 
-`index`는 실행이 읽은 파일에서의 셀 위치이고, `cell_id`는 그 셀의 공유 문서 ID(§4, `doc.snapshot`의 `cell_id`)입니다. 실행 중에 셀이 옮겨지거나 지워져도 `cell_id`로 셀을 찾아야 합니다. 실행이 시작될 때 공유 문서와 파일이 맞지 않으면(커널이 문서를 들고 있지 않을 때 등) `cell_id`는 `null`입니다. `run.started`의 `cell_ids`는 `cells`와 같은 순서·길이의 배열이고 같은 규칙을 따릅니다.
+`index`는 실행이 읽은 파일에서의 셀 위치이고, `cell_id`는 그 셀의 공유 문서 ID(§4, `doc.snapshot`의 `cell_id`)입니다. 실행 중에 셀이 옮겨지거나 지워져도 `cell_id`로 셀을 찾아야 합니다. 실행이 시작될 때 공유 문서와 파일이 맞지 않으면(커널이 문서를 들고 있지 않을 때 등) `cell_id`는 `null`입니다. `run.started`의 `cell_ids`는 `cells`와 같은 순서·길이의 배열이고 같은 규칙을 따릅니다. `cell.started`의 선택 필드 `group: {head, end}`는 그 셀이 닫힌 `[parallel]`..`[concurrent]` 묶음에 속할 때만 들어갑니다(SPEC FR-X9, PR-4 필드 추가).
 
 `output`의 `output` 필드는 nbformat 4의 출력 객체(`stream`, `display_data`, `execute_result`, `error`)를 그대로 씁니다. 같은 셀의 연속된 `stream` 출력은 커널이 최대 50 ms 동안 모아서 하나로 보냅니다.
 
@@ -295,11 +295,12 @@ TLS, HTTP/2, P2P 터널 위의 연결에는 넘길 날 소켓이 없습니다. �
 
 `Presence = {client_id, nickname, user, avatar?, capabilities, focused_cell_id?, focused_at?, cursor?, last_seen}`.
 
-`DocumentCell = {cell_id, index, type, raw_type, title, metadata, source, source_sha256, version, lock?, conflict?}`.
+`DocumentCell = {cell_id, index, type, raw_type, title, metadata, source, source_sha256, version, lock?, conflict?, row?, width?, group?}`.
 
 - `source`는 파서(FORMAT §2.4)가 낸 본문 그대로입니다. 표식과 메타데이터 줄은 빠지고, 다음 표식 앞의 빈 줄(앞 셀 본문에 속함)과 줄 끝(`\r\n` 포함)은 남습니다. 클라이언트가 이 값을 바꾸지 않고 돌려보내면 파일 바이트도 바뀌지 않습니다.
 - `type`은 정규 타입(소문자, 별칭 해석, 타입 없는 표식은 `code`, 첫 셀은 `preamble`)이고, `raw_type`은 표식의 `[ ]` 안에 쓰인 그대로(없으면 `null`)입니다. 표시는 `type`으로, 원문 보존이 필요하면 `raw_type`을 씁니다.
 - `title`은 표식의 제목이고 없으면 `null`입니다.
+- `row`(`int | null`), `width`(`str | null`, 세로 배치에서는 `null`), `group`(`{head: int, end: int} | null`)은 파서가 문서에서 계산하는 선택 필드이며 파일로 직렬화하지 않습니다(SPEC FR-F7, FR-X7, PR-4).
 
 **스냅숏의 `seq`.** `seq`는 **스냅숏에 이미 반영된 마지막 이벤트의 번호**입니다. 클라이언트는 `subscribe since=seq`(HTTP는 `?since=seq`)로 구독하고, `seq`가 그보다 큰 이벤트만 스냅숏 위에 적용합니다. 커널은 문서 상태를 바꾸는 일과 그 이벤트를 내는 일을 한 잠금 안에서 하고, 스냅숏도 같은 잠금 안에서 만듭니다. 따라서 스냅숏과 경쟁한 편집은 스냅숏에 들어 있거나(`seq` 이하) 구독으로 오거나(`seq` 초과) 둘 중 정확히 하나입니다. 클라이언트가 `seq`가 자기 것 이하인 이벤트를 받으면 무시합니다(재연결로 겹칠 때).
 
@@ -366,9 +367,10 @@ SPEC FR-A5, FR-A6, FR-K10, PR-7, INTENT D17. 커널 접근 토큰(초기, 로그
   - 초기 토큰: 매니저가 `tokens.issue {kind: "initial", capabilities: [다섯 모두]}`를 보내고 받은 `token`을 응답합니다.
   - 커널 로그인: 매니저가 자기 비밀번호를 확인한 뒤(SPEC FR-A4) `tokens.issue {kind: "login", capabilities: [다섯 모두]}`를 보냅니다.
   - 공유 발급: `tokens.issue {kind: "share", capabilities, label?, expires_at?}`. 커널이 `share_id`를 정합니다.
-  - 요청마다 확인: 매니저는 클라이언트가 낸 토큰이 마스터 토큰이나 매니저 공유 토큰(`manager.db`)이 아니면 `tokens.verify {token}`을 보냅니다. `valid`이면 `capabilities`로 권한을 검사합니다(SPEC FR-A3). `revoked`이면 `401 token_revoked`입니다.
+  - 요청마다 확인: 매니저는 클라이언트가 낸 토큰이 마스터 토큰이나 매니저 공유 토큰(`manager.db`)이 아니면 `tokens.verify {token}`을 보냅니다. URL이 지목한 커널이 모르는 토큰이 `dpk_`로 시작하면 떠 있는 다른 커널들에도 묻고, 주인이 있으면 `404`(다른 커널 경로) 또는 `403`(커널을 지목하지 않는 경로)으로 답합니다(SPEC FR-A6). `valid`이면 `capabilities`로 권한을 검사합니다(SPEC FR-A3). `revoked`이면 `401 token_revoked`입니다.
   - 철회: `tokens.revoke {share_id}`. 커널은 토큰을 거두고 그 공유로 넘겨받은 스트림을 닫습니다(§3.7.4와 같은 일).
-- **영속화.** 커널은 토큰 값을 두지 않고 SHA-256 해시, `kind`, `capabilities`, `share_id`, `label`, `created_at`, `expires_at`, `revoked_at`만 둡니다. 토큰은 `secrets.token_urlsafe(32)`이라 소금 없는 SHA-256으로 충분하고, 비교는 `hmac.compare_digest`입니다. 쓸 때는 임시 파일에 쓰고 `os.replace`로 바꿉니다. 거둔 토큰은 거둔 표시로 남깁니다(2025 `blacklisted`).
+- **형식.** 토큰은 `dpk_` + `secrets.token_urlsafe(32)`입니다(오너 결정 2026-11-23). 접두어는 매니저가 커널 접근 토큰을 알아보는 데만 씁니다.
+- **영속화.** 커널은 토큰 값을 두지 않고 SHA-256 해시, `kind`, `capabilities`, `share_id`, `label`, `created_at`, `expires_at`, `revoked_at`만 둡니다. 토큰의 난수 부분이 `secrets.token_urlsafe(32)`이라 소금 없는 SHA-256으로 충분하고, 비교는 `hmac.compare_digest`입니다. 쓸 때는 임시 파일에 쓰고 `os.replace`로 바꿉니다. 거둔 토큰은 거둔 표시로 남깁니다(2025 `blacklisted`).
 - **저장소 위치 [provisional].** `<노트북 옆 __runs__/파일이름/>tokens.json`(런타임 홈이 아니라 실행 기록 폴더, 권한 0600). 커널만 읽고 쓰고, 노트북 파일 옆에 있어 커널이 꺼져도 남고 홈이 달라도 같은 파일의 토큰입니다. 커널은 0.5초마다 자기 파일이 있는지 보고, 지워진 것을 알아채면 저장소를 지웁니다(SPEC FR-S5 감시와 별개의 스레드). 파일이 없으면 커널이 뜰 수 없으므로 그 토큰은 더 확인되지 않습니다. 커널이 꺼져 있는 동안 파일이 지워졌다 같은 경로에 다시 만들어지면 옛 토큰이 되살아납니다(알려진 한계, 사용자 확인 대기).
 - **스트림 닫기 연결점.** `TokenStore(close_streams=...)`가 `tokens.revoke`의 `closed` 수를 정합니다. 넘겨받은 스트림(§3.7)을 닫는 코드(#47)가 이 함수를 채웁니다. 그 전에는 0입니다.
 - **지운 설계.** 2026-10-04 초안의 런타임 홈 `tokens/<kernel_id>.json`(같은 계정의 모든 매니저가 함께 읽고 쓰는 파일)과 `tokens/<kernel_id>.lock`은 지웁니다.

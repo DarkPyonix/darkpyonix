@@ -49,6 +49,81 @@ pub enum Command {
     Share(ShareArgs),
     /// Run a kernel manager in the foreground.
     Manager(ManagerArgs),
+    /// Install and configure the VS Code server a dedicated manager runs (OSE, VS Code, script).
+    Editor(EditorArgs),
+    /// Register the dedicated manager as a user service (launchd, systemd --user, a logon task).
+    Service(ServiceArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ServiceArgs {
+    #[command(subcommand)]
+    pub command: ServiceCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ServiceCommand {
+    /// Register and start the dedicated manager; prints `{url, token, pid}` once.
+    Install(ServiceInstallArgs),
+    /// Stop the service and remove its registration (the token and manager.db stay).
+    Uninstall,
+    /// `{installed, running, url, pid}` as JSON.
+    Status,
+}
+
+#[derive(Debug, Args)]
+pub struct ServiceInstallArgs {
+    /// The service always runs a dedicated manager (SPEC FR-M4).
+    #[arg(long, required = true)]
+    pub dedicated: bool,
+    /// Address to listen on (default 127.0.0.1).
+    #[arg(long)]
+    pub host: Option<String>,
+    /// Port to listen on (default: a free port chosen once, at install).
+    #[arg(long)]
+    pub port: Option<u16>,
+}
+
+#[derive(Debug, Args)]
+pub struct EditorArgs {
+    #[command(subcommand)]
+    pub command: EditorCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EditorCommand {
+    /// Install a runtime: OSE from Ember's release, the user's own `code`, or a Manual Script.
+    Install(EditorInstallArgs),
+    /// The runtime a VS Code window opens with.
+    Use {
+        #[arg(value_parser = ["ose", "vsc", "script"])]
+        runtime: String,
+    },
+    /// Whether a dedicated manager starts the installed runtimes.
+    Autostart {
+        #[arg(value_parser = ["on", "off"])]
+        value: String,
+    },
+    /// What is installed (JSON).
+    Status,
+}
+
+#[derive(Debug, Args)]
+pub struct EditorInstallArgs {
+    #[arg(long, value_parser = ["ose", "vsc", "script"])]
+    pub runtime: String,
+    /// OSE release tag, e.g. `ose-v1.139.1` (ose).
+    #[arg(long)]
+    pub release: Option<String>,
+    /// The `code` command of your VS Code (vsc; default: found on PATH).
+    #[arg(long)]
+    pub code: Option<PathBuf>,
+    /// The install script (script). Its last stdout line names the server command as JSON.
+    #[arg(long)]
+    pub script: Option<PathBuf>,
+    /// Accept the Microsoft VS Code Server licence (vsc).
+    #[arg(long)]
+    pub accept_server_license_terms: bool,
 }
 
 #[derive(Debug, Args)]
@@ -145,6 +220,9 @@ pub struct ManagerArgs {
     /// Seconds without requests or streams before an ephemeral manager exits.
     #[arg(long = "idle-timeout", value_name = "S")]
     pub idle_timeout: Option<u64>,
+    /// Read the master token from the first line of this file (what the service runs).
+    #[arg(long = "token-file", value_name = "PATH")]
+    pub token_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

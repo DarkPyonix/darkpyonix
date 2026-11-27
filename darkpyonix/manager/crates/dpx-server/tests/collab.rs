@@ -581,6 +581,10 @@ async fn test_fr_s7_wait_carries_2025_poll_fields() {
     assert_eq!(ar["recommended_delay"], 5);
     let url = ar["next_poll_url"].as_str().unwrap();
     assert!(url.contains("poll_sequence=4") && url.contains("client_id=alarm-0001"), "{url}");
+    // The last allowed poll does not ask for another one (the next would be 429).
+    let w = a.get(&format!("{base}/runs/current/wait?timeout=1&poll_sequence=100")).await;
+    assert_eq!(w.body["status"], "running", "{}", w.text);
+    assert_eq!(w.body["auto_repoll"]["enabled"], false, "{}", w.text);
     // Default sequence is 1; finished runs have no next poll.
     s.backend.finish_run(&kid);
     let w = a.get(&format!("{base}/runs/latest/wait?timeout=1")).await;

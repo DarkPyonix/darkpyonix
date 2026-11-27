@@ -43,6 +43,15 @@ def test_pr_7_issue_returns_the_token_once(nb):
     assert v["capabilities"] == list(CAPABILITIES)
 
 
+def test_pr_7_issued_tokens_carry_the_kernel_prefix(nb):
+    """Owner decision 2026-11-23: the manager tells kernel tokens by their ``dpk_`` prefix."""
+    ts = make(nb)
+    for kind, caps in (("initial", list(CAPABILITIES)), ("login", list(CAPABILITIES)), ("share", ["read"])):
+        token = ts.issue({"kind": kind, "capabilities": caps})["token"]
+        assert token.startswith("dpk_") and len(token) > len("dpk_") + 32, token
+        assert ts.verify({"token": token})["valid"] is True
+
+
 def test_pr_7_list_never_returns_tokens(nb):
     ts = make(nb)
     a = ts.issue({"kind": "share", "capabilities": ["read", "history"], "label": "x"})

@@ -339,6 +339,7 @@ class DocumentState(object):
     def _reindex(self) -> None:
         for i, e in enumerate(self._entries):
             e.cell.index = i
+        dpformat.compute_layout([e.cell for e in self._entries])
 
     def _lock_dict(self, lk: _Lock) -> Dict[str, Any]:
         remaining = max(0.0, lk.last_activity + self.idle_lock_seconds - self._clock())
@@ -352,7 +353,9 @@ class DocumentState(object):
         out = {"cell_id": e.cell_id, "index": c.index, "type": c.type, "raw_type": c.raw_type,
                "title": c.title,
                "metadata": dict(c.metadata), "source": c.source,
-               "source_sha256": c.source_sha256, "version": e.version}  # type: Dict[str, Any]
+               "source_sha256": c.source_sha256, "version": e.version,
+               "row": c.row, "width": c.width,
+               "group": dict(c.group) if c.group is not None else None}  # type: Dict[str, Any]
         lk = self._locks.get(e.cell_id)
         if lk is not None:
             out["lock"] = self._lock_dict(lk)
@@ -487,6 +490,7 @@ class DocumentState(object):
         if regen:
             cell.header = ""  # serialize generates a fresh marker + metadata block
             changed = True
+            dpformat.compute_layout([e.cell for e in self._entries])
         if changed:
             entry.version += 1
         return changed

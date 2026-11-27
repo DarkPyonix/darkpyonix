@@ -352,6 +352,44 @@ async fn test_fr_m6_wait_is_handed_off_with_its_run_ref() {
 }
 
 #[tokio::test]
+async fn test_fr_m6_wait_over_http2_is_pumped_to_the_kernel() {
+    // No descriptor of the client's own (h2c, TLS, tunnel): the wait goes through the pump too.
+    let rig = start(false, |_| {}).await;
+    let client = reqwest::Client::builder().http2_prior_knowledge().build().unwrap();
+    let resp = client
+        .get(format!("{}/api/kernels/{}/runs/latest/wait?timeout=5", rig.h().url, rig.kid))
+        .bearer_auth(&rig.h().token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["next"], json!(null), "{body}");
+    assert_eq!(rig.backend.adopted_count(), 1, "the wait was not handed to the kernel");
+    let (kind, transport, request, _) = rig.backend.adopted(0);
+    assert_eq!((kind.as_str(), transport.as_str()), ("wait", "pump"));
+    assert!(request.starts_with(&format!("GET /api/kernels/{}/runs/latest/wait?timeout=5 HTTP/1.1", rig.kid)), "{request}");
+}
+
+#[tokio::test]
+async fn test_fr_m1_get_run_is_a_rest_call_even_with_handoff() {
+    // `getRun` is `runs.get`, not a stream: nothing is handed to the kernel.
+    let rig = start(false, |_| {}).await;
+    for client in [reqwest::Client::new(), reqwest::Client::builder().http2_prior_knowledge().build().unwrap()] {
+        let resp = client
+            .get(format!("{}/api/kernels/{}/runs/latest", rig.h().url, rig.kid))
+            .bearer_auth(&rig.h().token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404, "no finished run yet");
+        let body: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+        assert_eq!(body["error"]["code"], "not_found", "{body}");
+    }
+    assert_eq!(rig.backend.adopted_count(), 0, "getRun was handed off");
+}
+
+#[tokio::test]
 async fn test_fr_m6_tls_http2_stream_is_pumped_and_ends_with_manager() {
     // HTTP/2 without TLS (h2c) takes the same path as TLS and tunnels: no descriptor of the
     // client's own, so the kernel gets one end of a socket pair and the manager pumps bytes.

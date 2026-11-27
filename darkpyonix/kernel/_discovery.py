@@ -219,11 +219,29 @@ class DiscoveryResponder:
         self._sendto(_encode(body), (addr[0], addr[1]))
 
 
-class DiscoveryClient:
-    """The manager side of PROTOCOL §2: query the group, optionally listen for announces."""
+def _canonical(path: str) -> str:
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
-    def __init__(self, user_tag: str) -> None:
+
+def _home_matches(message: Dict[str, Any], home: Optional[str]) -> bool:
+    """PROTOCOL §2.4: with a home set, keep only messages naming that same home."""
+    if home is None:
+        return True
+    theirs = message.get("home")
+    return isinstance(theirs, str) and bool(theirs) and _canonical(theirs) == home
+
+
+class DiscoveryClient:
+    """The manager side of PROTOCOL §2: query the group, optionally listen for announces.
+
+    With ``home`` set, announces (and byes) whose ``home`` is a different runtime home, or
+    that carry none, are dropped and do not count towards ``expect`` (PROTOCOL §2.4). A bye
+    carries no home and is passed on as is.
+    """
+
+    def __init__(self, user_tag: str, home: Optional[str] = None) -> None:
         self.user_tag = user_tag
+        self.home = _canonical(home) if home else None
         self._listen_sock = None  # type: Optional[socket.socket]
         self._listen_thread = None  # type: Optional[threading.Thread]
         self._closed = threading.Event()
@@ -260,7 +278,8 @@ class DiscoveryClient:
                     break
                 reply = _decode(data)
                 if (reply is None or reply.get("op") != "announce" or reply.get("nonce") != nonce
-                        or reply.get("user_tag") != self.user_tag):
+                        or reply.get("user_tag") != self.user_tag
+                        or not _home_matches(reply, self.home)):
                     continue
                 kid = reply.get("kernel_id")
                 if not isinstance(kid, str) or (kernel_id is not None and kid != kernel_id):
@@ -295,7 +314,9 @@ class DiscoveryClient:
                     break
                 message = _decode(data)
                 if (message is None or message.get("op") not in ("announce", "bye")
-                        or message.get("user_tag") != self.user_tag):
+                        or message.get("user_tag") != self.user_tag
+                        or (message.get("op") == "announce"
+                            and not _home_matches(message, self.home))):
                     continue
                 try:
                     callback(message)
@@ -316,10 +337,10 @@ class DiscoveryClient:
 
 
 def discover(kernel_id: Optional[str] = None, timeout: float = QUERY_TIMEOUT) -> List[Dict[str, Any]]:
-    """Live kernels of this user, found by one multicast query (FR-D1)."""
+    """Live kernels of this user and this runtime home, found by one multicast query (FR-D1)."""
     from darkpyonix import _home
 
-    client = DiscoveryClient(_home.user_tag())
+    client = DiscoveryClient(_home.user_tag(), home=_home.home())
     try:
         answers = client.query(kernel_id=kernel_id, timeout=timeout)
     finally:

@@ -1,4 +1,4 @@
-// CLAUDE.md: the OpenAPI file is the SPEC. Every operation this Worker serves answers, with no
+// AGENTS.md: the OpenAPI file is the SPEC. Every operation this Worker serves answers, with no
 // credentials and an empty body, only with a status its documentation lists; and every route
 // the Worker has is documented. Operations with a path-level `servers` entry live on another
 // host and are skipped (none today: the hub runs no relay, FR-H3). Paths marked `x-planned: true` are
@@ -7,14 +7,15 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import specText from "../../../../docs/api/hub.openapi.yaml?raw";
-import { ROUTES } from "../src/app";
+import packageJson from "../package.json";
+import { ROUTES, VERSION } from "../src/app";
 import { z32Encode } from "../src/pkarr";
 import { call, makeDeps } from "./helpers";
 
 type Operation = { responses: Record<string, unknown> };
 type PathItem = Record<string, Operation> & { servers?: unknown; "x-planned"?: boolean };
 
-const spec = parse(specText) as { paths: Record<string, PathItem> };
+const spec = parse(specText) as { info: { version: string }; paths: Record<string, PathItem> };
 const METHODS = ["get", "put", "post", "patch", "delete"] as const;
 
 function workerPaths(): [string, PathItem][] {
@@ -28,7 +29,10 @@ function fill(path: string): string {
     .replace("{share_id}", "s_0123456789abcdef")
     .replace("{name}", "example-name")
     .replace("{link_id}", `l_${"0".repeat(32)}`)
-    .replace("{user_code}", "BCDF-GHJK");
+    .replace("{user_code}", "BCDF-GHJK")
+    .replace("{notebook_id}", `n_${"0".repeat(32)}`)
+    .replace("{version}", "1")
+    .replace("{github_login}", "octocat");
 }
 
 describe("hub.openapi.yaml", () => {
@@ -48,6 +52,13 @@ describe("hub.openapi.yaml", () => {
     expect(checked).toBeGreaterThanOrEqual(25);
   });
 
+  it("test_nfr_m3_worker_version_matches_the_contract", async () => {
+    // The OpenAPI file is the SPEC: the Worker reports the version of the contract it serves.
+    expect(VERSION).toBe(spec.info.version);
+    expect(packageJson.version).toBe(spec.info.version);
+    const health = (await (await call(makeDeps(), "GET", "/health")).json()) as { version: string };
+    expect(health.version).toBe(spec.info.version);
+  });
   it("test_hub_every_worker_route_is_documented_and_vice_versa", () => {
     const documented = new Set<string>();
     for (const [path, item] of workerPaths()) {
