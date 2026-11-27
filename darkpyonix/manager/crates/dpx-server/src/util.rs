@@ -134,6 +134,41 @@ pub fn runs_dir_for(path: &str) -> String {
         .into_owned()
 }
 
+/// Writes a secret only the current user may read (SPEC FR-M9): mode 0600 on Unix; on Windows a
+/// file whose inherited entries are removed and whose one entry grants the user full control,
+/// set before the secret is written.
+pub fn write_user_only(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        write_private_atomic(path, data)
+    }
+    #[cfg(not(unix))]
+    {
+        let dir = path.parent().unwrap_or(Path::new("."));
+        ensure_private_dir(dir)?;
+        let _ = std::fs::remove_file(path);
+        std::fs::write(path, b"")?;
+        let user = std::env::var("USERNAME").map_err(|_| std::io::Error::other("USERNAME is not set"))?;
+        let user = match std::env::var("USERDOMAIN") {
+            Ok(d) if !d.is_empty() => format!("{d}\\{user}"),
+            _ => user,
+        };
+        let out = std::process::Command::new("icacls")
+            .arg(path)
+            .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+            .output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::other(format!(
+                "icacls failed: {}",
+                String::from_utf8_lossy(&out.stdout).trim()
+            )));
+        }
+        let mut f = std::fs::OpenOptions::new().write(true).truncate(true).open(path)?;
+        f.write_all(data)?;
+        f.sync_all()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

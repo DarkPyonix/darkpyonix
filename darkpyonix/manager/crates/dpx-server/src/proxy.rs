@@ -293,6 +293,18 @@ fn prepare(mut req: Request<Body>) -> Prepared {
 /// connection per request, and an upgrade spliced byte for byte.
 #[cfg(unix)]
 pub async fn forward_unix(socket: &std::path::Path, req: Request<Body>) -> Response<Body> {
+    forward_on(tokio::net::UnixStream::connect(socket).await, req).await
+}
+
+/// The same over loopback TCP (the editor server on Windows, SPEC FR-M9).
+pub async fn forward_tcp(addr: std::net::SocketAddr, req: Request<Body>) -> Response<Body> {
+    forward_on(tokio::net::TcpStream::connect(addr).await, req).await
+}
+
+async fn forward_on<S>(stream: std::io::Result<S>, req: Request<Body>) -> Response<Body>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let pq = req
         .uri()
         .path_and_query()
@@ -306,7 +318,7 @@ pub async fn forward_unix(socket: &std::path::Path, req: Request<Body>) -> Respo
         headers,
         upgrade,
     } = prepare(req);
-    let stream = match tokio::net::UnixStream::connect(socket).await {
+    let stream = match stream {
         Ok(s) => s,
         Err(e) => return bad_gateway(e),
     };

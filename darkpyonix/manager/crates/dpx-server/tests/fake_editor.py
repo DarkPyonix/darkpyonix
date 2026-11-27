@@ -1,10 +1,12 @@
 """A stand-in for the VS Code server (OSE, `code serve-web`) in the editor tests (SPEC FR-M9,
 FR-M10). Standard library only.
 
-Server mode (`--socket-path`): appends its argv to `<data>/starts.jsonl`, writes its pid to
+Server mode (`--socket-path`, or `--host --port --connection-token-file` for loopback): appends its argv to `<data>/starts.jsonl`, writes its pid to
 `<data>/pid`, and answers HTTP on the Unix socket. A GET answers 200 with the path and headers it
 saw and logs the request to `<data>/requests.jsonl`; a request with `Upgrade` answers 101 and then
-echoes every byte. When `<data>/crash-once` exists it is removed and the server exits 3 at once.
+echoes every byte. On loopback, a request without the token (cookie `vscode-tkn` or query
+`tkn`) answers 403 and goes no further, as the real server does. When `<data>/crash-once`
+exists it is removed and the server exits 3 at once.
 
 CLI mode: `--install-extension X` appends X to `<data>/installed.txt` (an id starting with `fail.`
 exits 1 with a message). A path ending in `.vsix` is unpacked like the real server does: its
@@ -94,6 +96,17 @@ if os.path.exists(crash):
     sys.exit(3)
 
 socket_path = arg("--socket-path")
+token_file = arg("--connection-token-file")
+token = open(token_file).read().strip() if token_file else None
+
+
+def has_token(path, headers):
+    if token is None:
+        return True
+    cookies = dict(c.strip().split("=", 1) for c in headers.get("cookie", "").split(";") if "=" in c)
+    query = path.split("?", 1)[1] if "?" in path else ""
+    params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+    return cookies.get("vscode-tkn") == token or params.get("tkn") == token
 
 
 class Handler(socketserver.StreamRequestHandler):
@@ -113,6 +126,10 @@ class Handler(socketserver.StreamRequestHandler):
             length = int(headers.get("content-length", "0") or "0")
             if length:
                 self.rfile.read(length)
+            if not has_token(path, headers):
+                self.wfile.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                self.wfile.flush()
+                continue
             append("requests.jsonl", json.dumps({"method": method, "path": path, "headers": headers}))
             if "upgrade" in headers:
                 self.wfile.write(b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: "
@@ -129,10 +146,15 @@ class Handler(socketserver.StreamRequestHandler):
             self.wfile.flush()
 
 
-class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    daemon_threads = True
-
-
 signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
-with Server(socket_path, Handler) as server:
+if socket_path:
+    class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+    address = socket_path
+else:
+    class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+    address = (arg("--host"), int(arg("--port")))
+with Server(address, Handler) as server:
     server.serve_forever()
