@@ -17,6 +17,8 @@ pub mod docs;
 pub mod editor;
 pub mod error;
 pub mod handoff;
+#[cfg(windows)]
+mod proctree;
 pub mod proxy;
 pub mod sse;
 pub mod tls;
@@ -106,6 +108,9 @@ pub struct ServerConfig {
     pub password_free_attempts: u32,
     /// First lock length; it doubles with every further wrong password, up to 5 minutes (FR-A4, 1 s).
     pub password_delay_base: Duration,
+    /// Serve the editor server on loopback TCP with a connection token instead of a Unix socket
+    /// (SPEC FR-M9; the default on Windows).
+    pub editor_loopback: bool,
 }
 
 impl ServerConfig {
@@ -124,6 +129,7 @@ impl ServerConfig {
             presence_heartbeat: PRESENCE_HEARTBEAT,
             password_free_attempts: auth::DEFAULT_FREE_ATTEMPTS,
             password_delay_base: auth::DEFAULT_DELAY_BASE,
+            editor_loopback: cfg!(windows),
         }
     }
 
@@ -561,7 +567,7 @@ pub async fn serve(config: ServerConfig, backend: Arc<dyn KernelBackend>) -> std
         os_user: util::os_user(),
         avatars: Mutex::new(std::collections::HashMap::new()),
         shutdown: rx.clone(),
-        editors: editor::Editors::new(config.home.clone(), mode == Mode::Dedicated),
+        editors: editor::Editors::new(config.home.clone(), mode == Mode::Dedicated, config.editor_loopback),
     });
     // A dedicated manager starts the installed editor servers (SPEC FR-M9).
     state.editors.autostart();
