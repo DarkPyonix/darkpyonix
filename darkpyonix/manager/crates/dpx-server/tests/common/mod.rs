@@ -20,7 +20,7 @@ pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..").canonicalize().unwrap()
 }
 
-/// A fresh directory under `<repo>/.scratch/rust-tests/` (CLAUDE.md "Where files go").
+/// A fresh directory under `<repo>/.scratch/rust-tests/` (AGENTS.md "Where files go").
 pub fn scratch(name: &str) -> PathBuf {
     let dir = repo_root().join(".scratch").join("rust-tests").join(format!("{name}-{}", dpx_server::auth::random_hex(6)));
     std::fs::create_dir_all(&dir).unwrap();
