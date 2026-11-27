@@ -48,7 +48,7 @@ jobs:
           # A test that did not run is a failure.
           cargo test -p dpx-server --test editor_loopback 2>&1 | Tee-Object -FilePath editor-win.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($t in 'listens_on_loopback_with_a_token_file', 'proxy_sends_the_token_cookie',
+          foreach ($t in 'editor_listens_on_loopback_with_a_token_file', 'proxy_sends_the_token_cookie',
                          'token_is_not_in_the_command_line', 'token_file_is_user_only',
                          'stop_ends_the_whole_server_tree', 'server_tree_ends_when_the_manager_dies') {
             if (-not (Select-String -Path editor-win.log -Pattern "test_fr_m9_windows_$t ... ok")) {
