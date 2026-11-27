@@ -1,5 +1,5 @@
 // Routing for darkpyonix.dev (docs/api/hub.openapi.yaml). Every operation of that file that is
-// served by this Worker is listed here, and nothing else (CLAUDE.md: the OpenAPI is the SPEC).
+// served by this Worker is listed here, and nothing else (AGENTS.md: the OpenAPI is the SPEC).
 
 import {
   claimLink,
