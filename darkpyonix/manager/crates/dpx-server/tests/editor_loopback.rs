@@ -193,3 +193,56 @@ async fn test_fr_m9_windows_token_file_is_user_only() {
         assert_eq!(mode, 0o600);
     }
 }
+
+/// Whether process `pid` still exists.
+fn alive(pid: &str) -> bool {
+    if cfg!(windows) {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
+    } else {
+        // A killed child stays a zombie until it is reaped: that counts as gone.
+        let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid]).output().unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        !stat.is_empty() && !stat.starts_with('Z')
+    }
+}
+
+async fn gone(pid: &str) -> bool {
+    for _ in 0..100 {
+        if !alive(pid) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
+}
+
+// The fake editor's pid is the server behind the launcher: on Windows a grandchild of the
+// manager through `cmd.exe`.
+#[tokio::test]
+async fn test_fr_m9_windows_stop_ends_the_whole_server_tree() {
+    let e = Editor::start().await;
+    let pid = std::fs::read_to_string(e.data().join("pid")).unwrap().trim().to_string();
+    assert!(alive(&pid));
+    let r = e.s.admin().post("/api/editor/ose/stop", serde_json::json!({})).await;
+    assert!(r.status < 300, "{}", r.text);
+    assert!(gone(&pid).await, "editor server {pid} outlived its stop");
+}
+
+// The manager ends without a graceful shutdown (its runtime is dropped mid-run, as when the
+// process dies): the editor server must not outlive it.
+#[test]
+fn test_fr_m9_windows_server_tree_ends_when_the_manager_dies() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let e = rt.block_on(Editor::start());
+    let pid = std::fs::read_to_string(e.data().join("pid")).unwrap().trim().to_string();
+    assert!(alive(&pid));
+    drop(rt);
+    let waiter = tokio::runtime::Runtime::new().unwrap();
+    let ended = waiter.block_on(gone(&pid));
+    drop(e);
+    assert!(ended, "editor server {pid} outlived the manager");
+}

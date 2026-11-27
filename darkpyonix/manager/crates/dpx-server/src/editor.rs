@@ -714,9 +714,24 @@ async fn run_once(
     }
     #[cfg(unix)]
     cmd.process_group(0);
+    // Started suspended so the whole tree is in the job before any grandchild exists.
+    #[cfg(windows)]
+    cmd.creation_flags(crate::proctree::CREATE_SUSPENDED);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return Ended::Failed(format!("cannot start {}: {e}", inst.program.display())),
+    };
+    // Dropped when this run ends in any way, cancellation included: the tree ends with it.
+    #[cfg(windows)]
+    let tree = {
+        let (pid, handle) = (child.id().unwrap_or(0), child.raw_handle().unwrap_or(std::ptr::null_mut()));
+        match crate::proctree::Tree::adopt(pid, handle) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                tracing::warn!(runtime = %runtime, "editor server tree is not contained: {e}");
+                None
+            }
+        }
     };
     status.send_replace((RunState::Starting, None));
     let mut ready = false;
@@ -731,10 +746,14 @@ async fn run_once(
             }
             r = want.changed() => {
                 if r.is_err() {
+                    #[cfg(windows)]
+                    if let Some(t) = &tree { t.kill() }
                     end_child(&mut child).await;
                     return Ended::Closed;
                 }
                 if !*want.borrow() {
+                    #[cfg(windows)]
+                    if let Some(t) = &tree { t.kill() }
                     end_child(&mut child).await;
                     return Ended::Unwanted;
                 }

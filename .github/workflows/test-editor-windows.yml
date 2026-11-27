@@ -22,36 +22,46 @@ jobs:
   editor:
     name: Editor server on Windows (windows-latest)
     runs-on: windows-latest
+    # A hang never holds a runner for GitHub's 6 hours (run 45566280026 did).
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: darkpyonix/manager
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
       - uses: dtolnay/rust-toolchain@stable
+        timeout-minutes: 10
       - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 10
         with:
           workspaces: darkpyonix/manager
       - uses: actions/setup-python@v5
+        timeout-minutes: 5
         with:
           python-version: "3.12"
 
       - name: Loopback serving with a user-only token file (fake editor)
+        timeout-minutes: 20
         shell: pwsh
         run: |
           # A test that did not run is a failure.
           cargo test -p dpx-server --test editor_loopback 2>&1 | Tee-Object -FilePath editor-win.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($t in 'listens_on_loopback_with_a_token_file', 'proxy_sends_the_token_cookie',
-                         'token_is_not_in_the_command_line', 'token_file_is_user_only') {
+                         'token_is_not_in_the_command_line', 'token_file_is_user_only',
+                         'stop_ends_the_whole_server_tree', 'server_tree_ends_when_the_manager_dies') {
             if (-not (Select-String -Path editor-win.log -Pattern "test_fr_m9_windows_$t ... ok")) {
               Write-Error "test_fr_m9_windows_$t did not run"; exit 1
             }
           }
 
       - name: Build the binary
+        timeout-minutes: 20
         run: cargo build -p darkpyonix
 
       - name: The real OSE through the manager
+        timeout-minutes: 20
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,7 +111,10 @@ jobs:
               -Body '{"id": "redhat.vscode-yaml"}' -TimeoutSec 300
             Write-Output "extension: $($ext | ConvertTo-Json -Compress)"
           } finally {
-            Stop-Process -Id $mgr.Id -Force -ErrorAction SilentlyContinue
+            # Hard kill: the manager's tree, then anything left that serves an editor.
+            taskkill /PID $mgr.Id /T /F 2>&1 | Out-Null
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--connection-token-file*' } |
+              ForEach-Object { Write-Output "left over: $($_.ProcessId) $($_.Name)"; taskkill /PID $_.ProcessId /T /F 2>&1 | Out-Null }
             Get-Content "$env:RUNNER_TEMP\manager.err" -ErrorAction SilentlyContinue | Select-Object -Last 20
             Get-Content "$env:DARKPYONIX_HOME\editor\ose.log" -ErrorAction SilentlyContinue | Select-Object -Last 20
           }

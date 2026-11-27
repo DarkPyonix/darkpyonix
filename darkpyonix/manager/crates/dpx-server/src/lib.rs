@@ -17,6 +17,8 @@ pub mod docs;
 pub mod editor;
 pub mod error;
 pub mod handoff;
+#[cfg(windows)]
+mod proctree;
 pub mod proxy;
 pub mod sse;
 pub mod tls;
